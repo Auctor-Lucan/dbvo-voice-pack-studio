@@ -20,4 +20,4 @@ jobs:
       - name: Build
         run: dotnet build tests/DbvoStudio.Core.Tests/DbvoStudio.Core.Tests.csproj --no-restore -c Release
       - name: Test
-        run: dotnet test tests/DbvoStudio.Core.Tests/DbvoStudio.Core.Tests.csproj --no-build -c Release --logger "console;verbosity=normal"
+        run: dotnet test tests/DbvoStudio.Core.Tests/DbvoStudio.Core.Tests.csproj --no-build -c Release --logger "console;verbosity=normal" --logger "GitHubActions;summary-include-passed=false"
