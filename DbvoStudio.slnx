@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DbvoStudio.Core/DbvoStudio.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DbvoStudio.Core.Tests/DbvoStudio.Core.Tests.csproj" />
+  </Folder>
+</Solution>

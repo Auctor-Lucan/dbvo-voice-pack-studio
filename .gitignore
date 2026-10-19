@@ -1,0 +1,11 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.vscode/
+publish/
+TestResults/
+*.tmp
+# Never commit third-party mod plugins or game files used for local testing
+testdata/private/
