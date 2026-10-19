@@ -42,7 +42,7 @@ public class PluginTests : IDisposable
         var p = PluginFile.Read(Save(Sample(), "Sample.esp"));
         Assert.Equal(new[] { "Skyrim.esm", "Update.esm" }, p.Masters);
         Assert.Equal(5, p.Records.Count(r => r.Signature == "DIAL"));
-        Assert.Equal(6, p.Records.Count(r => r.Signature == "INFO"));
+        Assert.Equal(5, p.Records.Count(r => r.Signature == "INFO"));
         var info = p.Records.Single(r => r.FormId == 0x01000805);
         Assert.Equal(0x01000804u, info.ParentTopic);
         Assert.Equal("(Whisper) Tell me more.", p.DecodeLString(info.Get("RNAM")!.Data));
