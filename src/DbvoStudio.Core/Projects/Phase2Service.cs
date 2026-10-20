@@ -172,8 +172,10 @@ public sealed class Phase2Service
     /// LIP from the trimmed WAV with tags removed. Tools only see short work-folder paths; finished files are
     /// saved as takes\&lt;lineId&gt;\NN\&lt;stem&gt;.wav/.lip and the new take is selected.
     /// </summary>
+    /// <param name="stateGate">Lock shared with any other code that edits or saves the same patch object.</param>
     public async Task GenerateAsync(DbvoPatch patch, VoicePack voice, IReadOnlyList<Phase2Line> lines, ExternalTools tools,
-        IProgress<GenerationProgress>? progress = null, Func<Phase2Line, Task>? onLineDone = null, CancellationToken ct = default)
+        IProgress<GenerationProgress>? progress = null, Func<Phase2Line, Task>? onLineDone = null, CancellationToken ct = default,
+        SemaphoreSlim? stateGate = null)
     {
         if (string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey)) throw new InvalidOperationException("Enter your ElevenLabs API key in Settings.");
         if (string.IsNullOrWhiteSpace(voice.Eleven.VoiceId)) throw new InvalidOperationException("Pick a voice for this voice pack.");
@@ -184,13 +186,15 @@ public sealed class Phase2Service
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
         Directory.CreateDirectory(workRoot);
         int done = 0, failed = 0, total = lines.Count;
-        var saveLock = new SemaphoreSlim(1, 1);
+        var saveLock = stateGate ?? new SemaphoreSlim(1, 1);
+        var convertGate = new SemaphoreSlim(Math.Max(2, Environment.ProcessorCount / 2));
 
         async Task One(Phase2Line line)
         {
             ct.ThrowIfCancellationRequested();
             line.Status = Phase2Status.Generating;
             line.LastError = null;
+            Take? newTake = null;
             try
             {
                 var text = ApplyPronunciations(line.Spoken, voice.Pronunciations, es.ModelId);
@@ -210,6 +214,9 @@ public sealed class Phase2Service
                 var audio = await limiter.RunAsync(c => client.TextToSpeechAsync(req, c),
                     ex => ex is ElevenLabsException { Retryable: true }, ct: ct);
 
+                await convertGate.WaitAsync(ct);
+                try
+                {
                 using var work = new WorkFolder(workRoot);
                 var src = work.File(es.OutputFormat.StartsWith("pcm", StringComparison.OrdinalIgnoreCase) ? "a.pcm" : "a.mp3");
                 var wav = work.File("a.wav");
@@ -235,7 +242,7 @@ public sealed class Phase2Service
 
                 var take = new Take
                 {
-                    Slot = line.Takes.Count == 0 ? 1 : line.Takes.Max(t => t.Slot) + 1,
+                    Slot = line.Takes.Count == 0 ? 1 : line.Takes.ToList().Max(t => t.Slot) + 1,
                     SpokenText = line.Spoken,
                     DurationSeconds = w.DurationSeconds,
                     Settings = new TakeSettings
@@ -252,12 +259,11 @@ public sealed class Phase2Service
                 take.LipPath = Path.Combine(rel, stem + ".lip");
                 File.Copy(wav, Path.Combine(_lib.PatchFolder(patch.Id), take.WavPath), true);
                 File.Copy(lip, Path.Combine(_lib.PatchFolder(patch.Id), take.LipPath), true);
-
-                line.Takes.Add(take);
-                line.SelectedTakeId = take.Id;
-                line.Status = Phase2Status.Generated;
+                newTake = take;
+                }
+                finally { convertGate.Release(); }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 line.Status = line.Takes.Count > 0 ? Phase2Status.Generated : Phase2Status.Pending;
                 throw;
@@ -275,6 +281,12 @@ public sealed class Phase2Service
                 await saveLock.WaitAsync(CancellationToken.None);
                 try
                 {
+                    if (newTake != null)
+                    {
+                        line.Takes.Add(newTake);
+                        line.SelectedTakeId = newTake.Id;
+                        line.Status = Phase2Status.Generated;
+                    }
                     _lib.Save(patch);
                     if (onLineDone != null) await onLineDone(line);
                 }
@@ -282,16 +294,8 @@ public sealed class Phase2Service
             }
         }
 
-        // Local tools are CPU-bound; cap them separately from the network limit.
-        var localGate = new SemaphoreSlim(Math.Max(2, Environment.ProcessorCount / 2));
-        var tasks = lines.Select(async l =>
-        {
-            await localGate.WaitAsync(ct);
-            try { await One(l); }
-            finally { localGate.Release(); }
-        }).ToList();
-        // Network concurrency is enforced by the limiter; the local gate only bounds the conversion stage.
-        await Task.WhenAll(tasks);
+        // Network concurrency is enforced by the limiter; convertGate only bounds the CPU-bound conversion stage.
+        await Task.WhenAll(lines.Select(One));
     }
 
     /// <summary>Copy (hardlink) each selected take into the WAV + LIP folder. Existing files are skipped unless overwrite is on.</summary>
