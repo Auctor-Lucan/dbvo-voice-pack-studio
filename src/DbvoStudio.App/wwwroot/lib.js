@@ -1,5 +1,15 @@
 // Bridge to the C# host, small DOM helpers, and a virtual grid for thousands of rows.
 
+// Let append()/prepend() take arrays and skip null/false/undefined, so views can pass conditional pieces.
+for (const name of ['append', 'prepend']) {
+  for (const proto of [Element.prototype, DocumentFragment.prototype]) {
+    const native = proto[name];
+    proto[name] = function (...nodes) {
+      return native.apply(this, nodes.flat(Infinity).filter((n) => n != null && n !== false && n !== true));
+    };
+  }
+}
+
 const pending = new Map();
 const listeners = new Map();
 let nextId = 1;

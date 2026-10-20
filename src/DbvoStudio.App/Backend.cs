@@ -95,10 +95,16 @@ public sealed class Backend
                 using (var c = Client()) return await c.GetSubscriptionAsync();
             case "eleven.voices":
                 if (_voices == null || B(p, "refresh")) { using var c2 = Client(); _voices = await c2.GetVoicesAsync(); }
-                return _voices.OrderBy(v => v.Name).ToList();
+                return _voices.OrderBy(v => v.Name).Select(v => new { voiceId = v.VoiceId, name = v.Name, category = v.Category }).ToList();
             case "eleven.models":
                 if (_models == null || B(p, "refresh")) { using var c3 = Client(); _models = await c3.GetModelsAsync(); }
-                return _models;
+                return _models.Select(x => new { modelId = x.ModelId, name = x.Name, canUseStyle = x.CanUseStyle, canUseSpeakerBoost = x.CanUseSpeakerBoost, maxChars = x.MaxCharsSubscribed }).ToList();
+            case "eleven.subscriptionInfo":
+                using (var c4 = Client())
+                {
+                    var sub = await c4.GetSubscriptionAsync();
+                    return new { tier = sub.Tier, characterCount = sub.CharacterCount, characterLimit = sub.CharacterLimit };
+                }
             case "pick.file": return PickFile(S(p, "title"), S(p, "filter"), false);
             case "pick.files": return PickFile(S(p, "title"), S(p, "filter"), true);
             case "pick.folder": return PickFolder(S(p, "title"));
@@ -666,7 +672,7 @@ public sealed class Backend
             count = lines.Count,
             characters = lines.Sum(l => l.Spoken.Length),
             voice = e.VoiceName, voiceId = e.VoiceId, model = e.ModelId, e.OutputFormat, e.Concurrency, e.Seed, e.LanguageCode, e.TextNormalization,
-            settings = vs,
+            settings = new { stability = vs.Stability, similarityBoost = vs.SimilarityBoost, style = vs.Style, useSpeakerBoost = vs.UseSpeakerBoost, speed = vs.Speed },
             voice.Loudnorm, voice.GainDb, voice.TrimTailMs, voice.FadeOutMs, naming = voice.Naming.ToString(),
             pronunciations = voice.Pronunciations.Count,
             dictionaries = e.PronunciationDictionaryIds.Count,
