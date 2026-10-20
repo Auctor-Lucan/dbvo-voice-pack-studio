@@ -16,6 +16,10 @@ public sealed class SyncReport
     public int Removed { get; set; }
     public int Omitted { get; set; }
     public int Stale { get; set; }
+    /// <summary>Lines that got a take from WAV + LIP files already in the patch's WAV + LIP folder.</summary>
+    public int Adopted { get; set; }
+    /// <summary>Lines without a take that have a .fuz in the final folder (can be imported).</summary>
+    public int FuzOnly { get; set; }
 }
 
 public sealed record GenerationProgress(int Done, int Total, int Failed, string? Current, string? Message);
@@ -140,8 +144,116 @@ public sealed class Phase2Service
         patch.Lines = result.Values.ToList();
         report.Total = patch.Lines.Count;
         if (patch.Kind == "vc") MatchSources(patch);
+        report.Adopted = AdoptExisting(patch, voice);
+        report.FuzOnly = FindFuzOnly(patch, voice, mods).Count;
         _lib.Save(patch);
         return report;
+    }
+
+    /// <summary>Stems a line's files may have: the voice pack's naming first, then the other one.</summary>
+    private static IEnumerable<string> Stems(Phase2Line l, VoicePack v)
+    {
+        yield return LineNaming.Stem(l.FinalLine, v.Naming);
+        yield return LineNaming.Stem(l.FinalLine, v.Naming == NamingMode.Legacy ? NamingMode.Dbvo2Hash : NamingMode.Legacy);
+    }
+
+    /// <summary>
+    /// Lines without a take whose WAV (and LIP) already exist in the patch's WAV + LIP folder get that pair as
+    /// take #1, so earlier work counts and can be played, exported and built into .fuz. The files are hardlinked
+    /// into the take folder (copied across drives). Returns how many lines were adopted.
+    /// </summary>
+    public int AdoptExisting(DbvoPatch patch, VoicePack voice)
+    {
+        if (string.IsNullOrWhiteSpace(patch.WavLipFolder) || !Directory.Exists(patch.WavLipFolder)) return 0;
+        var wavs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in Directory.EnumerateFiles(patch.WavLipFolder, "*.wav", SearchOption.AllDirectories)) wavs.TryAdd(Path.GetFileNameWithoutExtension(f), f);
+        if (wavs.Count == 0) return 0;
+        int n = 0;
+        foreach (var line in patch.Lines.Where(l => l.Takes.Count == 0))
+        {
+            string? wav = null;
+            foreach (var stem in Stems(line, voice)) if (wavs.TryGetValue(stem, out wav)) break;
+            if (wav == null) continue;
+            var lip = Path.ChangeExtension(wav, ".lip");
+            if (!File.Exists(lip)) continue; // a WAV without its LIP is not a finished line
+            AddExistingTake(patch, voice, line, wav, lip, "existing");
+            n++;
+        }
+        return n;
+    }
+
+    private void AddExistingTake(DbvoPatch patch, VoicePack voice, Phase2Line line, string wav, string lip, string source)
+    {
+        var stem = LineNaming.Stem(line.FinalLine, voice.Naming);
+        var take = new Take
+        {
+            Slot = line.Takes.Count == 0 ? 1 : line.Takes.Max(t => t.Slot) + 1,
+            SpokenText = line.Spoken,
+            DurationSeconds = WavSeconds(wav),
+            Settings = new TakeSettings { Engine = source, ModelId = source == "fuz" ? "imported from .fuz" : "imported WAV + LIP" },
+        };
+        var rel = Path.Combine("takes", line.LineId, take.Slot.ToString("00"));
+        take.WavPath = Path.Combine(rel, stem + ".wav");
+        take.LipPath = Path.Combine(rel, stem + ".lip");
+        FileLinks.LinkOrCopy(wav, Path.Combine(_lib.PatchFolder(patch.Id), take.WavPath), true);
+        FileLinks.LinkOrCopy(lip, Path.Combine(_lib.PatchFolder(patch.Id), take.LipPath), true);
+        line.Takes.Add(take);
+        line.SelectedTakeId = take.Id;
+        line.Status = Phase2Status.Generated;
+        line.LastError = null;
+    }
+
+    /// <summary>Lines without a take that have a .fuz (in either naming) in the patch's .fuz folders.</summary>
+    public List<(Phase2Line Line, string Fuz)> FindFuzOnly(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods)
+    {
+        var list = new List<(Phase2Line, string)>();
+        var root = FinalRoot(patch, voice);
+        if (string.IsNullOrWhiteSpace(root)) return list;
+        var folders = patch.ModIds.Select(id => mods.FirstOrDefault(m => m.Id == id)?.Name ?? "Mod")
+            .Select(n => Path.Combine(root, ExpandTemplate(FuzTemplate(patch, voice), n, voice, patch))).Where(Directory.Exists).Distinct().ToList();
+        if (folders.Count == 0) return list;
+        var fuz = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var d in folders)
+            foreach (var f in Directory.EnumerateFiles(d, "*.fuz")) fuz.TryAdd(Path.GetFileNameWithoutExtension(f), f);
+        foreach (var line in patch.Lines.Where(l => l.Takes.Count == 0 && !l.IsOmitted))
+            foreach (var stem in Stems(line, voice))
+                if (fuz.TryGetValue(stem, out var f)) { list.Add((line, f)); break; }
+        return list;
+    }
+
+    /// <summary>Turn .fuz files from the final folder back into WAV + LIP takes (ffmpeg decodes the xWMA).</summary>
+    public async Task<int> ImportFuzAsync(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods, ExternalTools tools,
+        IProgress<GenerationProgress>? progress, CancellationToken ct, SemaphoreSlim? stateGate = null)
+    {
+        var todo = FindFuzOnly(patch, voice, mods);
+        var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
+        Directory.CreateDirectory(workRoot);
+        int done = 0, ok = 0, failed = 0;
+        var gate = stateGate ?? new SemaphoreSlim(1, 1);
+        foreach (var (line, fuzPath) in todo)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                using var work = new WorkFolder(workRoot);
+                var (lipBytes, xwm) = FuzFile.Split(await File.ReadAllBytesAsync(fuzPath, ct));
+                var x = work.File("a.xwm");
+                await File.WriteAllBytesAsync(x, xwm, ct);
+                var wav = work.File("a.wav");
+                await tools.ToWavAsync(x, wav, 44100, false, 0, ct);
+                var lip = work.File("a.lip");
+                await File.WriteAllBytesAsync(lip, lipBytes, ct);
+                await gate.WaitAsync(ct);
+                try { if (line.Takes.Count == 0) { AddExistingTake(patch, voice, line, wav, lip, "fuz"); ok++; } }
+                finally { gate.Release(); }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { failed++; line.LastError = "Could not import the .fuz: " + ex.Message; }
+            progress?.Report(new GenerationProgress(++done, todo.Count, failed, line.FinalLine, null));
+        }
+        await gate.WaitAsync(CancellationToken.None);
+        try { _lib.Save(patch); } finally { gate.Release(); }
+        return ok;
     }
 
     /// <summary>Lines eligible for generation: not omitted, and (unless <paramref name="regenerate"/>) without a usable take.</summary>

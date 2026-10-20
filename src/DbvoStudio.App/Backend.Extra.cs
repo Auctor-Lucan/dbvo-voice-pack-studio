@@ -122,6 +122,8 @@ public sealed partial class Backend
                     return new { found, total = patch.Lines.Count, patch = PatchDto(patch) };
                 });
 
+            case "patch.importFuz": return StartImportFuz(S(p, "id"));
+
             // ---- Other Tools: WAV to LIP
             case "wavlip.scan": return ScanWavs(Strings(p, "paths"));
             case "wavlip.run": return StartWavToLip(Strings(p, "files"));
@@ -419,6 +421,32 @@ public sealed partial class Backend
         foreach (var b in new[] { "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm" })
             if (!list.Contains(b, StringComparer.OrdinalIgnoreCase)) list.Insert(0, b);
         return list;
+    }
+
+    private object StartImportFuz(string id)
+    {
+        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        _jobCts = new CancellationTokenSource();
+        var ct = _jobCts.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var patch = LoadPatch(id);
+                var voice = LoadVoice(patch.VoicePackId);
+                var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "import", g.Done, g.Total, g.Failed, g.Current }));
+                int n = await new Phase2Service(_lib, Runtime()).ImportFuzAsync(patch, voice, _lib.LoadMods(), Tools(), progress, ct, _gate);
+                Emit("jobDone", new { kind = "import", patchId = id, ok = true, message = $"{n} line(s) imported from .fuz files." });
+            }
+            catch (OperationCanceledException) { Emit("jobDone", new { kind = "import", patchId = id, ok = false, message = "Cancelled." }); }
+            catch (Exception ex)
+            {
+                App.Log("Import .fuz failed: " + ex);
+                Emit("jobDone", new { kind = "import", patchId = id, ok = false, message = ex.Message });
+            }
+            finally { _jobCts = null; }
+        });
+        return true;
     }
 
     private object StartFomodBuild(JsonElement p)

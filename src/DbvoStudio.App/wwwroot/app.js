@@ -15,6 +15,8 @@ const main = document.getElementById('main');
 
 export async function refreshState() {
   app.state = await rpc('state');
+  // A job indicator left over from a job that ended without telling the page (e.g. after a crash) must not block buttons.
+  if (!app.state.jobRunning && app.job) { app.job = null; document.getElementById('job').classList.add('hidden'); }
   return app.state;
 }
 
@@ -65,7 +67,7 @@ toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [
 
 // ---- background jobs (generation, .fuz, FOMOD, WAV to LIP)
 const jobEl = document.getElementById('job');
-const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to LIP', generate: 'Generating' };
+const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to LIP', generate: 'Generating', import: 'Importing .fuz' };
 on('progress', (p) => {
   app.job = p;
   jobEl.classList.remove('hidden');
@@ -85,6 +87,8 @@ on('jobDone', async (d) => {
     if (d.files && d.files.length) body.push(h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), h('div.box.mono', { style: { whiteSpace: 'pre-wrap', maxHeight: '140px', overflow: 'auto' } }, d.files.join('\n'))));
     if (d.reminders && d.reminders.length) body.push(h('div.banner.warn', { style: { margin: 0 } }, h('div', h('b', 'Before you release: '), h('ul', d.reminders.map((x) => h('li', x))))));
     await modal('.fuz files built', body);
+  } else if (d.kind === 'import') {
+    toast(d.message || 'Done.', !d.ok);
   } else if (d.kind === 'wavlip') {
     if (d.message) toast(d.message, !d.ok);
   } else if (d.kind === 'fomod') {

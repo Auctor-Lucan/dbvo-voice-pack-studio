@@ -353,6 +353,7 @@ public sealed partial class Backend
         return new
         {
             libraryRoot = _lib.Root,
+            jobRunning = _jobCts != null,
             settings = new
             {
                 tools = new
@@ -1062,6 +1063,7 @@ public sealed partial class Backend
             pathWarnings = warnings,
             reminders = Phase2Service.EndOfPhaseReminders(patch, voice, mods),
             unreviewed,
+            fuzOnly = svc.FindFuzOnly(patch, voice, mods).Count,
             fuzFolders,
             wavLipFolder = svc.WavLipFolder(patch, voice),
             finalRoot = root,

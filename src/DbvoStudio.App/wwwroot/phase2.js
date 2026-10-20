@@ -156,7 +156,9 @@ export async function patchView(id) {
   await refreshState();
   let patch;
   try {
-    patch = (await rpc('patch.sync', { id })).patch; // pull in Phase 1 edits automatically
+    const r = await rpc('patch.sync', { id }); // pull in Phase 1 edits automatically
+    patch = r.patch;
+    if (r.report.adopted) setTimeout(() => toast(`${r.report.adopted} line(s) already had WAV + LIP files in the WAV + LIP folder: added as take #1.`), 300);
   } catch {
     patch = await rpc('patch.get', { id });
   }
@@ -583,6 +585,7 @@ export async function patchView(id) {
     const sel = [...grid.selected];
     const busy = !!app.job;
     const c = counts();
+    if (busy) actions.title = 'A job is running (see the top bar). Wait for it, or Cancel it.'; else actions.removeAttribute('title');
     const verb = vc ? 'Convert' : 'Generate';
     const exp = h('button.btn', { disabled: busy }, 'Export ▾');
     exp.addEventListener('click', () => popupMenu(exp, [
@@ -696,6 +699,8 @@ export async function patchView(id) {
       const unset = [!patch.wavLipFolder && 'WAV + LIP folder', !patch.finalRoot && 'final folder', !vc && !patch.fixFolder && 'DBVO Fix folder', vc && !patch.sourceFolders.length && 'source WAV folder'].filter(Boolean);
       if (unset.length) banners.append(h('div.banner.warn', h('span', 'Not set for this patch: ' + unset.join(', ') + '.'), h('div.spacer'), h('button.btn.sm', { onclick: openOptions }, 'Set folders')));
       for (const w of c.pathWarnings) banners.append(h('div.banner.warn', h('b', 'Path length: '), h('span', `${w.where} reaches ${w.length} of ${w.limit} characters with the longest line — tools like Yakitori fail past 260.`), h('div.spacer'), h('button.btn.sm', { onclick: openOptions }, 'Shorten folders')));
+      if (c.fuzOnly) banners.append(h('div.banner.info', h('span', `${c.fuzOnly} line(s) have no WAV + LIP here but a .fuz in the final folder. Import them as takes so they count as done and can be played.`),
+        h('div.spacer'), h('button.btn.sm', { disabled: !!app.job, onclick: async () => { try { await rpc('patch.importFuz', { id }); } catch (e) { fail(e); } } }, 'Import from .fuz')));
       if (c.unreviewed.length) banners.append(h('div.banner.warn', h('span', 'Flagged lines not reviewed in Phase 1: ' + c.unreviewed.map((u) => `${u.plugin} (${u.count})`).join(', ')),
         h('div.spacer'), patch.modIds.length === 1 ? h('button.btn.sm', { onclick: () => go('mod', { id: patch.modIds[0] }) }, 'Open in Phase 1') : null));
     } catch { /* checks are advisory */ }
@@ -813,7 +818,18 @@ export async function patchView(id) {
 
   // live updates from generation
   on('line2', (d) => { if (d.patchId === id && document.body.contains(view)) replaceLine(d.line); });
-  document.addEventListener('job-done', () => { if (document.body.contains(view)) { renderActions(); renderBanners(); } });
+  document.addEventListener('job-done', async (e) => {
+    if (!document.body.contains(view)) return;
+    if (e.detail && e.detail.kind === 'import' && e.detail.patchId === id) {
+      patch = await rpc('patch.get', { id });
+      reindex();
+      grid.setRows(visible());
+      renderCounts();
+      renderInspector();
+    }
+    renderActions();
+    renderBanners();
+  });
 
   function renderAll() {
     renderHead();
