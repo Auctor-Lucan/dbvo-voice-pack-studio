@@ -38,4 +38,12 @@
     </Content>
   </ItemGroup>
 
+  <!-- Whisper.net ships natives for every platform; keep only Windows x64 in the published app. -->
+  <Target Name="TrimWhisperRuntimes" AfterTargets="Publish">
+    <ItemGroup>
+      <_ExtraRuntimeDirs Include="$(PublishDir)runtimes\linux-x64;$(PublishDir)runtimes\linux-arm64;$(PublishDir)runtimes\linux-arm;$(PublishDir)runtimes\win-arm64;$(PublishDir)runtimes\win-x86;$(PublishDir)runtimes\osx-x64;$(PublishDir)runtimes\osx-arm64;$(PublishDir)runtimes\macos;$(PublishDir)runtimes\vulkan\linux-x64;$(PublishDir)runtimes\vulkan\linux-arm64" />
+    </ItemGroup>
+    <RemoveDir Directories="@(_ExtraRuntimeDirs)" />
+  </Target>
+
 </Project>
