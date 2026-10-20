@@ -17,7 +17,7 @@ const main = document.getElementById('main');
 
 export async function refreshState() {
   app.state = await rpc('state');
-  applyTheme((app.state.settings.ui || {}).theme);
+  { const th = (app.state.settings.ui || {}).theme; if (th) applyTheme(th); }
   // A job indicator left over from a job that ended without telling the page (e.g. after a crash) must not block buttons.
   if (!app.state.jobRunning && app.job) { app.job = null; document.getElementById('job').classList.add('hidden'); }
   return app.state;

@@ -21,6 +21,16 @@ public sealed partial class Backend
         {
             // ---- dialogs
             case "pick.save": return PickSave(S(p, "title"), S(p, "filter"), S(p, "name"));
+            case "patch.openTakes":
+            {
+                var dir = Path.Combine(_lib.PatchFolder(S(p, "id")), "takes");
+                Directory.CreateDirectory(dir);
+                OpenPath(dir);
+                return true;
+            }
+            case "window.theme":
+                _owner.Dispatcher.Invoke(() => WindowChrome.Apply(_owner, S(p, "caption"), S(p, "text"), B(p, "dark")));
+                return true;
 
             // ---- small files for the page (images, source audio) as data URLs
             case "file.dataUrl":

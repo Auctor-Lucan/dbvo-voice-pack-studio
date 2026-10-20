@@ -1,6 +1,6 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares voice packs, engines, takes and .fuz building with Phase 2.
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded } from './lib.js';
+import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip } from './phase2.js';
 
@@ -258,13 +258,19 @@ export async function revoiceView(id) {
     onRowDblClick: (l) => play(l),
     columns: [
       { id: 'sel', title: '', width: 32, resizable: false, render: (l) => grid.checkbox(l) },
-      { id: 'mark', title: '★', width: 34, resizable: false, render: (l) => h('button.mark-btn' + (l.marked ? '.on' : ''), { title: l.marked ? 'Marked: click to unmark' : 'Mark this line to come back to it', onclick: (e) => { e.stopPropagation(); upd(l, 'mark'); } }, '★') },
       { id: 'speaker', title: 'Speaker', width: 170, render: (l) => h('span.ellipsis', { title: `${l.speakerName}${l.npcs ? '\nNPCs: ' + l.npcs : ''}\n${CERT[l.cert] || l.cert}${l.via ? ' (' + l.via + ')' : ''}` }, l.cert !== 'Exact' ? h('span.mark.warn', { title: CERT[l.cert] }, '? ') : null, l.speakerName) },
       { id: 'vt', title: 'Voice type', width: 140, render: (l) => h('span.mono.faint.ellipsis', { title: `Sound\\Voice\\${l.pf}\\${l.vt}\\${l.stem}.fuz` }, l.vt) },
-      { id: 'orig', title: 'Now', width: 54, resizable: false, render: (l) => l.original ? h('button.icon-btn', { title: 'Play the file the game uses now: ' + l.original, onclick: (e) => { e.stopPropagation(); playOriginal(l); } }, '▶') : h('span.faint', { title: 'No voice file for this line yet (silent in game)' }, '—') },
+      { id: 'orig', title: 'Now', width: 54, resizable: false, render: (l) => l.original ? h('button.act-btn', { title: 'Play the file the game uses now: ' + l.original, onclick: (e) => { e.stopPropagation(); playOriginal(l); } }, icon('play')) : h('span.faint', { title: 'No voice file for this line yet (silent in game)' }, '—') },
       { id: 'text', title: 'Subtitle (in game)', flex: 1, width: 260, render: (l) => h('span.ellipsis', { title: l.text }, l.text) },
       { id: 'spoken', title: 'Spoken text (tags allowed)', flex: 1.2, width: 300, render: (l) => spokenCell(l) },
       { id: 'emo', title: 'Emotion', width: 90, render: (l) => l.emo === 'Neutral' ? h('span.faint', '—') : h('span.faint', { title: `${l.emo} ${l.emoV}` }, `${l.emo} ${l.emoV}`) },
+      { id: 'take', title: 'Take', width: 64, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
+        h('span.take-lbl', { title: l.takes.length ? `${l.takes.length} take(s)` : 'No take yet' }, l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—')) },
+      { id: 'act', title: '', width: 98, resizable: false, render: (l) => h('span.row', { style: { gap: '2px' } },
+        h('button.act-btn', { title: genBlock(l) || 'Generate a new take (no confirmation for one line)', disabled: !!genBlock(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.id]); } }, icon('regen')),
+        h('button.act-btn', { title: l.takes.length ? `Takes (${l.takes.length}): play, switch, delete` : 'No takes yet', disabled: !l.takes.length, onclick: (e) => { e.stopPropagation(); takesModal(l); } }, icon('takes')),
+        h('button.act-btn', { title: l.sel ? 'Play the new take (or double-click the row)' : 'No take yet: generate the line first', disabled: !l.sel, onclick: (e) => { e.stopPropagation(); play(l); } }, icon('play'))) },
+      { id: 'mark', title: '', width: 34, resizable: false, render: (l) => h('button.act-btn' + (l.marked ? '.on' : ''), { title: l.marked ? 'Marked: click to unmark' : 'Mark this line to come back to it', onclick: (e) => { e.stopPropagation(); upd(l, 'mark'); } }, icon('star', { filled: l.marked })) },
       { id: 'take', title: 'Take', width: 92, render: (l) => h('span.row', statusDot(l), l.takes.length ? h('button.btn.sm.ghost', { title: `${l.takes.length} take(s). Click to play, switch, or delete takes.`, onclick: (e) => { e.stopPropagation(); takesModal(l); } }, '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? ` of ${l.takes.length}` : '') + ' ▾') : h('span.faint', { title: 'No take yet' }, '—')) },
       { id: 'act', title: '', width: 84, resizable: false, render: (l) => h('span.row',
         h('button.icon-btn.big', { title: l.sel ? 'Play the new take (or double-click the row)' : 'No take yet: generate the line first (↻)', disabled: !l.sel, onclick: (e) => { e.stopPropagation(); play(l); } }, '▶'),

@@ -39,7 +39,6 @@ export async function wavLipView() {
       h('div.tgroup', h('label', 'Compute'), sel(w.compute, [['float16', 'float16'], ['int8_float16', 'int8_float16'], ['int8', 'int8']], async (v) => { w.compute = v; await save(); }))),
     h('div.col', { style: { paddingBottom: '10px' } },
       switchEl(w.cpuFallback, async (v) => { w.cpuFallback = v; await save(); }, w.engine === 'builtin' ? 'If GPU initialization fails, retry transcription on CPU' : 'If CUDA initialization fails, retry transcription on CPU/int8'),
-      switchEl(w.useFilename, async (v) => { w.useFilename = v; await save(); }, 'Use the filename as the text instead of transcribing (Legacy-named files: instant, never mishears)'),
       h('div.faint', w.engine === 'builtin'
         ? 'Default: large-v3, GPU, float16 (unquantized). int8 uses the smaller q8_0 model. The first run downloads the model.'
         : `Default matches the WAV_to_LIP app: faster-whisper 1.2.1, large-v3, CUDA, float16. Python: ${w.pythonPath || '— not set (Global Settings → WAV to LIP) —'}`)));
@@ -80,8 +79,10 @@ export async function wavLipView() {
   const log = (t) => { logLines.push(t); if (logLines.length > 2000) logLines.shift(); logEl.textContent = logLines.join('\n'); logEl.scrollTop = logEl.scrollHeight; };
   const startBtn = h('button.btn.primary', { title: 'Transcribe each WAV and write a .lip next to it', disabled: !!app.job, onclick: start }, 'Transcribe + Generate .LIP');
 
-  tool.append(tools, whisper,
-    h('div.section', h('div.section-head', h('h2', 'WAV files'), counter), h('div.section-body', { style: { padding: '10px 16px' } }, list,
+  whisper.style.maxWidth = 'none';
+  tools.style.maxWidth = 'none';
+  tool.append(h('div.tool-top', whisper, tools),
+    h('div.section', { style: { maxWidth: 'none' } }, h('div.section-head', h('h2', 'WAV files'), counter), h('div.section-body', { style: { padding: '10px 16px' } }, list,
       h('div.row', { style: { marginTop: '10px' } },
         h('button.btn', { onclick: async () => addPaths(await rpc('pick.files', { title: 'Select WAV files', filter: 'WAV audio|*.wav' })) }, 'Add WAV files…'),
         h('button.btn', { onclick: async () => { const f = await rpc('pick.folder', { title: 'Select folder containing WAV files' }); if (f) addPaths([f]); } }, 'Add folder…'),
@@ -97,7 +98,7 @@ export async function wavLipView() {
     if (overwrites && !(await confirmBox('Overwrite .lip files?', `${overwrites} .lip file(s) already exist and would be overwritten. Continue?`, 'Continue'))) return;
     try {
       startBtn.disabled = true;
-      statusEl.textContent = w.useFilename ? 'Starting.' : 'Starting Whisper. The first run may download the model.';
+      statusEl.textContent = 'Starting Whisper. The first run may download the model.';
       await rpc('wavlip.run', { files: files.map((f) => f.path) });
     } catch (e) { startBtn.disabled = false; fail(e); }
   }

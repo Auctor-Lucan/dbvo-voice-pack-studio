@@ -49,12 +49,7 @@ public sealed class WavToLip
 
         Func<string, CancellationToken, Task<string>> transcribe;
         IAsyncDisposable? engine = null;
-        if (_s.UseFilename)
-        {
-            transcribe = (wav, _) => Task.FromResult(TextFromFilename(wav));
-            Log("Using each file's name as the text (no transcription).");
-        }
-        else if (_s.Engine == "faster-whisper")
+        if (_s.Engine == "faster-whisper")
         {
             var fw = new FasterWhisperProcess(_s, Log);
             await fw.StartAsync(ct);
@@ -142,12 +137,6 @@ public sealed class WavToLip
         return (bw.TranscribeAsync, bw);
     }
 
-    /// <summary>Legacy names are the line itself: underscores back to spaces.</summary>
-    public static string TextFromFilename(string wav)
-    {
-        var stem = Path.GetFileNameWithoutExtension(wav);
-        return stem.Replace('_', ' ').Trim();
-    }
 
     // ------------------------------------------------------------------ built-in Whisper.net
 

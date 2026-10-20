@@ -103,7 +103,7 @@ public sealed partial class Backend
                 using (var c4 = Client())
                 {
                     var sub = await c4.GetSubscriptionAsync();
-                    return new { tier = sub.Tier, characterCount = sub.CharacterCount, characterLimit = sub.CharacterLimit };
+                    return new { tier = sub.Tier, characterCount = sub.CharacterCount, characterLimit = sub.CharacterLimit, nextReset = sub.NextReset };
                 }
             case "pick.file": return PickFile(S(p, "title"), S(p, "filter"), false);
             case "pick.files": return PickFile(S(p, "title"), S(p, "filter"), true);

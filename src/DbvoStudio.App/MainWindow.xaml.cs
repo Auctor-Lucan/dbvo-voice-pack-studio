@@ -12,6 +12,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        SourceInitialized += (_, _) => WindowChrome.Apply(this, "#010409", "#e6edf3", true);
         Loaded += async (_, _) => await InitAsync();
     }
 

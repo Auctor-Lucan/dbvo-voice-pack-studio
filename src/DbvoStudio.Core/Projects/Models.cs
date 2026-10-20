@@ -70,6 +70,7 @@ public sealed class WavToLipSettings
     public string Compute { get; set; } = "float16";
     public bool CpuFallback { get; set; } = true;
     /// <summary>Use the Legacy filename as the text instead of transcribing (instant, never mishears).</summary>
+    /// <summary>No longer used: Whisper transcription is the only reliable text for lip sync (kept so old settings files load).</summary>
     public bool UseFilename { get; set; }
     /// <summary>faster-whisper: python.exe of the environment that has faster-whisper (e.g. ...\WAV_to_LIP_App\.venv\Scripts\python.exe).</summary>
     public string PythonPath { get; set; } = "";

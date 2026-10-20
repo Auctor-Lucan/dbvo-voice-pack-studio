@@ -1,5 +1,5 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, switchEl, segmented, popupMenu, columnsMenu, tip } from './lib.js';
+import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, switchEl, segmented, popupMenu, columnsMenu, tip, icon } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Text changed since take' };
@@ -17,6 +17,14 @@ export const VOICE_COLORS = [
   ['#58a6ff', 'Blue'], ['#56d4dd', 'Sky'], ['#39c5cf', 'Teal'], ['#3fb950', 'Green'], ['#a5d64c', 'Lime'],
   ['#d29922', 'Amber'], ['#f0883e', 'Orange'], ['#f85149', 'Red'], ['#ff7b9c', 'Rose'], ['#8b949e', 'Slate'],
 ];
+
+let creditsCache = null; // { at, data }
+async function loadCredits(force = false) {
+  if (!force && creditsCache && Date.now() - creditsCache.at < 60000) return creditsCache.data;
+  const data = await rpc('eleven.subscriptionInfo');
+  creditsCache = { at: Date.now(), data };
+  return data;
+}
 
 export function voiceChip(name, color) {
   const c = h('span.voice-chip', { title: 'Voice pack' }, name || '—');
@@ -223,20 +231,19 @@ export async function patchView(id) {
     onRowDblClick: (l) => play(l),
     columns: [
       { id: 'sel', title: '', width: 32, resizable: false, render: (l) => grid.checkbox(l) },
-      { id: 'mark', title: 'Marked', width: 62, resizable: false, render: (l) => h('button.mark-btn' + (l.marked ? '.on' : ''), { title: l.marked ? 'Marked: click to unmark' : 'Mark this line (kept until you unmark it; "Generate · Marked" uses it)', onclick: () => upd(l, 'mark', !l.marked) }, '★') },
       { id: 'orig', title: 'Original mod line', width: 240, render: (l) => h('span.dim', { title: l.originalLine }, l.originalLine) },
       { id: 'file', title: 'Filename', flex: 1, width: 240, render: (l) => h('span.faint.mono', { title: `In-game line: ${l.finalLine}\nFile: ${l.stem}.wav / .lip / .fuz` }, l.editedInPhase1 ? h('span.mark.info', { title: 'Edited in Phase 1' }, 'P1 ') : null, l.stem + '.wav') },
       vc ? { id: 'src', title: 'Source', width: 80, render: (l) => l.hasSource ? h('span.row', h('button.icon-btn', { title: 'Play the source: ' + l.sourceWav, onclick: () => playSource(l) }, '▶'), h('span.badge.b-valid', { title: l.sourceWav }, l.sourceWav.toLowerCase().endsWith('.fuz') ? '.fuz' : '✓')) : h('span.badge.b-broken', { title: `No ${l.stem}.wav or .fuz (Legacy or DBVO 2.0 name) in the source folders. New lines from a mod update have no source until the source pack has them.` }, patch.ttsForMissing ? 'TTS' : 'missing') } : null,
       { id: 'spoken', title: vc ? 'Text for the LIP (and TTS without a source)' : 'Spoken text (tags anywhere)', flex: 1.3, width: 320, render: (l) => spokenCell(l) },
-      { id: 'restore', title: '', width: 34, resizable: false, render: (l) => l.spokenEdited ? h('button.icon-btn', { title: 'Restore the in-game line: ' + l.finalLine, onclick: () => upd(l, 'resetSpoken') }, '↺') : null },
-      { id: 'take', title: 'Take', width: 92, render: (l) => h('span.row', statusDot(l), l.takes.length
-        ? h('button.btn.sm.ghost', { title: `${l.takes.length} take(s). Click to play, switch, or delete takes.`, onclick: () => takesModal(l) },
-          '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? ` of ${l.takes.length}` : '') + ' ▾')
-        : h('span.faint', { title: 'No take yet' }, '—')) },
-      { id: 'act', title: '', width: 84, resizable: false, render: (l) => h('span.row',
-        h('button.icon-btn.big', { title: l.selectedTakeId ? 'Play (or double-click the row)' : vc ? 'No take yet: convert the line first (↻)' : 'No take yet: generate the line first (↻)', disabled: !l.selectedTakeId, onclick: () => play(l) }, '▶'),
-        h('button.icon-btn.big', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running (see the top bar)' : !canGen(l) ? 'No source WAV or .fuz with this line\'s name. Turn on "Generate lines without a source with text-to-speech" in the Voice Changer banner to voice it.' : vc && !l.hasSource ? 'Generate with text-to-speech (no source file)' : vc ? 'Convert again (new take)' : 'Generate a new take (no confirmation for one line)',
-          disabled: l.omitted || !!app.job || !canGen(l), onclick: () => generate('selected', [l.lineId]) }, '↻')) },
+      { id: 'take', title: 'Take', width: 64, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
+        h('span.take-lbl', { title: l.takes.length ? `${l.takes.length} take(s); #${(l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot} is used` : 'No take yet' },
+          l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—')) },
+      { id: 'act', title: '', width: 98, resizable: false, render: (l) => h('span.row', { style: { gap: '2px' } },
+        h('button.act-btn', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running (see the top bar)' : !canGen(l) ? 'No source WAV or .fuz with this line\'s name. Turn on "Generate lines without a source with text-to-speech" in the Voice Changer banner to voice it.' : vc && !l.hasSource ? 'Generate with text-to-speech (no source file)' : vc ? 'Convert again (new take)' : 'Generate a new take (no confirmation for one line)',
+          disabled: l.omitted || !!app.job || !canGen(l), onclick: () => generate('selected', [l.lineId]) }, icon('regen')),
+        h('button.act-btn', { title: l.takes.length ? `Takes (${l.takes.length}): play, switch, delete` : 'No takes yet', disabled: !l.takes.length, onclick: () => takesModal(l) }, icon('takes')),
+        h('button.act-btn', { title: l.selectedTakeId ? 'Play (or double-click the row)' : vc ? 'No take yet: convert the line first' : 'No take yet: generate the line first', disabled: !l.selectedTakeId, onclick: () => play(l) }, icon('play'))) },
+      { id: 'mark', title: '', width: 34, resizable: false, render: (l) => h('button.act-btn' + (l.marked ? '.on' : ''), { title: l.marked ? 'Marked: click to unmark' : 'Mark this line (kept until you unmark it; "Marked lines" generates them)', onclick: () => upd(l, 'mark', !l.marked) }, icon('star', { filled: l.marked })) },
     ].filter(Boolean),
   });
   grid.el.addEventListener('selection', () => renderActions());
@@ -253,7 +260,7 @@ export async function patchView(id) {
         h('button.icon-btn', { title: 'Undo', onclick: () => upd(l, 'rejectTags') }, '✕'));
     }
     const inp = h('input', { type: 'text', value: l.spoken, disabled: l.omitted });
-    if (l.differs) { inp.style.color = 'var(--link)'; inp.title = 'Blue: the spoken text differs from the in-game line (your edit). ↺ restores it.'; }
+    if (l.differs) { inp.style.color = 'var(--link)'; inp.title = 'Blue: the spoken text differs from the in-game line (your edit). The arrow on the left restores it.'; }
     inp.addEventListener('change', () => { if (inp.value !== l.spoken) upd(l, 'spoken', inp.value); });
     inp.addEventListener('focus', () => { if (focusedId !== l.lineId) { focusedId = l.lineId; grid.focus(l.lineId); renderInspector(); } });
     inp.addEventListener('keydown', (e) => {
@@ -262,7 +269,8 @@ export async function patchView(id) {
       if (e.key === 'Escape') { inp.value = l.spoken; inp.blur(); }
     });
     trackCaret(inp, l);
-    return inp;
+    if (!l.spokenEdited) return inp;
+    return h('span.spoken-wrap', h('button.act-btn', { title: 'Restore the in-game line: ' + l.finalLine, onclick: () => upd(l, 'resetSpoken') }, icon('restore', { size: 14 })), inp);
   }
 
   function play(l, take) {
@@ -437,6 +445,46 @@ export async function patchView(id) {
         numIn(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit; the app slows down automatically on "too many requests".' }));
     }
     if (locked) tb.append(h('span.badge.b-toolong', { title: 'Unlock in Global Settings → Voice packs' }, '🔒 locked'));
+    if (eng === 'elevenlabs' || eng === 'sts') tb.append(h('div.spacer'), creditsButton());
+  }
+
+  // ---- ElevenLabs credits (cached for a minute across pages)
+  function creditsButton() {
+    const btn = h('button.btn.sm.credits-btn', { title: 'ElevenLabs credits left this period' }, icon('coins', { size: 14 }), h('b', '…'), h('span.faint', 'credits'));
+    const fill = (c) => {
+      const left = Math.max(0, c.characterLimit - c.characterCount);
+      btn.children[1].textContent = left.toLocaleString();
+      btn.title = `${left.toLocaleString()} of ${c.characterLimit.toLocaleString()} credits left` + (c.nextReset ? ` · resets ${new Date(c.nextReset * 1000).toLocaleDateString()}` : '');
+    };
+    loadCredits().then(fill).catch(() => { btn.children[1].textContent = '—'; btn.title = 'Could not read the credits (check the API key in Global Settings)'; });
+    btn.addEventListener('click', async () => {
+      let c;
+      try { c = await loadCredits(true); fill(c); } catch (e) { fail(e); return; }
+      const left = Math.max(0, c.characterLimit - c.characterCount);
+      const pct = c.characterLimit ? Math.round((100 * left) / c.characterLimit) : 0;
+      const pend = patch.lines.filter(pendingLine).reduce((a, l) => a + l.spoken.length, 0);
+      popupMenu(btn, [
+        { label: `${left.toLocaleString()} credits left (${pct}%)`, sub: `${c.characterCount.toLocaleString()} of ${c.characterLimit.toLocaleString()} used · plan: ${c.tier}${c.nextReset ? ' · resets ' + new Date(c.nextReset * 1000).toLocaleDateString() : ''}`, onclick: () => {} },
+        { label: `This patch still needs ≈ ${pend.toLocaleString()}`, sub: pend > left ? 'More than you have left this period' : 'Fits in what you have left', onclick: () => {} },
+        { label: 'Refresh', sub: 'Read the credits from ElevenLabs again', onclick: () => { creditsCache = null; renderToolbar(); } },
+      ]);
+    });
+    return btn;
+  }
+
+  function folderButton() {
+    const btn = h('button.btn.sm.ghost', { title: 'Open this patch\'s folders in Explorer' }, icon('folder', { size: 14 }), ' Open folder ▾');
+    btn.addEventListener('click', () => {
+      const items = [
+        patch.wavLipFolder ? { label: 'WAV + LIP folder', sub: patch.wavLipFolder, onclick: () => rpc('open.path', { path: patch.wavLipFolder }).catch(fail) } : null,
+        patch.finalRoot ? { label: 'Final folder (.fuz)', sub: patch.finalRoot, onclick: () => rpc('open.path', { path: patch.finalRoot }).catch(fail) } : null,
+        patch.fixFolder ? { label: 'DBVO Fix folder', sub: patch.fixFolder, onclick: () => rpc('open.path', { path: patch.fixFolder }).catch(fail) } : null,
+        { label: 'Takes (this app\'s library)', sub: 'Every generated take of this patch', onclick: () => rpc('patch.openTakes', { id }).catch(fail) },
+      ].filter(Boolean);
+      if (items.length === 1) toast('Set the folders in Folders & options first.', true);
+      popupMenu(btn, items);
+    });
+    return btn;
   }
 
   // ---- tags: insert at the caret, or prefix the ticked rows
@@ -478,11 +526,11 @@ export async function patchView(id) {
     if (vc) {
       tagbar.append(h('span.lbl', 'Voice Changer'),
         h('span.dim', 'The source recording decides the delivery. For converted lines the text column is only used for the .lip, so edit it if the source says something different. Lines without a source use it as text-to-speech when that is turned on.'),
-        h('div.spacer'), columnsMenu(grid));
+        h('div.spacer'), columnsMenu(grid), folderButton());
       return;
     }
     if (engine() !== 'elevenlabs') {
-      tagbar.append(h('span.lbl', 'Tags'), h('span.dim', 'Audio tags are an ElevenLabs v3/v4 feature; local engines ignore them (they are removed before sending).'), h('div.spacer'), columnsMenu(grid));
+      tagbar.append(h('span.lbl', 'Tags'), h('span.dim', 'Audio tags are an ElevenLabs v3/v4 feature; local engines ignore them (they are removed before sending).'), h('div.spacer'), columnsMenu(grid), folderButton());
       return;
     }
     const chip = (t) => {
@@ -512,7 +560,8 @@ export async function patchView(id) {
       h('div.spacer'),
       columnsMenu(grid),
       h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, '✨ Auto-tag ticked'),
-      h('button.btn.sm.ghost', { title: 'Edit the tag list in the voice pack settings', onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, 'Edit tags…'));
+      h('button.btn.sm.ghost', { title: 'Edit the tag list in the voice pack settings', onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, 'Edit tags…'),
+      folderButton());
   }
 
   async function autotag(ids) {
@@ -592,7 +641,7 @@ export async function patchView(id) {
       insp.append(h('h3', 'Line'), h('div.dim', 'Click a row to see it in full. Double-click plays the selected take.'),
         h('div.help',
           vc ? h('p', 'Voice Changer: each line is converted from the source WAV or .fuz with the same name (Legacy or DBVO 2.0). A new .lip is always made from the text, so it matches any edits. Lines without a source are muted unless text-to-speech for them is turned on.')
-            : h('p', h('b', 'Filename'), ' comes from the in-game line set in Phase 1. ', h('b', 'Spoken text'), ' is what the voice says: edit it in the list or here, and put [tags] anywhere. ↺ restores the in-game line.'),
+            : h('p', h('b', 'Filename'), ' comes from the in-game line set in Phase 1. ', h('b', 'Spoken text'), ' is what the voice says: edit it in the list or here, and put [tags] anywhere. The back arrow at the start of an edited box restores the in-game line.'),
           h('p', 'Tick rows for one-off selections; ★ marks stay until you remove them, so you can collect lines to redo and generate them together.'),
           vc ? null : h('p', 'Tag buttons insert at the cursor of the box you are typing in. With rows ticked instead, they go at the start of each ticked line.'),
           h('p', 'Keys: ↑/↓ move, Space ticks, Ctrl+A ticks all shown.')));
