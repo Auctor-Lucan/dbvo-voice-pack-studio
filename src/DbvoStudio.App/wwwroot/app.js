@@ -1,8 +1,10 @@
+import { applyTheme } from './themes.js';
 import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, popupMenu } from './lib.js';
 import { modsView, modView } from './phase1.js';
 import { patchesView, patchView } from './phase2.js';
 import { fomodsView, fomodView } from './phase3.js';
 import { wavLipView } from './tools.js';
+import { revoiceListView, revoiceView } from './revoice.js';
 import { settingsView } from './settings.js';
 
 export const app = {
@@ -15,6 +17,7 @@ const main = document.getElementById('main');
 
 export async function refreshState() {
   app.state = await rpc('state');
+  applyTheme((app.state.settings.ui || {}).theme);
   // A job indicator left over from a job that ended without telling the page (e.g. after a crash) must not block buttons.
   if (!app.state.jobRunning && app.job) { app.job = null; document.getElementById('job').classList.add('hidden'); }
   return app.state;
@@ -26,7 +29,7 @@ export function go(view, params = {}) {
   render();
 }
 
-const SECTION = { mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches', fomods: 'fomods', fomod: 'fomods', settings: 'settings', voices: 'settings', wavlip: 'tools', vc: 'patches' };
+const SECTION = { mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches', fomods: 'fomods', fomod: 'fomods', settings: 'settings', voices: 'settings', wavlip: 'tools', vc: 'patches', revoices: 'tools', revoice: 'tools' };
 
 export async function render() {
   const section = SECTION[app.route.view] || 'mods';
@@ -44,6 +47,8 @@ export async function render() {
       case 'fomods': view = await fomodsView(); break;
       case 'fomod': view = await fomodView(app.route.id); break;
       case 'wavlip': view = await wavLipView(); break;
+      case 'revoices': view = await revoiceListView(); break;
+      case 'revoice': view = await revoiceView(app.route.id); break;
       case 'voices': view = await settingsView('voices', app.route.id); break;
       case 'settings': view = await settingsView(app.route.tab, app.route.id); break;
       default: view = await modsView();
@@ -62,6 +67,7 @@ document.querySelector('[data-section="settings"]').addEventListener('click', ()
 const toolsBtn = document.getElementById('tools-btn');
 toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [
   { label: 'WAV to LIP', sub: 'Whisper listens to WAV files and makes matching .lip files', onclick: () => go('wavlip') },
+  { label: 'NPC Revoice', sub: 'Replace NPC voice files in any mod or the base game with your voice packs', onclick: () => go('revoices') },
 ]));
 
 // ---- background jobs (generation, .fuz, FOMOD, WAV to LIP)
@@ -70,7 +76,7 @@ const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to L
 on('progress', (p) => {
   app.job = p;
   jobEl.classList.remove('hidden');
-  jobEl.querySelector('.job-label').textContent = `${(p.kind === 'fomod' && p.message) || LABEL[p.kind] || 'Working'} ${p.done}/${p.total}${p.failed ? ` · ${p.failed} failed` : ''}`;
+  jobEl.querySelector('.job-label').textContent = `${(p.kind === 'fomod' || p.kind === 'revoice') && p.message ? p.message : LABEL[p.kind] || 'Working'}${p.kind === 'revoice' ? '…' : ` ${p.done}/${p.total}`}${p.failed ? ` · ${p.failed} failed` : ''}`;
   jobEl.title = p.current || '';
   jobEl.querySelector('.bar-fill').style.width = (p.total ? (100 * p.done) / p.total : 0) + '%';
   document.dispatchEvent(new CustomEvent('job-progress', { detail: p }));

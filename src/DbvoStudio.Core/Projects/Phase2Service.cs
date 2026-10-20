@@ -308,8 +308,9 @@ public sealed class Phase2Service
     /// <param name="stateGate">Lock shared with any other code that edits or saves the same patch object.</param>
     public async Task GenerateAsync(DbvoPatch patch, VoicePack voice, IReadOnlyList<Phase2Line> lines, ExternalTools tools,
         IProgress<GenerationProgress>? progress = null, Func<Phase2Line, Task>? onLineDone = null, CancellationToken ct = default,
-        SemaphoreSlim? stateGate = null, string? engineOverride = null)
+        SemaphoreSlim? stateGate = null, string? engineOverride = null, string? folder = null, Action? save = null)
     {
+        string root = folder ?? _lib.PatchFolder(patch.Id);
         bool vc = patch.Kind == "vc";
         string engine = engineOverride ?? (vc ? "sts" : voice.Engine);
         var es = voice.Eleven.Clone();
@@ -452,14 +453,14 @@ public sealed class Phase2Service
                         DurationSeconds = w.DurationSeconds,
                         Settings = got.Settings,
                     };
-                    var stem = LineNaming.Stem(line.FinalLine, voice.Naming);
+                    var stem = line.FileStem ?? LineNaming.Stem(line.FinalLine, voice.Naming);
                     var rel = Path.Combine("takes", line.LineId, take.Slot.ToString("00"));
-                    var dir = Path.Combine(_lib.PatchFolder(patch.Id), rel);
+                    var dir = Path.Combine(root, rel);
                     Directory.CreateDirectory(dir);
                     take.WavPath = Path.Combine(rel, stem + ".wav");
                     take.LipPath = Path.Combine(rel, stem + ".lip");
-                    File.Copy(wav, Path.Combine(_lib.PatchFolder(patch.Id), take.WavPath), true);
-                    File.Copy(lip, Path.Combine(_lib.PatchFolder(patch.Id), take.LipPath), true);
+                    File.Copy(wav, Path.Combine(root, take.WavPath), true);
+                    File.Copy(lip, Path.Combine(root, take.LipPath), true);
                     newTake = take;
                 }
                 finally { convertGate.Release(); }
@@ -488,7 +489,7 @@ public sealed class Phase2Service
                         line.SelectedTakeId = newTake.Id;
                         line.Status = Phase2Status.Generated;
                     }
-                    _lib.Save(patch);
+                    if (save != null) save(); else _lib.Save(patch);
                     if (onLineDone != null) await onLineDone(line);
                 }
                 finally { saveLock.Release(); }

@@ -1,5 +1,6 @@
 // Global Settings: tools, voice packs, pronunciation, omit references, categories, library. Saved as you change them.
 import { VOICE_COLORS, voiceChip } from './phase2.js';
+import { THEMES, applyTheme } from './themes.js';
 import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, switchEl, segmented, popupMenu } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
@@ -164,6 +165,16 @@ async function general(_, rerender) {
           h('button.btn.sm.primary', { title: 'Save the key encrypted for your Windows user', onclick: async () => { try { await rpc('settings.setApiKey', { key: apiKey.value.trim() }); apiKey.value = ''; await refreshState(); rerender(); } catch (e) { fail(e); } } }, 'Save key'),
           h('button.btn.sm', { title: 'Check the key and show your remaining credits', onclick: test }, 'Test')),
         apiStatus))),
+    section('Appearance', null,
+      srow('Colour theme', 'Changes the whole app straight away. Voice pack labels keep their own colours.', h('div.theme-picks', THEMES.map((t) => {
+        const cur = ((st.ui || {}).theme || 'github-dark') === t.id;
+        const v = t.v;
+        return h('button.theme-pick' + (cur ? '.on' : ''), { title: `Use the ${t.name} theme`, style: { background: v.bg, color: v.text, borderColor: cur ? v.accent : v.line },
+          onclick: async () => { applyTheme(t.id); await saveSettings({ ui: { theme: t.id } }); rerender(); } },
+          h('div.tp-bar', { style: { background: v.deep } }, h('span', { style: { background: v.accent } }), h('span', { style: { background: v.panel } })),
+          h('div.tp-body', h('span', { style: { background: v.raised, borderColor: v.line } }), h('span', { style: { background: v.ok } }), h('span', { style: { background: v.warn } }), h('span', { style: { background: v.bad } })),
+          h('div.tp-name', t.name + (t.id === 'github-dark' ? ' (default)' : '')));
+      })))),
     section('Generation', null,
       srow('Confirm batch generation', 'Shows the count, characters and engine before generating or converting several lines. Single lines never ask.',
         switchEl((st.ui || {}).confirmBatch !== 'false', (x) => save({ ui: { confirmBatch: x ? 'true' : 'false' } }), null, { title: 'Ask before generating more than one line' }))),

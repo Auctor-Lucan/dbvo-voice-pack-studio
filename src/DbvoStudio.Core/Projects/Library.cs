@@ -28,7 +28,7 @@ public sealed class Library
     {
         Root = Path.GetFullPath(root);
         Directory.CreateDirectory(Root);
-        foreach (var d in new[] { "voicepacks", "references", "mods", "patches", "fomods", "backups" })
+        foreach (var d in new[] { "voicepacks", "references", "mods", "patches", "fomods", "revoice", "backups" })
             Directory.CreateDirectory(Path.Combine(Root, d));
     }
 
@@ -87,6 +87,19 @@ public sealed class Library
     {
         p.UpdatedUtc = DateTime.UtcNow;
         SaveJson(Path.Combine(FomodFolder(p.Id), "fomod.json"), p);
+    }
+
+    // ---------- NPC Revoice projects (Other Tools) ----------
+    public string RevoiceFolder(string id) => Path.Combine(Root, "revoice", id);
+    public List<Revoice.RevoiceProject> LoadRevoiceProjects() =>
+        Directory.EnumerateDirectories(Path.Combine(Root, "revoice"))
+            .Select(d => Load<Revoice.RevoiceProject>(Path.Combine(d, "project.json"))).Where(p => p != null).Select(p => p!)
+            .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    public Revoice.RevoiceProject? LoadRevoiceProject(string id) => Load<Revoice.RevoiceProject>(Path.Combine(RevoiceFolder(id), "project.json"));
+    public void Save(Revoice.RevoiceProject p)
+    {
+        p.UpdatedUtc = DateTime.UtcNow;
+        SaveJson(Path.Combine(RevoiceFolder(p.Id), "project.json"), p);
     }
 
     // ---------- references ----------

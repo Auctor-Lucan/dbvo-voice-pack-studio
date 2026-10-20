@@ -366,7 +366,7 @@ public sealed class LineSource
 }
 
 /// <summary>One line in Phase 2.</summary>
-public sealed class Phase2Line
+public class Phase2Line
 {
     /// <summary>Short stable ID; names the line's take folder.</summary>
     public string LineId { get; set; } = "";
@@ -393,6 +393,8 @@ public sealed class Phase2Line
     public bool Marked { get; set; }
     /// <summary>Voice Changer: the source WAV this line is converted from (absolute path), if found.</summary>
     public string? SourceWav { get; set; }
+    /// <summary>File name (without extension) for takes when it is not derived from the line (NPC Revoice: the game's voice file name).</summary>
+    public string? FileStem { get; set; }
 
     [JsonIgnore] public Take? SelectedTake => Takes.FirstOrDefault(t => t.Id == SelectedTakeId);
     [JsonIgnore] public bool IsOmitted => OmittedBy != null && !OverrideOmit;

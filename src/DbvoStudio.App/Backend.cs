@@ -360,7 +360,10 @@ public sealed partial class Backend
             case "patch.autotag": return await AutoTag(p);
             default:
                 var extra = await DispatchExtra(m, p);
-                if (extra != NotHandled) return extra; throw new InvalidOperationException("Unknown action: " + m);
+                if (extra != NotHandled) return extra;
+                var rv = await DispatchRevoice(m, p, dropped);
+                if (rv != NotHandled) return rv;
+                throw new InvalidOperationException("Unknown action: " + m);
         }
     }
 

@@ -26,6 +26,21 @@ public sealed class StringsTable
         return t;
     }
 
+    /// <summary>Load a plugin's strings from an archive (vanilla strings live in "Skyrim - Interface.bsa"). Null when none are there.</summary>
+    public static StringsTable? FromArchive(Archives.BsaArchive bsa, string pluginBaseName, string language = "English")
+    {
+        var t = new StringsTable();
+        bool any = false;
+        foreach (var (ext, lengthPrefixed) in new[] { ("STRINGS", false), ("DLSTRINGS", true), ("ILSTRINGS", true) })
+        {
+            var data = bsa.Read($@"strings\{pluginBaseName}_{language}.{ext}".ToLowerInvariant());
+            if (data == null) continue;
+            t.AddFile(data, lengthPrefixed);
+            any = true;
+        }
+        return any ? t : null;
+    }
+
     /// <summary>True if any strings file for the plugin exists in the folder.</summary>
     public static bool Exists(string folder, string pluginBaseName, string language = "English") =>
         new[] { "STRINGS", "DLSTRINGS", "ILSTRINGS" }
