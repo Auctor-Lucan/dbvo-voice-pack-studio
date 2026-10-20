@@ -636,7 +636,7 @@ public sealed class Backend
             case "exclude": line.Excluded = B(p, "value"); line.Reviewed = true; break;
             case "includeHidden": line.IncludeAnyway = B(p, "value"); break;
             case "variants":
-                line.Variants = Strings(p, "value").Select(v => v.Replace("…", "...").Trim()).Where(v => v.Length > 0).ToList();
+                line.Variants = Strings(p, "value").Select(v => v.Trim()).Where(v => v.Length > 0).ToList();
                 line.Reviewed = true;
                 break;
             case "keepPrevious":
@@ -690,6 +690,8 @@ public sealed class Backend
         return new
         {
             patch.Id, patch.Name, patch.VoicePackId, patch.ModIds, patch.ReferenceIds, patch.WavLipFolder, patch.FinalRoot, patch.FuzTemplate,
+            patch.OverwriteWavLip, patch.OverwriteFuz,
+            category = mods.FirstOrDefault(m => patch.ModIds.Contains(m.Id))?.Category ?? "Misc",
             mediaBase = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, _lib.PatchFolder(patch.Id)).Replace('\\', '/') + "/",
             modNames = mods.Where(m => patch.ModIds.Contains(m.Id)).ToDictionary(m => m.Id, m => m.Name),
             lines = patch.Lines.Select(l => Line2Dto(l, voice)).ToList(),

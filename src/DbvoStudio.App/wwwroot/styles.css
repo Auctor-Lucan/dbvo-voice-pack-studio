@@ -228,8 +228,9 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .cat-head h3 { margin: 0; font-size: 13px; font-weight: 650; }
 .cat-head .caret { color: var(--faint); width: 12px; }
 .cat.drop-over { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.prow { display: grid; grid-template-columns: 18px minmax(160px, 2fr) minmax(120px, 1fr) 210px 120px; gap: 12px; align-items: center; padding: 6px 12px; border-top: 1px solid var(--line-soft); cursor: pointer; }
+.prow { display: grid; grid-template-columns: 18px minmax(160px, 2fr) minmax(120px, 1fr) 230px 210px; gap: 12px; align-items: center; padding: 6px 12px; border-top: 1px solid var(--line-soft); cursor: pointer; }
 .prow:hover { background: #1c2128; }
+.prow > div:last-child { white-space: nowrap; }
 .prow .grip { color: var(--faint); cursor: grab; }
 .prow.dragging { opacity: .4; }
 

@@ -1,7 +1,7 @@
 import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce } from './lib.js';
 import { modsView, modView } from './phase1.js';
 import { patchesView, patchView } from './phase2.js';
-import { voicesView, settingsView } from './settings.js';
+import { settingsView } from './settings.js';
 
 export const app = {
   state: null,
@@ -25,7 +25,7 @@ export function go(view, params = {}) {
 export async function render() {
   document.querySelectorAll('.nav-item').forEach((b) => {
     const v = app.route.view;
-    const section = v === 'mod' ? 'mods' : v === 'patch' ? 'patches' : v;
+    const section = v === 'mod' ? 'mods' : v === 'patch' ? 'patches' : v === 'voices' ? 'settings' : v;
     b.classList.toggle('active', b.dataset.view === section);
   });
   clear(main);
@@ -38,8 +38,8 @@ export async function render() {
       case 'mod': view = await modView(app.route.id); break;
       case 'patches': view = await patchesView(); break;
       case 'patch': view = await patchView(app.route.id); break;
-      case 'voices': view = await voicesView(app.route.id); break;
-      case 'settings': view = await settingsView(); break;
+      case 'voices': view = await settingsView('voices', app.route.id); break;
+      case 'settings': view = await settingsView(app.route.tab, app.route.id); break;
       default: view = await modsView();
     }
     clear(main).append(view);
