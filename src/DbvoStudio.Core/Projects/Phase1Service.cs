@@ -101,22 +101,42 @@ public sealed class Phase1Service
         if (unresolved != 0)
             mp.Notices.Add($"This plugin is localized and {(unresolved < 0 ? "its strings files were not found" : unresolved + " strings could not be read")}. Add its .STRINGS files.");
 
-        var old = mp.Lines.ToDictionary(l => l.Key);
-        var fresh = new List<Phase1Line>();
-        foreach (var x in extraction.Lines)
+        var lines = extraction.Lines.Select(x => NewLine(x.FormId, x.Field, x.EditorId, x.Original, x.Kind, x.Suggested, x.HiddenByPrompts, x.Order)).ToList();
+        Merge(mod, mp, existing, lines, report);
+        return report;
+    }
+
+    /// <summary>A Phase 1 row from the script's verdict. Player-name lines get the script's formatting fixes but keep the alias.</summary>
+    private static Phase1Line NewLine(uint formId, LineField field, string? edid, string original, LineKind kind, string? suggested, bool hidden, int order)
+    {
+        var nl = new Phase1Line
         {
-            var nl = new Phase1Line
-            {
-                FormId = x.FormId,
-                Field = x.Field,
-                EditorId = x.EditorId,
-                Original = x.Original,
-                Suggested = x.Suggested,
-                Final = x.Kind is LineKind.Valid or LineKind.Fixed ? x.Suggested : null,
-                Kind = x.Kind,
-                HiddenByPrompts = x.HiddenByPrompts,
-                Order = x.Order,
-            };
+            FormId = formId,
+            Field = field,
+            EditorId = edid,
+            Original = original,
+            Suggested = suggested,
+            Final = kind is LineKind.Valid or LineKind.Fixed ? suggested : null,
+            Kind = kind,
+            HiddenByPrompts = hidden,
+            Order = order,
+        };
+        if (kind == LineKind.Broken && ScriptRules.HasPlayerAlias(original) && !ScriptRules.HasOtherAlias(original))
+        {
+            var fixedText = ScriptRules.Fix(ScriptRules.Trim(original));
+            nl.Suggested = fixedText;
+            nl.Final = fixedText.Length > ScriptRules.MaxLength ? null : fixedText;
+        }
+        return nl;
+    }
+
+    /// <summary>Merge freshly read lines into a plugin's rows: keep decisions on unchanged lines, flag changed ones.</summary>
+    private void Merge(Mod mod, ModPlugin mp, ModPlugin? existing, List<Phase1Line> lines, ImportReport report)
+    {
+        var old = mp.Lines.GroupBy(l => l.Key).ToDictionary(g => g.Key, g => g.First());
+        var fresh = new List<Phase1Line>();
+        foreach (var nl in lines)
+        {
             if (old.TryGetValue(nl.Key, out var prev))
             {
                 old.Remove(nl.Key);
@@ -132,6 +152,7 @@ public sealed class Phase1Service
                     nl.Status = prev.Status == Phase1Status.ChangedInMod ? Phase1Status.ChangedInMod : Phase1Status.Active;
                     nl.PreviousFinal = prev.PreviousFinal;
                     nl.PreviousOriginal = prev.PreviousOriginal;
+                    nl.PlayerNameExported = prev.PlayerNameExported;
                     report.Kept++;
                 }
                 else
@@ -152,9 +173,9 @@ public sealed class Phase1Service
         }
         foreach (var gone in old.Values)
         {
+            if (gone.Status != Phase1Status.Removed) report.Removed++;
             gone.Status = Phase1Status.Removed;
             fresh.Add(gone);
-            report.Removed++;
         }
         mp.Lines = fresh;
         if (existing == null)
@@ -163,8 +184,103 @@ public sealed class Phase1Service
             report.Added = fresh.Count;
         }
         _lib.Save(mod);
+    }
+
+    /// <summary>
+    /// Import a topic .txt (for mods without a plugin to read, or collections such as player-name lines).
+    /// Every line is checked with the script's rules. Lines are kept as they are by default: they are what the
+    /// game shows, and changing one changes its filename. No DBVO Fix plugin can be made from a topic file.
+    /// Re-importing a file with the same name updates it (lines are matched by their text).
+    /// </summary>
+    public ImportReport ImportTopicFile(Mod mod, string txtPath)
+    {
+        var raw = TopicFile.Read(txtPath);
+        var dir = Path.Combine(_lib.ModFolder(mod.Id), "topics");
+        Directory.CreateDirectory(dir);
+        var name = Path.GetFileName(txtPath);
+        var stored = Path.Combine(dir, name);
+        if (!string.Equals(Path.GetFullPath(txtPath), Path.GetFullPath(stored), StringComparison.OrdinalIgnoreCase))
+            File.Copy(txtPath, stored, true);
+
+        var existing = mod.Plugins.FirstOrDefault(p => p.IsTopicFile && string.Equals(p.FileName, name, StringComparison.OrdinalIgnoreCase));
+        var mp = existing ?? new ModPlugin { FileName = name, IsTopicFile = true };
+        mp.StoredFile = stored;
+        mp.ImportedUtc = DateTime.UtcNow;
+        mp.Notices.Clear();
+        var report = new ImportReport { Plugin = mp };
+
+        var seen = new HashSet<string>();
+        var lines = new List<Phase1Line>();
+        foreach (var text in raw)
+        {
+            if (!seen.Add(text)) continue;
+            uint id = (uint)Naming.XxHash64.Hash(System.Text.Encoding.UTF8.GetBytes(text));
+            var r = ScriptRules.Classify(text, null);
+            if (r.Kind == LineKind.Empty) continue;
+            var nl = NewLine(id, LineField.TopicText, null, text, r.Kind, r.Final, false, lines.Count);
+            // Keep the line as written: the topic file mirrors the game's text.
+            if (nl.Kind == LineKind.Fixed) nl.Final = text;
+            if (nl.IsPlayerName) nl.Final = text;
+            lines.Add(nl);
+        }
+        Merge(mod, mp, existing, lines, report);
         return report;
     }
+
+    /// <summary>
+    /// Read an earlier DBVO Fix plugin made for this plugin and take its dialogue texts as the final lines.
+    /// FormIDs are matched across the two master lists. Old marker texts (BROKEN LINE, TOO LONG WILL CTD) are ignored.
+    /// Returns (applied, ignoredMarkers, unmatched).
+    /// </summary>
+    public (int Applied, int Markers, int Unmatched) ImportFixPlugin(Mod mod, ModPlugin target, string fixPath)
+    {
+        if (target.IsTopicFile) throw new InvalidOperationException("A topic file has no DBVO Fix plugin.");
+        var fix = PluginFile.Read(fixPath);
+        var source = PluginFile.Read(target.StoredFile, new HashSet<string>());
+        int applied = 0, markers = 0, unmatched = 0;
+        var byKey = target.Lines.ToDictionary(l => l.Key);
+        foreach (var rec in fix.Records)
+        {
+            var sub = rec.Signature == "DIAL" ? rec.Get("FULL") : rec.Get("RNAM");
+            if (sub == null) continue;
+            var text = fix.DecodeLString(sub.Data);
+            if (text == null) continue;
+            uint? local = MapFormId(rec.FormId, fix, source);
+            if (local == null) { unmatched++; continue; }
+            var key = new Phase1Line { FormId = local.Value, Field = rec.Signature == "DIAL" ? LineField.TopicText : LineField.Prompt }.Key;
+            if (!byKey.TryGetValue(key, out var line)) { unmatched++; continue; }
+            if (text.Contains("BROKEN LINE", StringComparison.Ordinal) || text.Contains("TOO LONG WILL CTD", StringComparison.Ordinal))
+            {
+                markers++;
+                continue;
+            }
+            if (line.Final == text && line.Reviewed) continue;
+            SetFinal(line, text);
+            applied++;
+        }
+        target.ImportedFixPlugin = Path.GetFileName(fixPath);
+        _lib.Save(mod);
+        return (applied, markers, unmatched);
+    }
+
+    /// <summary>Translate a FormID from one plugin's master list to another's (by owning file name).</summary>
+    public static uint? MapFormId(uint formId, PluginFile from, PluginFile to)
+    {
+        string owner = from.OwnerOf(formId);
+        int index;
+        if (string.Equals(owner, to.FileName, StringComparison.OrdinalIgnoreCase)) index = to.Masters.Count;
+        else
+        {
+            index = to.Masters.ToList().FindIndex(m => string.Equals(m, owner, StringComparison.OrdinalIgnoreCase));
+            if (index < 0) return null;
+        }
+        return ((uint)index << 24) | (formId & 0x00FFFFFF);
+    }
+
+    /// <summary>Player-name lines (with &lt;Alias=Player&gt;) of a plugin, as they would appear in a player-name topic file.</summary>
+    public static List<string> PlayerNameLines(ModPlugin p) =>
+        p.Lines.Where(l => l.Status != Phase1Status.Removed && !l.Excluded && l.IsPlayerName)
+            .Select(l => (l.Final ?? l.Original).Trim()).Distinct().ToList();
 
     private string? ResolveStringsFolder(Mod mod, string pluginPath)
     {
@@ -215,8 +331,13 @@ public sealed class Phase1Service
 
     /// <summary>The edits for the DBVO Fix plugin. Unresolved flagged lines get no override.</summary>
     public static List<LineEdit> FixEdits(ModPlugin p) =>
-        p.Lines.Where(l => l.NeedsOverride && !(l.IsFlagged && !l.UserEdited))
+        p.IsTopicFile ? new List<LineEdit>()
+        : p.Lines.Where(l => l.NeedsOverride && !(l.IsFlagged && !l.UserEdited))
             .Select(l => new LineEdit(l.FormId, l.Field, l.Final!)).ToList();
+
+    /// <summary>File name of the topic file written for a plugin (a topic-file source keeps its own name).</summary>
+    public static string TopicFileName(ModPlugin p) =>
+        p.IsTopicFile ? p.FileName : $"TopicList{Path.GetFileNameWithoutExtension(p.FileName)}.txt";
 
     /// <summary>
     /// Write the DBVO Fix plugin (only when needed) and the topic file for one plugin into the given folders.
@@ -225,7 +346,7 @@ public sealed class Phase1Service
     public List<string> WriteOutputs(Mod mod, ModPlugin p, IEnumerable<string> fixFolders, string topicFolder)
     {
         var written = new List<string>();
-        var topicPath = Path.Combine(topicFolder, $"TopicList{Path.GetFileNameWithoutExtension(p.FileName)}.txt");
+        var topicPath = Path.Combine(topicFolder, TopicFileName(p));
         TopicFile.Write(topicPath, TopicLines(p));
         written.Add(topicPath);
 

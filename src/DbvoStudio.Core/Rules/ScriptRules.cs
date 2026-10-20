@@ -147,6 +147,21 @@ public static class ScriptRules
         return new LineResult(LineKind.Empty, val, null);
     }
 
+    /// <summary>True when the text contains &lt;Alias=Player&gt; in any letter case. Such lines are voiced through player-name patches.</summary>
+    public static bool HasPlayerAlias(string s) => s.Contains("<Alias=Player>", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True when the text contains an alias placeholder other than the player's name.</summary>
+    public static bool HasOtherAlias(string s)
+    {
+        int i = 0;
+        while ((i = s.IndexOf("<Alias", i, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            if (!s.AsSpan(i).StartsWith("<Alias=Player>", StringComparison.OrdinalIgnoreCase)) return true;
+            i += 6;
+        }
+        return false;
+    }
+
     /// <summary>True when the text contains an alias or global placeholder such as &lt;Alias=Player&gt;.</summary>
     public static bool HasPlaceholder(string s) =>
         s.Contains("<Alias", StringComparison.OrdinalIgnoreCase) || s.Contains("<Global", StringComparison.OrdinalIgnoreCase);

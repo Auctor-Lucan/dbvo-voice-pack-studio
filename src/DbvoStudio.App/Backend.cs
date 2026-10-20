@@ -124,6 +124,26 @@ public sealed class Backend
                 });
             case "backup.now": return _lib.Backup(S(p, "reason", "manual"), _settings.BackupsToKeep);
             case "library.open": OpenPath(_lib.Root); return true;
+            case "library.change": return await Locked(() => ChangeLibrary(S(p, "path")));
+            case "rules.check": return CheckText(S(p, "text"));
+            case "categories.save":
+                return await Locked(() =>
+                {
+                    var cats = Strings(p, "categories").Select(c => c.Trim()).Where(c => c.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    if (cats.Count == 0) cats = AppSettings.DefaultCategories.ToList();
+                    _settings.Categories = cats;
+                    _lib.Save(_settings);
+                    return State();
+                });
+            case "mod.setCategory":
+                return await Locked(() =>
+                {
+                    var mod = LoadMod(S(p, "id"));
+                    mod.Category = S(p, "category", "Misc");
+                    EnsureCategory(mod.Category);
+                    _lib.Save(mod);
+                    return State();
+                });
 
             // ---- voice packs
             case "voice.save":
@@ -144,8 +164,9 @@ public sealed class Backend
             case "mod.create":
                 return await Locked(() =>
                 {
-                    var mod = new Mod { Name = S(p, "name").Trim(), Version = S(p, "version").Trim() };
+                    var mod = new Mod { Name = S(p, "name").Trim(), Version = S(p, "version").Trim(), Category = S(p, "category", "Misc").Trim() };
                     if (mod.Name.Length == 0) throw new InvalidOperationException("Give the mod a name.");
+                    EnsureCategory(mod.Category);
                     _lib.Save(mod);
                     return ModDto(mod);
                 });
@@ -157,6 +178,8 @@ public sealed class Backend
                     mod.Name = S(p, "name", mod.Name);
                     mod.Version = S(p, "version", mod.Version);
                     mod.NexusUrl = S(p, "nexusUrl", mod.NexusUrl);
+                    mod.Category = S(p, "category", mod.Category);
+                    EnsureCategory(mod.Category);
                     _lib.Save(mod);
                     return ModDto(mod);
                 });
@@ -168,6 +191,30 @@ public sealed class Backend
                     return State();
                 });
             case "mod.import": return await Locked(() => ImportPlugins(p));
+            case "mod.importFix":
+                return await Locked(() =>
+                {
+                    var mod = LoadMod(S(p, "id"));
+                    var pl = mod.Plugins.First(x => x.FileName == S(p, "plugin"));
+                    var (applied, markers, unmatched) = new Phase1Service(_lib, Runtime()).ImportFixPlugin(mod, pl, S(p, "path"));
+                    return new { mod = ModDto(LoadMod(mod.Id)), applied, markers, unmatched };
+                });
+            case "mod.exportPlayerNames":
+                return await Locked(() =>
+                {
+                    var mod = LoadMod(S(p, "id"));
+                    var pl = mod.Plugins.First(x => x.FileName == S(p, "plugin"));
+                    var keys = Strings(p, "keys").ToHashSet();
+                    var lines = pl.Lines.Where(l => l.IsPlayerName && l.Status != Phase1Status.Removed && !l.Excluded && (keys.Count == 0 || keys.Contains(l.Key))).ToList();
+                    if (lines.Count == 0) throw new InvalidOperationException("No player-name lines to export.");
+                    var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                    Directory.CreateDirectory(downloads);
+                    var file = Path.Combine(downloads, $"Player name lines - {SafeFile(mod.Name)}.txt");
+                    Core.Topics.TopicFile.Write(file, lines.Select(l => (l.Final ?? l.Original).Trim()).Distinct());
+                    foreach (var l in lines) { l.PlayerNameExported = true; l.Reviewed = true; }
+                    _lib.Save(mod);
+                    return new { file, count = lines.Count, mod = ModDto(mod) };
+                });
             case "mod.addMasters":
                 return await Locked(() =>
                 {
@@ -201,17 +248,35 @@ public sealed class Backend
                 return await Locked(() =>
                 {
                     var voice = LoadVoice(S(p, "voicePackId"));
-                    var patch = new DbvoPatch
-                    {
-                        Name = S(p, "name").Trim(),
-                        VoicePackId = voice.Id,
-                        ModIds = Strings(p, "modIds"),
-                        ReferenceIds = p.TryGetProperty("referenceIds", out _) ? Strings(p, "referenceIds") : voice.DefaultReferenceIds.ToList(),
-                    };
-                    if (patch.Name.Length == 0) patch.Name = voice.Name + " – " + string.Join(", ", _lib.LoadMods().Where(x => patch.ModIds.Contains(x.Id)).Select(x => x.Name));
-                    _lib.Save(patch);
-                    new Phase2Service(_lib, Runtime()).Sync(patch, voice, _lib.LoadMods());
-                    return PatchDto(patch);
+                    var refs = p.TryGetProperty("referenceIds", out _) ? Strings(p, "referenceIds") : null;
+                    return PatchDto(CreatePatch(voice, Strings(p, "modIds"), S(p, "name"), refs));
+                });
+            case "patch.openFor":
+                // Continue to Phase 2: the mod's patch for the given (or last used) voice pack, created if missing.
+                return await Locked(() =>
+                {
+                    var voices = _lib.LoadVoicePacks();
+                    if (voices.Count == 0) return new { needVoicePack = true, id = (string?)null };
+                    var vid = S(p, "voicePackId", _settings.LastVoicePackId ?? "");
+                    var voice = voices.FirstOrDefault(v => v.Id == vid) ?? voices[0];
+                    var modId = S(p, "modId");
+                    var existing = _lib.LoadPatches().FirstOrDefault(x => x.VoicePackId == voice.Id && x.ModIds.Count == 1 && x.ModIds[0] == modId)
+                                   ?? _lib.LoadPatches().FirstOrDefault(x => x.VoicePackId == voice.Id && x.ModIds.Contains(modId));
+                    var patch = existing != null ? LoadPatch(existing.Id) : CreatePatch(voice, new List<string> { modId }, "", null);
+                    return new { needVoicePack = false, id = (string?)patch.Id };
+                });
+            case "patch.switchVoice":
+                // Same mods, another voice pack: open that voice's patch, creating it if needed.
+                return await Locked(() =>
+                {
+                    var cur = LoadPatch(S(p, "id"));
+                    var voice = LoadVoice(S(p, "voicePackId"));
+                    var set = cur.ModIds.OrderBy(x => x).ToList();
+                    var existing = _lib.LoadPatches().FirstOrDefault(x => x.VoicePackId == voice.Id && x.ModIds.OrderBy(y => y).SequenceEqual(set));
+                    var patch = existing != null ? LoadPatch(existing.Id) : CreatePatch(voice, cur.ModIds.ToList(), "", cur.ReferenceIds.ToList());
+                    _settings.LastVoicePackId = voice.Id;
+                    _lib.Save(_settings);
+                    return new { id = patch.Id };
                 });
             case "patch.get": return await Locked(() => PatchDto(LoadPatch(S(p, "id"))));
             case "patch.saveMeta":
@@ -224,6 +289,8 @@ public sealed class Backend
                     patch.WavLipFolder = S(p, "wavLipFolder", patch.WavLipFolder);
                     patch.FinalRoot = S(p, "finalRoot", patch.FinalRoot);
                     patch.FuzTemplate = S(p, "fuzTemplate", patch.FuzTemplate);
+                    if (p.TryGetProperty("overwriteWavLip", out var ow) && ow.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteWavLip = ow.GetBoolean();
+                    if (p.TryGetProperty("overwriteFuz", out var of) && of.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteFuz = of.GetBoolean();
                     _lib.Save(patch);
                     new Phase2Service(_lib, Runtime()).Sync(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods());
                     return PatchDto(patch);
@@ -253,7 +320,9 @@ public sealed class Backend
                 return await Locked(() =>
                 {
                     var patch = LoadPatch(S(p, "id"));
-                    return new Phase2Service(_lib, Runtime()).ExportWavLip(patch, LoadVoice(patch.VoicePackId));
+                    var rep = new Phase2Service(_lib, Runtime()).ExportWavLip(patch, LoadVoice(patch.VoicePackId));
+                    var files = WriteFixAndTopics(patch);
+                    return new { rep.Written, rep.Skipped, rep.Failed, rep.Errors, files };
                 });
             case "patch.buildFuz": return StartFuz(p);
             case "patch.writeFixPlugins": return await Locked(() => WritePatchFixPlugins(p));
@@ -282,6 +351,15 @@ public sealed class Backend
             libraryRoot = _lib.Root,
             settings = new
             {
+                tools = new
+                {
+                    fonix = File.Exists(_settings.FonixDataPath), xwma = File.Exists(_settings.XwmaEncodePath),
+                    ffmpeg = File.Exists(_settings.FfmpegPath), faceFx = File.Exists(_settings.FaceFxWrapperPath),
+                    baseGame = Directory.Exists(_settings.BaseGameFolder), strings = Directory.Exists(_settings.StringsFolder),
+                },
+                categories = _settings.Categories,
+                pronunciations = _settings.Pronunciations,
+                defaultReferenceIds = _settings.DefaultReferenceIds,
                 hasApiKey = !string.IsNullOrEmpty(Secrets.Unprotect(_settings.ElevenLabsApiKey)),
                 _settings.FonixDataPath,
                 _settings.XwmaEncodePath,
@@ -303,8 +381,10 @@ public sealed class Backend
             {
                 x.Id, x.Name, x.VoicePackId, x.ModIds, x.ReferenceIds, x.UpdatedUtc,
                 voicePack = voices.FirstOrDefault(v => v.Id == x.VoicePackId)?.Name ?? "(missing)",
+                category = mods.FirstOrDefault(m => x.ModIds.Contains(m.Id))?.Category ?? "Misc",
                 total = x.Lines.Count,
-                generated = x.Lines.Count(l => l.SelectedTakeId != null),
+                generated = x.Lines.Count(l => l.SelectedTakeId != null && !l.IsOmitted),
+                failed = x.Lines.Count(l => l.Status == Phase2Status.Failed),
                 omitted = x.Lines.Count(l => l.IsOmitted),
             }).ToList(),
         };
@@ -326,6 +406,10 @@ public sealed class Backend
         Set("voxCpmAddress", v => _settings.LocalEngines.VoxCpmAddress = v);
         Set("omniVoiceAddress", v => _settings.LocalEngines.OmniVoiceAddress = v);
         if (s.TryGetProperty("backupsToKeep", out var bk) && bk.ValueKind == JsonValueKind.Number) _settings.BackupsToKeep = bk.GetInt32();
+        if (s.TryGetProperty("pronunciations", out var pr) && pr.ValueKind == JsonValueKind.Array)
+            _settings.Pronunciations = pr.Deserialize<List<Pronunciation>>(JsonOptions) ?? new();
+        if (s.TryGetProperty("defaultReferenceIds", out var dr) && dr.ValueKind == JsonValueKind.Array)
+            _settings.DefaultReferenceIds = dr.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToList();
         if (s.TryGetProperty("ui", out var ui) && ui.ValueKind == JsonValueKind.Object)
             foreach (var kv in ui.EnumerateObject()) _settings.Ui[kv.Name] = kv.Value.ToString();
         _lib.Save(_settings);
@@ -423,6 +507,18 @@ public sealed class Backend
         {
             if (_patches.TryGetValue(id, out var cached)) return cached;
             var p = _lib.LoadPatch(id) ?? throw new InvalidOperationException("DBVO Patch not found.");
+            // Patches from the first test build had no folders of their own: fill them from the voice pack's templates.
+            if (string.IsNullOrWhiteSpace(p.WavLipFolder) && string.IsNullOrWhiteSpace(p.FinalRoot))
+            {
+                var v = _lib.LoadVoicePacks().FirstOrDefault(x => x.Id == p.VoicePackId);
+                var modName = _lib.LoadMods().FirstOrDefault(m => p.ModIds.Contains(m.Id))?.Name ?? p.Name;
+                if (v != null && (v.Destinations.WavLipFolder.Length > 0 || v.Destinations.FinalRoot.Length > 0))
+                {
+                    if (v.Destinations.WavLipFolder.Length > 0) p.WavLipFolder = Phase2Service.ExpandTemplate(v.Destinations.WavLipFolder, modName, v, p);
+                    if (v.Destinations.FinalRoot.Length > 0) p.FinalRoot = Phase2Service.ExpandTemplate(v.Destinations.FinalRoot, modName, v, p);
+                    _lib.Save(p);
+                }
+            }
             _patches[id] = p;
             return p;
         }
@@ -435,15 +531,16 @@ public sealed class Backend
 
     private static object ModSummary(Mod m) => new
     {
-        m.Id, m.Name, m.Version, m.UpdatedUtc,
+        m.Id, m.Name, m.Version, m.UpdatedUtc, m.Category,
         plugins = m.Plugins.Select(p => new
         {
-            p.FileName,
+            p.FileName, p.IsTopicFile,
             lines = p.Lines.Count(l => l.Status != Phase1Status.Removed),
             topicLines = Phase1Service.TopicLines(p).Count,
-            fixes = p.Lines.Count(l => l.NeedsOverride),
+            fixes = Phase1Service.FixEdits(p).Count,
             flagged = p.Lines.Count(l => l.IsFlagged && l.Status != Phase1Status.Removed && !l.Excluded),
             unreviewed = Phase1Service.UnreviewedFlags(p).Count,
+            playerNames = p.Lines.Count(l => l.IsPlayerName && l.Status != Phase1Status.Removed && !l.Excluded),
             needsFix = p.NeedsFixPlugin,
         }).ToList(),
     };
@@ -454,19 +551,25 @@ public sealed class Backend
         var mastersDir = Path.Combine(_lib.ModFolder(m.Id), "masters");
         return new
         {
-            m.Id, m.Name, m.Version, m.NexusUrl, m.UpdatedUtc,
+            m.Id, m.Name, m.Version, m.NexusUrl, m.UpdatedUtc, m.Category,
             uploadedMasters = Directory.Exists(mastersDir) ? Directory.GetFiles(mastersDir).Select(Path.GetFileName).ToList() : new List<string?>(),
-            plugins = m.Plugins.Select(p => new
-            {
-                p.FileName, p.FixFileName, p.Masters, p.Localized, p.Notices, p.ImportedUtc, p.FixPrefix,
-                missingMasters = SafeMissing(svc, m, p),
-                needsFix = p.NeedsFixPlugin,
-                topicLines = Phase1Service.TopicLines(p).Count,
-                unreviewed = Phase1Service.UnreviewedFlags(p).Count,
-                lines = p.Lines.OrderBy(l => l.Status == Phase1Status.Removed).ThenBy(l => l.Order).Select(Line1Dto).ToList(),
-            }).ToList(),
+            plugins = m.Plugins.Select(p => PluginDto(svc, m, p, true)).ToList(),
         };
     }
+
+    private static object PluginDto(Phase1Service svc, Mod m, ModPlugin p, bool withLines) => new
+    {
+        p.FileName, p.FixFileName, p.Masters, p.Localized, p.Notices, p.ImportedUtc, p.FixPrefix, p.IsTopicFile, p.ImportedFixPlugin,
+        missingMasters = withLines && !p.IsTopicFile ? SafeMissing(svc, m, p) : new List<MissingMaster>(),
+        needsFix = p.NeedsFixPlugin,
+        fixes = p.IsTopicFile ? 0 : Phase1Service.FixEdits(p).Count,
+        topicLines = Phase1Service.TopicLines(p).Count,
+        topicFileName = Phase1Service.TopicFileName(p),
+        unreviewed = Phase1Service.UnreviewedFlags(p).Count,
+        playerNames = p.Lines.Count(l => l.IsPlayerName && l.Status != Phase1Status.Removed && !l.Excluded),
+        playerNamesExported = p.Lines.Count(l => l.IsPlayerName && l.PlayerNameExported && l.Status != Phase1Status.Removed && !l.Excluded),
+        lines = withLines ? p.Lines.OrderBy(l => l.Status == Phase1Status.Removed).ThenBy(l => l.Order).Select(l => Line1Dto(l, p.IsTopicFile)).ToList() : null,
+    };
 
     private static List<MissingMaster> SafeMissing(Phase1Service svc, Mod m, ModPlugin p)
     {
@@ -474,28 +577,46 @@ public sealed class Backend
         catch { return new(); }
     }
 
-    private static object Line1Dto(Phase1Line l) => new
+    private static object Line1Dto(Phase1Line l, bool topicFile) => new
     {
         key = l.Key,
-        formId = l.FormId.ToString("X8"),
-        record = l.Field == LineField.TopicText ? "DIAL FULL" : "INFO RNAM",
+        formId = topicFile ? "" : l.FormId.ToString("X8"),
+        record = topicFile ? "topic line" : l.Field == LineField.TopicText ? "DIAL FULL" : "INFO RNAM",
         l.EditorId, l.Original, l.Suggested, l.Final, kind = l.Kind.ToString(), l.UserEdited, l.Reviewed,
         l.HiddenByPrompts, l.IncludeAnyway, l.Excluded, status = l.Status.ToString(), l.PreviousFinal, l.PreviousOriginal,
-        l.Variants, needsOverride = l.NeedsOverride, flagged = l.IsFlagged,
+        l.Variants, needsOverride = !topicFile && l.NeedsOverride, flagged = l.IsFlagged,
+        isPlayerName = l.IsPlayerName, l.PlayerNameExported,
+        hasOtherAlias = ScriptRules.HasOtherAlias(l.Original),
         hasPlaceholder = l.Final != null && ScriptRules.HasPlaceholder(LineNaming.SpokenPart(l.Final)),
     };
+
+    /// <summary>The script's verdict on a text the user is typing (live validation in Phase 1).</summary>
+    private static object CheckText(string text)
+    {
+        var r = ScriptRules.Classify(text, null);
+        string? problem = r.Kind switch
+        {
+            LineKind.Broken when ScriptRules.HasPlayerAlias(text) && !ScriptRules.HasOtherAlias(text) => null,
+            LineKind.Broken when ScriptRules.HasOtherAlias(text) => "Still contains an alias placeholder, so it can't be voiced as is.",
+            LineKind.Broken => "The script would still mark this BROKEN (for example because of * or a misplaced < or parenthesis).",
+            LineKind.TooLong => $"Still {text.Trim().Length} characters: lines over {ScriptRules.MaxLength} crash DBVO.",
+            LineKind.Fixed => "The script would still reformat this: " + r.Final,
+            _ => null,
+        };
+        return new { kind = r.Kind.ToString(), length = text.Trim().Length, max = ScriptRules.MaxLength, problem, isPlayerName = ScriptRules.HasPlayerAlias(text) };
+    }
 
     private object ImportPlugins(JsonElement p)
     {
         var mod = LoadMod(S(p, "id"));
-        var paths = Paths(p, "paths").Where(f => new[] { ".esp", ".esm", ".esl" }.Contains(Path.GetExtension(f).ToLowerInvariant())).ToList();
-        if (paths.Count == 0) throw new InvalidOperationException("Choose .esp, .esm or .esl files.");
+        var paths = Paths(p, "paths").Where(f => new[] { ".esp", ".esm", ".esl", ".txt" }.Contains(Path.GetExtension(f).ToLowerInvariant())).ToList();
+        if (paths.Count == 0) throw new InvalidOperationException("Choose .esp, .esm or .esl plugins, or topic .txt files.");
         _lib.Backup("before-import-" + mod.Name, _settings.BackupsToKeep);
         var svc = new Phase1Service(_lib, Runtime());
         var reports = new List<object>();
         foreach (var f in paths)
         {
-            var r = svc.Import(mod, f);
+            var r = Path.GetExtension(f).Equals(".txt", StringComparison.OrdinalIgnoreCase) ? svc.ImportTopicFile(mod, f) : svc.Import(mod, f);
             reports.Add(new { plugin = r.Plugin.FileName, r.Added, r.Changed, r.Removed, r.Kept, r.UnresolvedStrings, missingMasters = r.MissingMasters });
         }
         return new { mod = ModDto(LoadMod(mod.Id)), reports };
@@ -526,7 +647,7 @@ public sealed class Backend
             default: throw new InvalidOperationException("Unknown line action.");
         }
         _lib.Save(mod);
-        return new { line = Line1Dto(line), plugin = new { plugin.FileName, needsFix = plugin.NeedsFixPlugin, topicLines = Phase1Service.TopicLines(plugin).Count, unreviewed = Phase1Service.UnreviewedFlags(plugin).Count } };
+        return new { line = Line1Dto(line, plugin.IsTopicFile), plugin = PluginDto(new Phase1Service(_lib, Runtime()), mod, plugin, false) };
     }
 
     private object BulkPhase1(JsonElement p)
@@ -749,9 +870,13 @@ public sealed class Backend
                 var patch = LoadPatch(id);
                 var voice = LoadVoice(patch.VoicePackId);
                 var svc = new Phase2Service(_lib, Runtime());
+                List<string> files;
+                await _gate.WaitAsync();
+                try { files = string.IsNullOrWhiteSpace(custom) ? WriteFixAndTopics(patch) : new List<string>(); }
+                finally { _gate.Release(); }
                 var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "fuz", g.Done, g.Total, g.Failed, g.Current }));
                 var rep = await svc.ExportFuzAsync(patch, voice, _lib.LoadMods(), Tools(), string.IsNullOrWhiteSpace(custom) ? null : custom, progress, ct);
-                Emit("jobDone", new { kind = "fuz", patchId = id, ok = rep.Failed == 0, report = rep, reminders = Phase2Service.EndOfPhaseReminders(patch, voice, _lib.LoadMods()) });
+                Emit("jobDone", new { kind = "fuz", patchId = id, ok = rep.Failed == 0, report = rep, files, reminders = Phase2Service.EndOfPhaseReminders(patch, voice, _lib.LoadMods()) });
             }
             catch (OperationCanceledException)
             {
@@ -771,34 +896,96 @@ public sealed class Backend
     }
 
     /// <summary>Write each mod's DBVO Fix plugin (when needed) to the WAV+LIP folder and the mod's final folder.</summary>
-    private object WritePatchFixPlugins(JsonElement p)
+    private object WritePatchFixPlugins(JsonElement p) => WriteFixAndTopics(LoadPatch(S(p, "id")));
+
+    /// <summary>
+    /// Write each mod's DBVO Fix plugin (when needed) and topic file to the patch's WAV + LIP folder and its
+    /// final mod folder. Runs automatically with "Copy WAV + LIP" and "Build .fuz".
+    /// </summary>
+    private List<string> WriteFixAndTopics(DbvoPatch patch)
     {
-        var patch = LoadPatch(S(p, "id"));
-        var voice = LoadVoice(patch.VoicePackId);
-        var svc2 = new Phase2Service(_lib, Runtime());
         var svc1 = new Phase1Service(_lib, Runtime());
+        var folders = new[] { patch.WavLipFolder, patch.FinalRoot }.Where(f => !string.IsNullOrWhiteSpace(f)).ToList();
+        if (folders.Count == 0) throw new InvalidOperationException("Set this patch's WAV + LIP folder or final folder first (Folders & options).");
         var written = new List<string>();
         foreach (var mod in _lib.LoadMods().Where(m => patch.ModIds.Contains(m.Id)))
-        {
-            var folders = new List<string>();
-            var wl = svc2.WavLipFolder(patch, voice);
-            if (!string.IsNullOrWhiteSpace(wl)) folders.Add(wl);
-            var root = svc2.FinalRoot(patch, voice);
-            if (!string.IsNullOrWhiteSpace(root)) folders.Add(ModRootFolder(root, svc2.FuzTemplate(patch, voice), mod.Name, voice, patch));
-            if (folders.Count == 0) throw new InvalidOperationException("Set the WAV + LIP folder or the final folder first.");
             foreach (var pl in mod.Plugins) written.AddRange(svc1.WriteOutputs(mod, pl, folders, folders[0]));
-        }
         return written;
     }
 
-    /// <summary>The mod's own root under the final folder: the template up to its "Sound" segment.</summary>
-    private static string ModRootFolder(string root, string template, string modName, VoicePack v, DbvoPatch p)
+    /// <summary>A new DBVO Patch: folders filled in from the voice pack's templates ({mod} = mod name).</summary>
+    private DbvoPatch CreatePatch(VoicePack voice, List<string> modIds, string name, List<string>? referenceIds)
     {
-        var expanded = Phase2Service.ExpandTemplate(template, modName, v, p);
-        var parts = expanded.Split('\\', '/');
-        int sound = Array.FindIndex(parts, s => s.Equals("Sound", StringComparison.OrdinalIgnoreCase));
-        var keep = sound >= 0 ? parts.Take(sound) : parts.Take(Math.Max(0, parts.Length - 1));
-        return Path.Combine(new[] { root }.Concat(keep).ToArray());
+        var mods = _lib.LoadMods().Where(x => modIds.Contains(x.Id)).ToList();
+        if (mods.Count == 0) throw new InvalidOperationException("Pick at least one mod.");
+        string modName = mods.Count == 1 ? mods[0].Name : (string.IsNullOrWhiteSpace(name) ? string.Join(" + ", mods.Select(x => x.Name)) : name.Trim());
+        var patch = new DbvoPatch
+        {
+            Name = string.IsNullOrWhiteSpace(name) ? modName : name.Trim(),
+            VoicePackId = voice.Id,
+            ModIds = modIds.ToList(),
+            ReferenceIds = referenceIds ?? _settings.DefaultReferenceIds.ToList(),
+        };
+        string Expand(string t) => string.IsNullOrWhiteSpace(t) ? "" : Phase2Service.ExpandTemplate(t, modName, voice, patch);
+        patch.WavLipFolder = Expand(voice.Destinations.WavLipFolder);
+        patch.FinalRoot = Expand(voice.Destinations.FinalRoot);
+        patch.FuzTemplate = string.IsNullOrWhiteSpace(voice.Destinations.FuzTemplate) ? @"Sound\DBVO\{packId}" : voice.Destinations.FuzTemplate;
+        _lib.Save(patch);
+        lock (_patches) _patches[patch.Id] = patch;
+        new Phase2Service(_lib, Runtime()).Sync(patch, voice, _lib.LoadMods());
+        _settings.LastVoicePackId = voice.Id;
+        _lib.Save(_settings);
+        return patch;
+    }
+
+    private void EnsureCategory(string category)
+    {
+        if (string.IsNullOrWhiteSpace(category)) return;
+        if (!_settings.Categories.Contains(category, StringComparer.OrdinalIgnoreCase))
+        {
+            _settings.Categories.Add(category.Trim());
+            _lib.Save(_settings);
+        }
+    }
+
+    private static string SafeFile(string s) => string.Concat(s.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)).Trim();
+
+    /// <summary>
+    /// Point the app at another library folder. An empty (or new) folder gets a copy of the current library;
+    /// a folder that already holds a library is used as is. The app restarts afterwards.
+    /// </summary>
+    private object ChangeLibrary(string target)
+    {
+        if (string.IsNullOrWhiteSpace(target)) throw new InvalidOperationException("Choose a folder.");
+        if (_jobCts != null) throw new InvalidOperationException("Stop the running job first.");
+        target = Path.GetFullPath(target);
+        if (string.Equals(target.TrimEnd('\\'), _lib.Root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) return new { changed = false };
+        bool existingLibrary = File.Exists(Path.Combine(target, "settings.json"));
+        if (!existingLibrary)
+        {
+            if (Directory.Exists(target) && Directory.EnumerateFileSystemEntries(target).Any())
+                throw new InvalidOperationException("That folder is not empty and holds no library. Choose an empty folder or an existing DBVO Studio library.");
+            CopyDirectory(_lib.Root, target);
+        }
+        var pointer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DBVOStudio", "library.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(pointer)!);
+        File.WriteAllText(pointer, target);
+        _owner.Dispatcher.BeginInvoke(() =>
+        {
+            var exe = Environment.ProcessPath;
+            if (exe != null) Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
+            Application.Current.Shutdown();
+        });
+        return new { changed = true, copied = !existingLibrary, path = target };
+    }
+
+    private static void CopyDirectory(string from, string to)
+    {
+        Directory.CreateDirectory(to);
+        foreach (var dir in Directory.EnumerateDirectories(from, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(Path.Combine(to, Path.GetRelativePath(from, dir)));
+        foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
+            File.Copy(file, Path.Combine(to, Path.GetRelativePath(from, file)), true);
     }
 
     private object Checks(string id)
@@ -822,6 +1009,7 @@ public sealed class Backend
             unreviewed,
             fuzFolders,
             wavLipFolder = svc.WavLipFolder(patch, voice),
+            finalRoot = root,
             tools = new
             {
                 ffmpeg = File.Exists(_settings.FfmpegPath), faceFx = File.Exists(_settings.FaceFxWrapperPath),

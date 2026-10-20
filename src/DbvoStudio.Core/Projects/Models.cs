@@ -26,6 +26,15 @@ public sealed class AppSettings
     public int BackupsToKeep { get; set; } = 30;
     public string? LastVoicePackId { get; set; }
     public Dictionary<string, string> Ui { get; set; } = new();
+    /// <summary>The global DBVO pronunciation dictionary, used by every voice pack. Voice pack entries win for the same word.</summary>
+    public List<Pronunciation> Pronunciations { get; set; } = new();
+    /// <summary>Mod categories for sorting DBVO Patches (user-editable, in display order).</summary>
+    public List<string> Categories { get; set; } = new(DefaultCategories);
+    /// <summary>Reference sets ticked by default in new DBVO Patches.</summary>
+    public List<string> DefaultReferenceIds { get; set; } = new();
+
+    public static readonly string[] DefaultCategories =
+        { "Main Game", "DLCs", "Large Quests", "Small Quests", "Followers", "Immersion", "NSFW", "Misc" };
 }
 
 /// <summary>A topic .txt of lines users already have (e.g. the base game pack). Matching lines are omitted.</summary>
@@ -87,14 +96,18 @@ public sealed class Pronunciation
     public bool CaseSensitive { get; set; }
 }
 
+/// <summary>
+/// Folder templates of a voice pack. New DBVO Patches get their own folders from these ({mod} = the mod name);
+/// each patch can then change its folders.
+/// </summary>
 public sealed class Destinations
 {
-    /// <summary>Where WAV + LIP files go (and a copy of each DBVO Fix plugin).</summary>
+    /// <summary>Template for a patch's WAV + LIP folder, e.g. C:\Dev\Vampira - {mod}\RawWav.</summary>
     public string WavLipFolder { get; set; } = "";
-    /// <summary>Root of the final mod / FOMOD folder (also receives the DBVO Fix plugins).</summary>
+    /// <summary>Template for a patch's final mod folder (receives the DBVO Fix plugin), e.g. C:\FOMOD\Vamp - {mod}.</summary>
     public string FinalRoot { get; set; } = "";
-    /// <summary>Folder template under the final root, e.g. "{mod}\Sound\DBVO\{packId}". The .fuz files land in the last folder.</summary>
-    public string FuzTemplate { get; set; } = @"{mod}\Sound\DBVO\{packId}";
+    /// <summary>Sub-folder under the final folder where .fuz files go.</summary>
+    public string FuzTemplate { get; set; } = @"Sound\DBVO\{packId}";
     public string ReleaseFolder { get; set; } = "";
 }
 
@@ -149,11 +162,16 @@ public sealed class Phase1Line
     /// <summary>Written-out alternatives for alias lines; each becomes its own topic line and file.</summary>
     public List<string> Variants { get; set; } = new();
     public int Order { get; set; }
+    /// <summary>Exported to the player-name topic file (Downloads).</summary>
+    public bool PlayerNameExported { get; set; }
 
     [JsonIgnore] public string Key => $"{FormId:X8}:{(Field == LineField.TopicText ? "FULL" : "RNAM")}";
 
+    /// <summary>Contains &lt;Alias=Player&gt; (any case): voiced through separate player-name patches, not here.</summary>
+    [JsonIgnore] public bool IsPlayerName => ScriptRules.HasPlayerAlias(Final ?? Original);
+
     [JsonIgnore]
-    public bool IsFlagged => Kind is LineKind.Broken or LineKind.TooLong;
+    public bool IsFlagged => (Kind == LineKind.Broken && !IsPlayerName) || Kind == LineKind.TooLong;
 
     /// <summary>Text written to the DBVO Fix plugin when it differs from the original.</summary>
     [JsonIgnore]
@@ -173,6 +191,10 @@ public sealed class Phase1Line
 public sealed class ModPlugin
 {
     public string FileName { get; set; } = "";
+    /// <summary>A topic .txt instead of a plugin: lines are checked, but no DBVO Fix plugin can be made.</summary>
+    public bool IsTopicFile { get; set; }
+    /// <summary>Name of an imported earlier DBVO Fix plugin, if any.</summary>
+    public string? ImportedFixPlugin { get; set; }
     /// <summary>Copy of the plugin inside the library.</summary>
     public string StoredFile { get; set; } = "";
     public List<string> Masters { get; set; } = new();
@@ -183,7 +205,7 @@ public sealed class ModPlugin
     public List<string> Notices { get; set; } = new();
 
     [JsonIgnore] public string FixFileName => FixPluginWriter.FixFileName(FileName, FixPrefix);
-    [JsonIgnore] public bool NeedsFixPlugin => Lines.Any(l => l.NeedsOverride);
+    [JsonIgnore] public bool NeedsFixPlugin => !IsTopicFile && Lines.Any(l => l.NeedsOverride);
 }
 
 /// <summary>A mod: Phase 1 work, shared by every voice pack.</summary>
@@ -193,6 +215,8 @@ public sealed class Mod
     public string Name { get; set; } = "";
     public string Version { get; set; } = "";
     public string NexusUrl { get; set; } = "";
+    /// <summary>Category for sorting DBVO Patches (e.g. Followers). Not used in folder paths.</summary>
+    public string Category { get; set; } = "Misc";
     public List<ModPlugin> Plugins { get; set; } = new();
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
@@ -279,6 +303,8 @@ public sealed class DbvoPatch
     public string WavLipFolder { get; set; } = "";
     public string FinalRoot { get; set; } = "";
     public string FuzTemplate { get; set; } = "";
+    public bool OverwriteWavLip { get; set; }
+    public bool OverwriteFuz { get; set; }
     public List<Phase2Line> Lines { get; set; } = new();
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;

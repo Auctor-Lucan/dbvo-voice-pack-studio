@@ -41,14 +41,16 @@ public sealed class Phase2Service
 
     public string TakesFolder(DbvoPatch p) => Path.Combine(_lib.PatchFolder(p.Id), "takes");
 
-    public string WavLipFolder(DbvoPatch p, VoicePack v) =>
-        !string.IsNullOrWhiteSpace(p.WavLipFolder) ? p.WavLipFolder : v.Destinations.WavLipFolder;
+    /// <summary>The patch's own WAV + LIP folder (filled from the voice pack template when the patch was made).</summary>
+    public string WavLipFolder(DbvoPatch p, VoicePack v) => p.WavLipFolder;
 
-    public string FinalRoot(DbvoPatch p, VoicePack v) =>
-        !string.IsNullOrWhiteSpace(p.FinalRoot) ? p.FinalRoot : v.Destinations.FinalRoot;
+    /// <summary>The patch's final mod folder: receives the DBVO Fix plugin; .fuz files go below it.</summary>
+    public string FinalRoot(DbvoPatch p, VoicePack v) => p.FinalRoot;
 
+    /// <summary>Sub-folder for .fuz files under the final folder, e.g. Sound\DBVO\{packId}.</summary>
     public string FuzTemplate(DbvoPatch p, VoicePack v) =>
-        !string.IsNullOrWhiteSpace(p.FuzTemplate) ? p.FuzTemplate : v.Destinations.FuzTemplate;
+        !string.IsNullOrWhiteSpace(p.FuzTemplate) ? p.FuzTemplate
+        : !string.IsNullOrWhiteSpace(v.Destinations.FuzTemplate) ? v.Destinations.FuzTemplate : @"Sound\DBVO\{packId}";
 
     /// <summary>Expand a folder template: {mod}, {packId}, {voicePack}, {patch}.</summary>
     public static string ExpandTemplate(string template, string modName, VoicePack v, DbvoPatch p) =>
@@ -150,6 +152,18 @@ public sealed class Phase2Service
             .ToList();
     }
 
+    /// <summary>
+    /// The global DBVO dictionary plus the voice pack's own; for the same word the voice pack wins.
+    /// Longer words come first, so "Alduin's" is handled before "Alduin".
+    /// </summary>
+    public static List<Pronunciation> MergePronunciations(IEnumerable<Pronunciation> global, IEnumerable<Pronunciation> voice)
+    {
+        var map = new Dictionary<string, Pronunciation>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in global.Where(p => !string.IsNullOrWhiteSpace(p.Word))) map[p.Word.Trim()] = p;
+        foreach (var p in voice.Where(p => !string.IsNullOrWhiteSpace(p.Word))) map[p.Word.Trim()] = p;
+        return map.Values.OrderByDescending(p => p.Word.Trim().Length).ToList();
+    }
+
     /// <summary>Apply the pronunciation dictionary (local layer) to the spoken text before sending.</summary>
     public static string ApplyPronunciations(string text, IEnumerable<Pronunciation> entries, string modelId)
     {
@@ -181,6 +195,7 @@ public sealed class Phase2Service
         if (string.IsNullOrWhiteSpace(voice.Eleven.VoiceId)) throw new InvalidOperationException("Pick a voice for this voice pack.");
 
         var es = voice.Eleven.Clone();
+        var pronunciations = MergePronunciations(_settings.Pronunciations, voice.Pronunciations);
         using var client = new ElevenLabsClient(_settings.ElevenLabsApiKey);
         var limiter = new AdaptiveLimiter(es.Concurrency);
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
@@ -197,7 +212,7 @@ public sealed class Phase2Service
             Take? newTake = null;
             try
             {
-                var text = ApplyPronunciations(line.Spoken, voice.Pronunciations, es.ModelId);
+                var text = ApplyPronunciations(line.Spoken, pronunciations, es.ModelId);
                 var req = new TtsRequest
                 {
                     VoiceId = es.VoiceId,
@@ -314,7 +329,7 @@ public sealed class Phase2Service
                 foreach (var (srcRel, ext) in new[] { (t.WavPath, ".wav"), (t.LipPath, ".lip") })
                 {
                     var target = Path.Combine(folder, stem + ext);
-                    if (File.Exists(target) && !voice.OverwriteWavLip) continue;
+                    if (File.Exists(target) && !patch.OverwriteWavLip) continue;
                     FileLinks.LinkOrCopy(Path.Combine(_lib.PatchFolder(patch.Id), srcRel), target, true);
                     any = true;
                 }
@@ -356,7 +371,7 @@ public sealed class Phase2Service
                     : line.Sources.Select(s => mods.FirstOrDefault(m => m.Id == s.ModId)?.Name ?? "Mod").Distinct()
                         .Select(name => Path.Combine(root, ExpandTemplate(template, name, voice, patch))).ToList();
                 var targets = folders.Select(f => Path.Combine(f, stem + ".fuz")).ToList();
-                var needed = targets.Where(t => voice.OverwriteFuz || !File.Exists(t)).ToList();
+                var needed = targets.Where(t => patch.OverwriteFuz || !File.Exists(t)).ToList();
                 if (needed.Count == 0)
                 {
                     lock (rep) rep.Skipped++;
