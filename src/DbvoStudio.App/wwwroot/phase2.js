@@ -1,5 +1,5 @@
-// Phase 2: DBVO Patches (voice pack x mods) — generation grid, takes, export.
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, switchEl, segmented, popupMenu } from './lib.js';
+// Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
+import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, switchEl, segmented, popupMenu, columnsMenu, tip } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Text changed since take' };
@@ -8,26 +8,39 @@ const LANGS = [['', 'Auto'], ['en', 'en · English'], ['de', 'de · German'], ['
   ['pt', 'pt · Portuguese'], ['pl', 'pl · Polish'], ['ru', 'ru · Russian'], ['ja', 'ja · Japanese'], ['zh', 'zh · Chinese'], ['ko', 'ko · Korean'],
   ['nl', 'nl · Dutch'], ['sv', 'sv · Swedish'], ['cs', 'cs · Czech'], ['tr', 'tr · Turkish'], ['uk', 'uk · Ukrainian'], ['hu', 'hu · Hungarian']];
 
+const ENGINES = [['elevenlabs', 'ElevenLabs'], ['voxcpm', 'VoxCPM (local)'], ['omnivoice', 'OmniVoice (local)']];
+
 const pct = (p) => { const n = p.total - p.omitted; return n ? Math.round((100 * p.generated) / n) : 0; };
 
-// ------------------------------------------------------------------ list
+export function voiceChip(name, color) {
+  const c = h('span.voice-chip', { title: 'Voice pack' }, name || '—');
+  if (color) c.style.setProperty('--vc', color);
+  return c;
+}
 
-export async function patchesView() {
+// ------------------------------------------------------------------ list (DBVO Patches, or Voice Changer patches)
+
+export async function patchesView(kind = 'tts') {
   const s = await refreshState();
+  const vc = kind === 'vc';
+  const patches = s.patches.filter((p) => (p.kind || 'tts') === kind);
   const view = h('div.view');
   view.append(h('div.view-head',
-    h('h1', 'DBVO Patches'),
-    h('span.sub', 'Phase 2 · one voice pack × one or more mods. Drag a patch onto another header to change its category.'),
+    h('h1', vc ? 'Voice Changer' : 'DBVO Patches'),
+    h('span.sub', vc
+      ? 'Other Tools · revoice WAV files another voice pack already has (ElevenLabs speech-to-speech). Works like Phase 2, without DBVO Fix plugins or topic files.'
+      : 'One voice pack × one or more mods. Drag a patch onto another header to change its category.'),
     h('div.spacer'),
-    h('button.btn', { onclick: addCategory }, '+ Category'),
-    h('button.btn.primary', { onclick: () => newPatch() }, '+ New DBVO Patch')));
+    vc ? null : h('button.btn', { onclick: addCategory }, '+ Category'),
+    h('button.btn.primary', { onclick: () => newPatch(kind) }, vc ? '+ New Voice Changer patch' : '+ New DBVO Patch')));
   const body = h('div.view-body');
   view.append(body);
-  if (!s.patches.length) {
-    body.append(h('div.empty', h('h2', 'No DBVO Patches yet'),
-      h('div', 'Open a mod in Phase 1 and click "Continue to Phase 2", or create one here.'),
+  if (!patches.length) {
+    body.append(h('div.empty', h('h2', vc ? 'No Voice Changer patches yet' : 'No DBVO Patches yet'),
+      h('div', vc ? 'Pick a Phase 1 mod, the voice pack to make, and the folder with the WAV files of another voice pack for the same mod.'
+        : 'Open a mod in Phase 1 and click "Continue to Phase 2", or create one here.'),
       h('div', { style: { marginTop: '14px' } }, s.voicePacks.length
-        ? h('button.btn.primary', { onclick: () => newPatch() }, '+ New DBVO Patch')
+        ? h('button.btn.primary', { onclick: () => newPatch(kind) }, vc ? '+ New Voice Changer patch' : '+ New DBVO Patch')
         : h('button.btn.primary', { onclick: () => go('settings', { tab: 'voices', id: 'new' }) }, '+ New voice pack'))));
     return view;
   }
@@ -39,46 +52,55 @@ export async function patchesView() {
   body.append(h('div.row', { style: { marginBottom: '12px' } }, q, voiceFilter), listEl);
   let dragId = null;
 
+  const card = (p) => {
+    const n = p.total - p.omitted;
+    const el = h('div.pcard', { draggable: !vc, onclick: () => go('patch', { id: p.id }) },
+      h('div.row', h('span.title.ellipsis.grow', p.name), voiceChip(p.voicePack, p.voiceColor)),
+      h('div.row', { title: 'Phase 1: flagged lines (BROKEN LINE / TOO LONG WILL CTD) not yet reviewed' },
+        h('span.faint', 'Phase 1'),
+        p.unreviewed ? h('span.badge.b-broken', `${p.unreviewed} flagged not reviewed`) : h('span.badge.b-valid', 'all flagged lines reviewed')),
+      h('div.row', { title: 'Phase 2: lines with a take' },
+        h('span.faint', 'Phase 2'),
+        h('div.grow', h('div.bar' + (n && p.generated >= n ? '.ok' : ''), h('div.bar-fill', { style: { width: pct(p) + '%' } }))),
+        h('span.mono', `${p.generated} / ${n}`)),
+      h('div.stat-row',
+        vc ? h('span', h('b', p.secondsLeft), ' line(s) left to convert (billed by audio length)')
+          : h('span', { title: 'Characters of spoken text still to generate; ElevenLabs bills about one credit per character' }, h('b', (p.charsLeft || 0).toLocaleString()), ' characters left ≈ credits')),
+      p.warnings && p.warnings.length ? h('div.warns', p.warnings.map((w) => h('span.badge.b-toolong', '⚠ ' + w))) : null);
+    if (!vc) {
+      el.addEventListener('dragstart', (e) => { dragId = p.id; el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+      el.addEventListener('dragend', () => { dragId = null; el.classList.remove('dragging'); });
+    }
+    return el;
+  };
+
   const render = () => {
     clear(listEl);
     const f = q.value.toLowerCase();
-    const cats = [...s.settings.categories, ...new Set(s.patches.map((p) => p.category).filter((c) => !s.settings.categories.includes(c)))];
+    const cats = [...s.settings.categories, ...new Set(patches.map((p) => p.category).filter((c) => !s.settings.categories.includes(c)))];
     for (const cat of cats) {
-      const list = s.patches.filter((p) => p.category === cat && (!voiceFilter.value || p.voicePackId === voiceFilter.value) && (!f || p.name.toLowerCase().includes(f) || p.voicePack.toLowerCase().includes(f)));
+      const list = patches.filter((p) => p.category === cat && (!voiceFilter.value || p.voicePackId === voiceFilter.value) && (!f || p.name.toLowerCase().includes(f) || p.voicePack.toLowerCase().includes(f)));
+      if (vc && !list.length) continue;
       const isOpen = !collapsed[cat];
       const sec = h('div.cat',
         h('div.cat-head', { onclick: () => { collapsed[cat] = isOpen; store.set('cats-collapsed', collapsed); render(); } },
           h('span.caret', isOpen ? '▾' : '▸'), h('h3', cat), h('span.faint', list.length || 'empty · drop a patch here')),
-        isOpen ? list.map((p) => {
-          const row = h('div.prow', { draggable: true, onclick: () => go('patch', { id: p.id }) },
-            h('span.grip', { title: 'Drag to another category' }, '⋮⋮'),
-            h('div.ellipsis', h('b', p.name)),
-            h('div.dim.ellipsis', p.voicePack),
-            h('div.row', h('div.grow', h('div.bar', h('div.bar-fill', { style: { width: pct(p) + '%' } }))), h('span.faint.mono', `${p.generated}/${p.total - p.omitted}`)),
-            h('div.row', { style: { justifyContent: 'flex-end' } },
-              p.failed ? h('span.badge.b-broken', `${p.failed} failed`) : null,
-              p.omitted ? h('span.faint', `${p.omitted} omitted`) : null,
-              p.total && p.generated >= p.total - p.omitted ? h('span.badge.b-valid', 'done') : null));
-          row.addEventListener('dragstart', (e) => { dragId = p.id; row.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
-          row.addEventListener('dragend', () => { dragId = null; row.classList.remove('dragging'); });
-          return row;
-        }) : null,
-        null);
-      sec.addEventListener('dragover', (e) => { if (dragId) { e.preventDefault(); sec.classList.add('drop-over'); } });
-      sec.addEventListener('dragleave', (e) => { if (!sec.contains(e.relatedTarget)) sec.classList.remove('drop-over'); });
-      sec.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        sec.classList.remove('drop-over');
-        const p = s.patches.find((x) => x.id === dragId);
-        if (!p || p.category === cat) return;
-        try {
-          for (const mid of p.modIds) await rpc('mod.setCategory', { id: mid, category: cat });
-          await refreshState();
-          s.patches = app.state.patches;
-          render();
-          toast(`Moved to ${cat}. The mod's category changed too (it is shared by all its patches).`);
-        } catch (err) { fail(err); }
-      });
+        isOpen && list.length ? h('div.cards2', list.map(card)) : null);
+      if (!vc) {
+        sec.addEventListener('dragover', (e) => { if (dragId) { e.preventDefault(); sec.classList.add('drop-over'); } });
+        sec.addEventListener('dragleave', (e) => { if (!sec.contains(e.relatedTarget)) sec.classList.remove('drop-over'); });
+        sec.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          sec.classList.remove('drop-over');
+          const p = patches.find((x) => x.id === dragId);
+          if (!p || p.category === cat) return;
+          try {
+            for (const mid of p.modIds) await rpc('mod.setCategory', { id: mid, category: cat });
+            go('patches');
+            toast(`Moved to ${cat}. The mod's category changed too (it is shared by all its patches).`);
+          } catch (err) { fail(err); }
+        });
+      }
       listEl.append(sec);
     }
   };
@@ -97,25 +119,33 @@ async function addCategory() {
   } catch (e) { fail(e); }
 }
 
-async function newPatch() {
+async function newPatch(kind = 'tts') {
   const s = await refreshState();
+  const vc = kind === 'vc';
   if (!s.voicePacks.length) { toast('Create a voice pack first.', true); go('settings', { tab: 'voices', id: 'new' }); return; }
   if (!s.mods.length) { toast('Create a mod in Phase 1 first.', true); go('mods'); return; }
-  const name = h('input', { type: 'text', placeholder: 'leave empty for "<voice pack> – <mod>"' });
+  const name = h('input', { type: 'text', placeholder: vc ? 'leave empty for "<mod> (Voice Changer)"' : 'leave empty for the mod\'s name' });
   const voice = h('select', s.voicePacks.map((v) => h('option', { value: v.id, selected: v.id === s.settings.lastVoicePackId }, v.name)));
   const modBoxes = s.mods.map((m) => ({ m, box: h('input', { type: 'checkbox' }) }));
-  const ok = await modal('New DBVO Patch', [
-    h('div.col', h('div.field-label', 'Voice pack'), voice),
-    h('div.col', h('div.field-label', 'Mods to voice (several = an all-in-one patch)'), h('div.box', { style: { maxHeight: '240px', overflow: 'auto' } },
+  const sources = [];
+  const srcList = h('div.col');
+  const renderSrc = () => clear(srcList).append(sources.length ? sources.map((f, i) => h('div.row', h('span.mono.grow.ellipsis', f), h('button.icon-btn', { onclick: () => { sources.splice(i, 1); renderSrc(); } }, '×'))) : h('div.faint', 'No folder yet.'));
+  renderSrc();
+  const ok = await modal(vc ? 'New Voice Changer patch' : 'New DBVO Patch', [
+    h('div.col', h('div.field-label', vc ? 'Voice pack to make (the target voice)' : 'Voice pack'), voice),
+    h('div.col', h('div.field-label', vc ? 'Phase 1 mod(s) the source WAV files belong to' : 'Mods to voice (several = an all-in-one patch)'), h('div.box', { style: { maxHeight: '240px', overflow: 'auto' } },
       modBoxes.map(({ m, box }) => h('label.row', box, m.name, h('span.faint', m.category))))),
+    vc ? h('div.col', h('div.field-label', 'Source WAV folder(s) from another voice pack'), srcList,
+      h('div.row', h('button.btn.sm', { onclick: async () => { const f = await rpc('pick.folder', { title: 'Folder with the source voice pack\'s WAV files' }); if (f) { sources.push(f); renderSrc(); } } }, '+ Add folder')),
+      h('div.faint', 'Searched with sub-folders. Files are matched to lines by name, in both Legacy and DBVO 2.0 naming.')) : null,
     h('div.col', h('div.field-label', 'Name (optional)'), name),
-    h('div.faint', 'Folders and omit lists come from the voice pack and Settings; change them per patch under "Folders & options".'),
+    h('div.faint', 'Folders come from the voice pack\'s defaults; change them per patch under "Folders & options".'),
   ], [{ label: 'Cancel', value: false }, { label: 'Create', primary: true, value: true }]);
   if (!ok) return;
   const modIds = modBoxes.filter((x) => x.box.checked).map((x) => x.m.id);
   if (!modIds.length) { toast('Pick at least one mod.', true); return; }
   try {
-    const p = await rpc('patch.create', { name: name.value, voicePackId: voice.value, modIds });
+    const p = await rpc('patch.create', { name: name.value, voicePackId: voice.value, modIds, kind, sourceFolders: sources });
     go('patch', { id: p.id });
   } catch (e) { fail(e); }
 }
@@ -130,16 +160,18 @@ export async function patchView(id) {
   } catch {
     patch = await rpc('patch.get', { id });
   }
+  const vc = patch.kind === 'vc';
   let voice = app.state.voicePacks.find((v) => v.id === patch.voicePackId);
   if (!voice) throw new Error('This patch\'s voice pack was deleted.');
   const ui = store.get('patch:' + id, { filter: 'all' });
   let filter = ui.filter || 'all';
   let search = '';
   let focusedId = null;
-  let voices = [], models = [];
+  let voices = [], models = [], localVoices = [];
   let showInsp = store.get('insp2', true);
   let lastEdit = null; // { el, line } — the last spoken-text box the user was in
   const audio = new Audio();
+  const engine = () => (vc ? 'sts' : voice.engine || 'elevenlabs');
 
   const view = h('div.view');
   const head = h('div.view-head');
@@ -158,26 +190,30 @@ export async function patchView(id) {
   const reindex = () => { index = new Map(patch.lines.map((l) => [l.lineId, l])); };
   reindex();
 
+  const statusDot = (l) => h('span.dot.' + (l.omitted ? 'Omitted' : l.stale && l.status === 'Generated' ? 'Stale' : l.status),
+    { title: l.omitted ? `Omitted — already in ${l.omittedBy}` : (STATUS_TEXT[l.status] || l.status) + (l.lastError ? ': ' + l.lastError : '') });
+
   const grid = new VGrid(left, {
-    storageKey: 'phase2',
+    storageKey: vc ? 'vc' : 'phase2',
     rowKey: (l) => l.lineId,
-    rowClass: (l) => (l.omitted ? 'muted' : ''),
+    rowClass: (l) => (l.omitted || (vc && !l.hasSource) ? 'muted' : ''),
     onRowClick: (l) => { focusedId = l.lineId; renderInspector(); },
     onRowDblClick: (l) => play(l),
     columns: [
       { id: 'sel', title: '', width: 32, resizable: false, render: (l) => grid.checkbox(l) },
-      { id: 'st', title: '', width: 26, resizable: false, render: (l) => h('span.dot.' + (l.omitted ? 'Omitted' : l.stale && l.status === 'Generated' ? 'Stale' : l.status), { title: l.omitted ? `Omitted — already in ${l.omittedBy}` : (STATUS_TEXT[l.status] || l.status) + (l.lastError ? ': ' + l.lastError : '') }) },
-      { id: 'orig', title: 'Original line', width: 220, render: (l) => h('span.dim', { title: l.originalLine }, l.originalLine) },
-      { id: 'final', title: 'In-game line (filename)', flex: 1, width: 260, render: (l) => h('span', { title: `${l.finalLine}\nFile: ${l.stem}` },
-        l.editedInPhase1 ? h('span.mark.info', { title: 'Edited in Phase 1' }, 'P1 ') : null, l.finalLine) },
-      { id: 'spoken', title: 'Spoken text (tags anywhere)', flex: 1.3, width: 320, render: (l) => spokenCell(l) },
-      { id: 'take', title: 'Take', width: 70, render: (l) => l.takes.length > 1
+      { id: 'mark', title: 'Marked', width: 62, resizable: false, render: (l) => h('button.mark-btn' + (l.marked ? '.on' : ''), { title: l.marked ? 'Marked: click to unmark' : 'Mark this line (kept until you unmark it; "Generate · Marked" uses it)', onclick: () => upd(l, 'mark', !l.marked) }, '★') },
+      { id: 'orig', title: 'Original mod line', width: 240, render: (l) => h('span.dim', { title: l.originalLine }, l.originalLine) },
+      { id: 'file', title: 'Filename', flex: 1, width: 240, render: (l) => h('span.faint.mono', { title: `In-game line: ${l.finalLine}\nFile: ${l.stem}.wav / .lip / .fuz` }, l.editedInPhase1 ? h('span.mark.info', { title: 'Edited in Phase 1' }, 'P1 ') : null, l.stem + '.wav') },
+      vc ? { id: 'src', title: 'Source', width: 80, render: (l) => l.hasSource ? h('span.row', h('button.icon-btn', { title: 'Play the source WAV: ' + l.sourceWav, onclick: () => playSource(l) }, '▶'), h('span.badge.b-valid', '✓')) : h('span.badge.b-broken', { title: 'No WAV with this line\'s name in the source folders' }, 'missing') } : null,
+      { id: 'spoken', title: vc ? 'Text for the LIP' : 'Spoken text (tags anywhere)', flex: 1.3, width: 320, render: (l) => spokenCell(l) },
+      { id: 'restore', title: '', width: 34, resizable: false, render: (l) => l.spokenEdited ? h('button.icon-btn', { title: 'Restore the in-game line: ' + l.finalLine, onclick: () => upd(l, 'resetSpoken') }, '↺') : null },
+      { id: 'take', title: 'Take', width: 92, render: (l) => h('span.row', statusDot(l), l.takes.length > 1
         ? h('select', { style: { padding: '1px 2px' }, onchange: (e) => upd(l, 'selectTake', e.target.value) }, l.takes.map((t) => h('option', { value: t.id, selected: t.id === l.selectedTakeId }, '#' + t.slot)))
-        : h('span.faint', l.takes.length ? '#' + l.takes[0].slot : '—') },
-      { id: 'act', title: '', width: 70, resizable: false, render: (l) => h('span',
-        h('button.icon-btn', { title: 'Play (or double-click the row)', disabled: !l.selectedTakeId, onclick: () => play(l) }, '▶'),
-        h('button.icon-btn', { title: 'Generate a new take', disabled: l.omitted || !!app.job, onclick: () => generate('selected', [l.lineId]) }, '↻')) },
-    ],
+        : h('span.faint', l.takes.length ? '#' + l.takes[0].slot : '—')) },
+      { id: 'act', title: '', width: 84, resizable: false, render: (l) => h('span.row',
+        h('button.icon-btn.big', { title: 'Play (or double-click the row)', disabled: !l.selectedTakeId, onclick: () => play(l) }, '▶'),
+        h('button.icon-btn.big', { title: vc ? 'Convert again (new take)' : 'Generate a new take', disabled: l.omitted || !!app.job || (vc && !l.hasSource), onclick: () => generate('selected', [l.lineId]) }, '↻')) },
+    ].filter(Boolean),
   });
   grid.el.addEventListener('selection', () => renderActions());
 
@@ -212,6 +248,15 @@ export async function patchView(id) {
     audio.play().catch(fail);
   }
 
+  async function playSource(l) {
+    try {
+      const url = await rpc('file.dataUrl', { path: l.sourceWav });
+      if (!url) { toast('The source file is gone.', true); return; }
+      audio.src = url;
+      audio.play().catch(fail);
+    } catch (e) { fail(e); }
+  }
+
   async function upd(l, action, value) {
     try {
       replaceLine(await rpc('line2.update', { id, lineId: l.lineId, action, value }));
@@ -231,7 +276,7 @@ export async function patchView(id) {
     renderActions();
   }
 
-  // ---- toolbar: ElevenLabs settings of the voice pack, saved on every change
+  // ---- toolbar: the voice pack's engine settings, saved on every change
   const saveVoice = debounce(async () => {
     try {
       voice = await rpc('voice.save', { voice });
@@ -240,67 +285,104 @@ export async function patchView(id) {
     } catch (e) { fail(e); }
   }, 300);
 
-  function setE(key, value) {
-    if (voice.settingsLocked) { toast('This voice pack\'s settings are locked. Unlock them in Settings → Voice packs.', true); renderToolbar(); return; }
-    voice.eleven[key] = value;
+  function setIn(obj, key, value) {
+    if (voice.settingsLocked) { toast('This voice pack\'s settings are locked. Unlock them in Global Settings → Voice packs.', true); renderToolbar(); return; }
+    obj[key] = value;
     saveVoice();
     renderToolbar();
   }
+  const setE = (k, v) => setIn(voice.eleven, k, v);
 
   const isTagModel = (m) => /^eleven_v[34]/i.test(m || '');
   const modelInfo = (m) => models.find((x) => x.modelId === m) || {};
   const grp = (label, ...kids) => h('div.tgroup', h('label', label), h('div.row', ...kids));
+  const slider = (obj, key, min, max, step, label, locked) => {
+    const val = h('span.mono.dim', { style: { width: '34px' } }, Number(obj[key]).toFixed(2));
+    const r = h('input', { type: 'range', min, max, step, value: obj[key], disabled: locked, style: { width: '96px' } });
+    r.addEventListener('input', () => { val.textContent = Number(r.value).toFixed(2); });
+    r.addEventListener('change', () => setIn(obj, key, Number(r.value)));
+    return grp(label, r, val);
+  };
+  const numIn = (obj, key, label, opts = {}) => {
+    const i = h('input', { type: 'number', value: obj[key] ?? '', placeholder: opts.placeholder || '', step: opts.step || 'any', min: opts.min, disabled: voice.settingsLocked, style: { width: opts.width || '76px' }, title: opts.title || '' });
+    i.addEventListener('change', () => setIn(obj, key, i.value === '' ? (opts.nullable ? null : 0) : Number(i.value)));
+    return grp(label, i);
+  };
+  const voicePicker = (obj, idKey, nameKey, list, label = 'Voice') => {
+    const sel = h('select', { disabled: voice.settingsLocked, style: { maxWidth: '200px' }, onchange: (ev) => { const v = list.find((x) => x.voiceId === ev.target.value); if (nameKey) obj[nameKey] = v ? v.name : ''; setIn(obj, idKey, ev.target.value); } },
+      h('option', { value: '' }, list.length ? '— pick a voice —' : ((nameKey && obj[nameKey]) || 'Loading voices…')),
+      list.map((v) => h('option', { value: v.voiceId, selected: v.voiceId === obj[idKey] }, v.name)));
+    if (obj[idKey] && !list.some((v) => v.voiceId === obj[idKey])) sel.append(h('option', { value: obj[idKey], selected: true }, (nameKey && obj[nameKey]) || obj[idKey]));
+    return grp(label, sel, h('button.icon-btn', { title: 'Reload voices and models', onclick: () => loadEngine(true) }, '⟳'));
+  };
 
   function renderToolbar() {
-    const e = voice.eleven;
     const locked = voice.settingsLocked;
-    const tag = isTagModel(e.modelId);
-    const mi = modelInfo(e.modelId);
-    const supportsStyle = mi.canUseStyle != null ? mi.canUseStyle && !tag : !tag;
-    const supportsBoost = mi.canUseSpeakerBoost != null ? mi.canUseSpeakerBoost && !tag : !tag;
-    const langOk = !/multilingual_v2|monolingual_v1|english_v1/.test(e.modelId);
-    const slider = (key, min, max, step, label) => {
-      const val = h('span.mono.dim', { style: { width: '34px' } }, Number(e[key]).toFixed(2));
-      const r = h('input', { type: 'range', min, max, step, value: e[key], disabled: locked, style: { width: '96px' } });
-      r.addEventListener('input', () => { val.textContent = Number(r.value).toFixed(2); });
-      r.addEventListener('change', () => setE(key, Number(r.value)));
-      return grp(label, r, val);
-    };
-    const voiceSel = h('select', { disabled: locked, style: { maxWidth: '190px' }, onchange: (ev) => { const v = voices.find((x) => x.voiceId === ev.target.value); voice.eleven.voiceName = v ? v.name : ''; setE('voiceId', ev.target.value); } },
-      h('option', { value: '' }, voices.length ? '— pick a voice —' : (e.voiceName || 'Loading voices…')),
-      voices.map((v) => h('option', { value: v.voiceId, selected: v.voiceId === e.voiceId }, v.name)));
-    if (e.voiceId && !voices.some((v) => v.voiceId === e.voiceId)) voiceSel.append(h('option', { value: e.voiceId, selected: true }, e.voiceName || e.voiceId));
-    const modelSel = h('select', { disabled: locked, onchange: (ev) => setE('modelId', ev.target.value) },
-      (models.length ? models : [{ modelId: e.modelId }]).map((m) => h('option', { value: m.modelId, selected: m.modelId === e.modelId }, m.modelId + (isTagModel(m.modelId) ? ' · tags' : ''))));
-    const stabVal = e.stability < 0.25 ? 0 : e.stability < 0.75 ? 0.5 : 1;
-    const stability = tag
-      ? grp('Stability', segmented([[0, 'Creative'], [0.5, 'Natural'], [1, 'Robust']], stabVal, (v) => setE('stability', Number(v)), { disabled: locked }))
-      : slider('stability', 0, 1, 0.01, 'Stability');
-    const fmt = h('select', { disabled: locked, onchange: (ev) => setE('outputFormat', ev.target.value) },
-      [['mp3_44100_128', 'MP3 44.1k 128'], ['mp3_44100_192', 'MP3 44.1k 192'], ['pcm_44100', 'PCM 44.1k (lossless)']].map(([v, t]) => h('option', { value: v, selected: v === e.outputFormat }, t)));
-    const seed = h('input', { type: 'number', value: e.seed ?? '', placeholder: 'random', disabled: locked, style: { width: '92px' }, title: 'Same seed + same text + same settings ≈ same take. Empty = random.' });
-    seed.addEventListener('change', () => setE('seed', seed.value === '' ? null : Number(seed.value)));
-    const conc = h('input', { type: 'number', min: 1, max: 50, value: e.concurrency, disabled: locked, style: { width: '58px' }, title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit; the app slows down automatically on "too many requests".' });
-    conc.addEventListener('change', () => setE('concurrency', Math.max(1, Number(conc.value) || 1)));
-    const lang = h('select', { disabled: locked || !langOk, title: langOk ? 'Force the language (ISO 639-1). Auto lets the model detect it.' : 'This model does not accept a language code.', onchange: (ev) => setE('languageCode', ev.target.value) },
-      LANGS.map(([v, t]) => h('option', { value: v, selected: v === (e.languageCode || '') }, t)));
-    const norm = h('select', { disabled: locked, title: 'Text normalization: whether ElevenLabs writes out numbers, dates and abbreviations before speaking ("1st" → "first", "Dr." → "Doctor"). Auto lets the model decide; On is safer for numbers; Off keeps the text exactly as written.', onchange: (ev) => setE('textNormalization', ev.target.value) },
-      [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']].map(([v, t]) => h('option', { value: v, selected: v === e.textNormalization }, t)));
-
-    clear(tb).append(
-      grp('Voice', voiceSel, h('button.icon-btn', { title: 'Reload voices and models', onclick: () => loadEleven(true) }, '⟳')),
-      grp('Model', modelSel),
-      stability,
-      slider('similarity', 0, 1, 0.01, 'Similarity'),
-      supportsStyle ? slider('style', 0, 1, 0.01, 'Style') : null,
-      supportsBoost ? grp('Speaker boost', switchEl(e.speakerBoost, (v) => setE('speakerBoost', v), '', { disabled: locked })) : null,
-      slider('speed', 0.7, 1.2, 0.01, 'Speed'),
-      grp('Language', lang),
-      grp('Read numbers ⓘ', norm),
-      grp('Format', fmt),
-      grp('Seed', seed),
-      grp('Concurrent', conc),
-      locked ? h('span.badge.b-toolong', { title: 'Unlock in Settings → Voice packs' }, '🔒 locked') : null);
+    const eng = engine();
+    const engineSel = vc ? null : grp('Engine', h('select', { disabled: locked, onchange: (ev) => { setIn(voice, 'engine', ev.target.value); loadEngine(); } },
+      ENGINES.map(([v, t]) => h('option', { value: v, selected: v === (voice.engine || 'elevenlabs') }, t))));
+    clear(tb);
+    if (eng === 'sts') {
+      const st = voice.sts;
+      const fmt = h('select', { disabled: locked, onchange: (ev) => setIn(st, 'outputFormat', ev.target.value) },
+        [['mp3_44100_128', 'MP3 44.1k 128'], ['mp3_44100_192', 'MP3 44.1k 192'], ['pcm_44100', 'PCM 44.1k (Pro plan)'], ['pcm_24000', 'PCM 24k'], ['pcm_22050', 'PCM 22k'], ['pcm_16000', 'PCM 16k']].map(([v, t]) => h('option', { value: v, selected: v === st.outputFormat }, t)));
+      const modelSel = h('select', { disabled: locked, onchange: (ev) => setIn(st, 'modelId', ev.target.value) },
+        (models.length ? models : [{ modelId: st.modelId }]).map((m) => h('option', { value: m.modelId, selected: m.modelId === st.modelId }, m.modelId)));
+      tb.append(voicePicker(st, 'voiceId', 'voiceName', voices, 'Target voice'), grp('Model', modelSel),
+        slider(st, 'stability', 0, 1, 0.01, 'Stability', locked), slider(st, 'similarity', 0, 1, 0.01, 'Similarity', locked), slider(st, 'style', 0, 1, 0.01, 'Style', locked),
+        grp('Speaker boost', switchEl(st.speakerBoost, (v) => setIn(st, 'speakerBoost', v), '', { disabled: locked })),
+        grp('Remove background noise', switchEl(st.removeBackgroundNoise, (v) => setIn(st, 'removeBackgroundNoise', v), '', { disabled: locked })),
+        grp('Format', fmt), numIn(st, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px' }),
+        numIn(st, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'Your ElevenLabs plan\'s concurrency limit' }));
+    } else if (eng === 'voxcpm' || eng === 'omnivoice') {
+      const o = eng === 'voxcpm' ? voice.voxCpm : voice.omniVoice;
+      const vsel = h('select', { disabled: locked, onchange: (ev) => setIn(o, 'voice', ev.target.value) },
+        h('option', { value: '' }, localVoices.length ? '— pick a reference voice —' : (o.voice || 'Server offline?')),
+        localVoices.map((v) => h('option', { value: v, selected: v === o.voice }, v)));
+      if (o.voice && !localVoices.includes(o.voice)) vsel.append(h('option', { value: o.voice, selected: true }, o.voice));
+      const health = h('span.badge.b-skip', 'checking…');
+      rpc('engine.health', { engine: eng }).then((r) => { health.className = 'badge ' + (r.ok ? 'b-valid' : 'b-broken'); health.textContent = r.ok ? `ready${r.device ? ' · ' + r.device : ''}` : r.phase; }).catch(() => { health.textContent = 'offline'; health.className = 'badge b-broken'; });
+      tb.append(engineSel, grp('Reference voice', vsel, h('button.icon-btn', { title: 'Reload', onclick: () => loadEngine(true) }, '⟳')), grp('Server', health));
+      if (eng === 'voxcpm') {
+        tb.append(numIn(o, 'cfgValue', 'CFG', { step: 0.1 }), numIn(o, 'inferenceTimesteps', 'Timesteps', { min: 1 }),
+          grp('Normalize', switchEl(o.normalize, (v) => setIn(o, 'normalize', v), '', { disabled: locked })),
+          grp('Retry bad cases', switchEl(o.retryBadcase, (v) => setIn(o, 'retryBadcase', v), '', { disabled: locked })),
+          grp('Reference mode', switchEl(o.referenceMode, (v) => setIn(o, 'referenceMode', v), '', { disabled: locked })),
+          o.referenceMode ? numIn(o, 'controlCfgValue', 'Control CFG', { step: 0.1 }) : null,
+          numIn(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
+      } else {
+        tb.append(numIn(o, 'numStep', 'Steps', { min: 1 }), numIn(o, 'speed', 'Speed', { step: 0.05 }), numIn(o, 'guidanceScale', 'Guidance', { step: 0.1 }),
+          numIn(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
+      }
+    } else {
+      const e = voice.eleven;
+      const tag = isTagModel(e.modelId);
+      const mi = modelInfo(e.modelId);
+      const supportsStyle = mi.canUseStyle != null ? mi.canUseStyle && !tag : !tag;
+      const supportsBoost = mi.canUseSpeakerBoost != null ? mi.canUseSpeakerBoost && !tag : !tag;
+      const langOk = !/multilingual_v2|monolingual_v1|english_v1/.test(e.modelId);
+      const modelSel = h('select', { disabled: locked, onchange: (ev) => setE('modelId', ev.target.value) },
+        (models.length ? models : [{ modelId: e.modelId }]).map((m) => h('option', { value: m.modelId, selected: m.modelId === e.modelId }, m.modelId + (isTagModel(m.modelId) ? ' · tags' : ''))));
+      const stabVal = e.stability < 0.25 ? 0 : e.stability < 0.75 ? 0.5 : 1;
+      const stability = tag
+        ? grp('Stability', segmented([[0, 'Creative'], [0.5, 'Natural'], [1, 'Robust']], stabVal, (v) => setE('stability', Number(v)), { disabled: locked }))
+        : slider(e, 'stability', 0, 1, 0.01, 'Stability', locked);
+      const fmt = h('select', { disabled: locked, onchange: (ev) => setE('outputFormat', ev.target.value) },
+        [['mp3_44100_128', 'MP3 44.1k 128'], ['mp3_44100_192', 'MP3 44.1k 192'], ['pcm_44100', 'PCM 44.1k (lossless)']].map(([v, t]) => h('option', { value: v, selected: v === e.outputFormat }, t)));
+      const lang = h('select', { disabled: locked || !langOk, title: langOk ? 'Force the language (ISO 639-1). Auto lets the model detect it.' : 'This model does not accept a language code.', onchange: (ev) => setE('languageCode', ev.target.value) },
+        LANGS.map(([v, t]) => h('option', { value: v, selected: v === (e.languageCode || '') }, t)));
+      const norm = h('select', { disabled: locked, title: 'Text normalization: whether ElevenLabs writes out numbers, dates and abbreviations before speaking ("1st" → "first", "Dr." → "Doctor"). Auto lets the model decide; On is safer for numbers; Off keeps the text exactly as written.', onchange: (ev) => setE('textNormalization', ev.target.value) },
+        [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']].map(([v, t]) => h('option', { value: v, selected: v === e.textNormalization }, t)));
+      tb.append(engineSel, voicePicker(e, 'voiceId', 'voiceName', voices), grp('Model', modelSel), stability,
+        slider(e, 'similarity', 0, 1, 0.01, 'Similarity', locked),
+        supportsStyle ? slider(e, 'style', 0, 1, 0.01, 'Style', locked) : null,
+        supportsBoost ? grp('Speaker boost', switchEl(e.speakerBoost, (v) => setE('speakerBoost', v), '', { disabled: locked })) : null,
+        slider(e, 'speed', 0.7, 1.2, 0.01, 'Speed', locked),
+        grp('Language', lang), grp('Read numbers ⓘ', norm), grp('Format', fmt),
+        numIn(e, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px', title: 'Same seed + same text + same settings ≈ same take. Empty = random.' }),
+        numIn(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit; the app slows down automatically on "too many requests".' }));
+    }
+    if (locked) tb.append(h('span.badge.b-toolong', { title: 'Unlock in Global Settings → Voice packs' }, '🔒 locked'));
   }
 
   // ---- tags: insert at the caret, or prefix the ticked rows
@@ -338,6 +420,17 @@ export async function patchView(id) {
   }
 
   function renderTagbar() {
+    clear(tagbar);
+    if (vc) {
+      tagbar.append(h('span.lbl', 'Voice Changer'),
+        h('span.dim', 'The source recording decides the delivery. The text column is only used for the .lip, so edit it if the source says something different.'),
+        h('div.spacer'), columnsMenu(grid));
+      return;
+    }
+    if (engine() !== 'elevenlabs') {
+      tagbar.append(h('span.lbl', 'Tags'), h('span.dim', 'Audio tags are an ElevenLabs v3/v4 feature; local engines ignore them (they are removed before sending).'), h('div.spacer'), columnsMenu(grid));
+      return;
+    }
     const chip = (t) => {
       const c = h('span.chip.tag-chip', { title: 'Click: insert at the cursor, or add to the start of the ticked rows. Shift-click: remove from the ticked rows.' }, t);
       c.addEventListener('mousedown', (e) => e.preventDefault()); // keep the caret in the text box
@@ -354,7 +447,7 @@ export async function patchView(id) {
       applyTags([t], 'add', ids);
       custom.value = '';
     });
-    clear(tagbar).append(
+    tagbar.append(
       h('span.lbl', 'Tags'),
       voice.tags.map(chip),
       custom,
@@ -363,13 +456,14 @@ export async function patchView(id) {
         if (r && r.t.trim()) applyTags(r.t.match(/\[[^\]]+\]|[^\s\[\]]+/g), 'add', grid.rows.filter((l) => !l.omitted).map((l) => l.lineId));
       } }, 'Add to all shown…'),
       h('div.spacer'),
+      columnsMenu(grid),
       h('button.btn.sm', { onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, '✨ Auto-tag ticked'),
       h('button.btn.sm.ghost', { onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, 'Edit tags…'));
   }
 
   async function autotag(ids) {
     if (!app.state.settings.aiProvider.endpoint) {
-      toast('Set an AI provider (OpenAI-compatible or Ollama) in Settings to use auto-tagging.', true);
+      toast('Set up AI auto-tagging in Global Settings → General & tools first.', true);
       return;
     }
     try {
@@ -385,18 +479,21 @@ export async function patchView(id) {
   }
 
   // ---- filters
+  const pendingLine = (l) => !l.omitted && (l.status === 'Pending' || l.status === 'Failed') && (!vc || l.hasSource);
   function counts() {
     const L = patch.lines;
     return {
       all: L.length,
-      pending: L.filter((l) => !l.omitted && (l.status === 'Pending' || l.status === 'Failed')).length,
+      pending: L.filter(pendingLine).length,
       generated: L.filter((l) => l.status === 'Generated' && !l.stale).length,
       failed: L.filter((l) => l.status === 'Failed').length,
       stale: L.filter((l) => l.stale || l.status === 'Stale').length,
       omitted: L.filter((l) => l.omitted).length,
+      marked: L.filter((l) => l.marked).length,
       differs: L.filter((l) => l.differs).length,
       p1: L.filter((l) => l.editedInPhase1).length,
       suggestions: L.filter((l) => l.tagSuggestion).length,
+      nosource: L.filter((l) => vc && !l.hasSource).length,
     };
   }
 
@@ -404,14 +501,16 @@ export async function patchView(id) {
     const q = search.toLowerCase();
     return patch.lines.filter((l) => {
       switch (filter) {
-        case 'pending': if (!(!l.omitted && (l.status === 'Pending' || l.status === 'Failed'))) return false; break;
+        case 'pending': if (!pendingLine(l)) return false; break;
         case 'generated': if (!(l.status === 'Generated' && !l.stale)) return false; break;
         case 'failed': if (l.status !== 'Failed') return false; break;
         case 'stale': if (!(l.stale || l.status === 'Stale')) return false; break;
         case 'omitted': if (!l.omitted) return false; break;
+        case 'marked': if (!l.marked) return false; break;
         case 'differs': if (!l.differs) return false; break;
         case 'p1': if (!l.editedInPhase1) return false; break;
         case 'suggestions': if (!l.tagSuggestion) return false; break;
+        case 'nosource': if (l.hasSource) return false; break;
       }
       return !q || l.finalLine.toLowerCase().includes(q) || l.spoken.toLowerCase().includes(q) || l.originalLine.toLowerCase().includes(q);
     });
@@ -423,10 +522,10 @@ export async function patchView(id) {
     const had = filters.querySelector('input[type=text]');
     const q = had || h('input', { type: 'text', placeholder: 'Search…', value: search });
     if (!had) q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 150));
-    clear(filters).append(chip('all', 'All'), chip('pending', 'To generate'), chip('generated', 'Generated'), chip('stale', 'Changed since take'),
-      chip('failed', 'Failed'),
+    clear(filters).append(chip('all', 'All'), chip('pending', vc ? 'To convert' : 'To generate'), chip('generated', vc ? 'Converted' : 'Generated'), chip('stale', 'Changed since take'),
+      chip('failed', 'Failed'), chip('marked', '★ Marked'),
       chip('omitted', 'Omitted', 'Left out because a ticked reference topic file (e.g. the base game pack) already has the line'),
-      chip('differs', 'Spoken ≠ in-game'), chip('p1', 'Edited in Phase 1'),
+      vc ? chip('nosource', 'No source WAV') : chip('differs', 'Spoken ≠ in-game'), chip('p1', 'Edited in Phase 1'),
       c.suggestions ? chip('suggestions', '✨ Suggestions') : null, h('div.spacer'), q,
       h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp2', showInsp); split.classList.toggle('no-insp', !showInsp); renderCounts(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel'));
   }
@@ -438,8 +537,10 @@ export async function patchView(id) {
     if (!l) {
       insp.append(h('h3', 'Line'), h('div.dim', 'Click a row to see it in full. Double-click plays the selected take.'),
         h('div.help',
-          h('p', h('b', 'In-game line'), ' decides the filename and comes from Phase 1. ', h('b', 'Spoken text'), ' is what the voice says: edit it in the list or here, and put [tags] anywhere.'),
-          h('p', 'Tag buttons insert at the cursor of the box you are typing in. With rows ticked instead, they go at the start of each ticked line.'),
+          vc ? h('p', 'Each line is converted from the source WAV with the same name (Legacy or DBVO 2.0). A new .lip is always made from the text, so it matches any edits.')
+            : h('p', h('b', 'Filename'), ' comes from the in-game line set in Phase 1. ', h('b', 'Spoken text'), ' is what the voice says: edit it in the list or here, and put [tags] anywhere. ↺ restores the in-game line.'),
+          h('p', 'Tick rows for one-off selections; ★ marks stay until you remove them, so you can collect lines to redo and generate them together.'),
+          vc ? null : h('p', 'Tag buttons insert at the cursor of the box you are typing in. With rows ticked instead, they go at the start of each ticked line.'),
           h('p', 'Keys: ↑/↓ move, Space ticks, Ctrl+A ticks all shown.')));
       return;
     }
@@ -447,26 +548,28 @@ export async function patchView(id) {
     spoken.addEventListener('change', () => { if (spoken.value !== l.spoken) upd(l, 'spoken', spoken.value); });
     trackCaret(spoken, l);
     insp.append(
-      h('div.row', h('span.dot.' + (l.omitted ? 'Omitted' : l.status)), h('span.dim', l.omitted ? 'Omitted — already in ' + l.omittedBy : STATUS_TEXT[l.status] || l.status)),
+      h('div.row', statusDot(l), h('span.dim', l.omitted ? 'Omitted — already in ' + l.omittedBy : STATUS_TEXT[l.status] || l.status), h('div.spacer'),
+        h('button.mark-btn' + (l.marked ? '.on' : ''), { title: 'Mark', onclick: () => upd(l, 'mark', !l.marked) }, '★')),
       l.lastError ? h('div.banner.bad', { style: { margin: 0 } }, l.lastError) : null,
       h('div', h('div.field-label', 'Original line (from the mod)'), h('div.box', l.originalLine)),
       h('div', h('div.field-label', 'In-game line'), h('div.box', l.finalLine)),
       h('div', h('div.field-label', 'File'), h('div.box.mono', { style: { wordBreak: 'break-all' } }, l.stem + '.wav / .lip / .fuz')),
-      h('div', h('div.field-label', 'Spoken text (tags allowed)'), spoken,
+      vc ? h('div', h('div.field-label', 'Source WAV'), l.hasSource ? h('div.row', h('button.btn.sm', { onclick: () => playSource(l) }, '▶ Play source'), h('span.mono.faint.ellipsis', { title: l.sourceWav }, l.sourceWav)) : h('div.banner.bad', { style: { margin: 0 } }, 'No source WAV found with this name.')) : null,
+      h('div', h('div.field-label', vc ? 'Text for the LIP' : 'Spoken text (tags allowed)'), spoken,
         h('div.row', { style: { marginTop: '6px' } },
-          h('button.btn.sm', { disabled: l.omitted, onclick: () => autotag([l.lineId]) }, '✨ Auto-tag'),
-          l.spokenEdited ? h('button.btn.sm.ghost', { onclick: () => upd(l, 'resetSpoken') }, 'Reset') : null,
+          vc || engine() !== 'elevenlabs' ? null : h('button.btn.sm', { disabled: l.omitted, onclick: () => autotag([l.lineId]) }, '✨ Auto-tag'),
+          l.spokenEdited ? h('button.btn.sm.ghost', { onclick: () => upd(l, 'resetSpoken') }, '↺ Restore in-game line') : null,
           h('div.spacer'),
-          h('button.btn.sm.primary', { disabled: l.omitted || !!app.job, onclick: () => generate('selected', [l.lineId]) }, l.takes.length ? 'New take' : 'Generate'))),
+          h('button.btn.sm.primary', { disabled: l.omitted || !!app.job || (vc && !l.hasSource), onclick: () => generate('selected', [l.lineId]) }, l.takes.length ? 'New take' : vc ? 'Convert' : 'Generate'))),
       l.tagSuggestion ? h('div.box', h('div.field-label', 'AI suggestion'), h('div', diffAdded(l.spoken, l.tagSuggestion)),
         h('div.row', { style: { marginTop: '6px' } }, h('button.btn.sm.primary', { onclick: () => upd(l, 'acceptTags') }, 'Accept'), h('button.btn.sm', { onclick: () => upd(l, 'rejectTags') }, 'Undo'))) : null,
       l.omittedBy ? switchEl(l.overrideOmit, (v) => upd(l, 'overrideOmit', v), `Generate anyway (it is in "${l.omittedBy}")`) : null,
       h('h3', `Takes (${l.takes.length})`),
       l.takes.length ? h('div.col', l.takes.slice().reverse().map((t) => h('div.take' + (t.id === l.selectedTakeId ? '.sel' : ''),
-        h('button.icon-btn', { title: 'Play', onclick: () => play(l, t) }, '▶'),
+        h('button.icon-btn.big', { title: 'Play', onclick: () => play(l, t) }, '▶'),
         h('div.grow', { style: { minWidth: 0 } }, h('div', '#' + t.slot + (t.id === l.selectedTakeId ? ' · used' : '')),
-          h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.settings.modelId} · stab ${t.settings.stability} · sim ${t.settings.similarity}${t.settings.speakerBoost ? ' · boost' : ''}${t.settings.seed != null ? ' · seed ' + t.settings.seed : ''}`),
-          t.spokenText !== l.spoken ? h('div.meta.ellipsis', { title: t.spokenText }, 'Said: ' + t.spokenText) : null),
+          h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.settings.engine} · ${t.settings.modelId}${t.settings.engine && t.settings.engine.startsWith('elevenlabs') ? ` · stab ${t.settings.stability} · sim ${t.settings.similarity}${t.settings.speakerBoost ? ' · boost' : ''}` : ''}${t.settings.seed != null ? ' · seed ' + t.settings.seed : ''}`),
+          t.spokenText !== l.spoken ? h('div.meta.ellipsis', { title: t.spokenText }, 'Text then: ' + t.spokenText) : null),
         t.id !== l.selectedTakeId ? h('button.btn.sm', { onclick: () => upd(l, 'selectTake', t.id) }, 'Use') : null,
         h('button.icon-btn', { title: 'Discard take', onclick: async () => { if (await confirmBox('Discard take?', `Delete take #${t.slot} and its files?`, 'Discard', true)) upd(l, 'deleteTake', t.id); } }, '🗑'))))
         : h('div.faint', 'No takes yet.'),
@@ -475,64 +578,87 @@ export async function patchView(id) {
     );
   }
 
-  // ---- status bar and actions
+  // ---- status bar: Export, then one button per generate choice
   function renderActions() {
     const sel = [...grid.selected];
     const busy = !!app.job;
     const c = counts();
-    const genBtn = h('button.btn.primary', { disabled: busy }, `Generate missing · ${c.pending}`);
-    genBtn.addEventListener('click', () => generate('missing'));
-    const more = h('button.btn.primary', { disabled: busy, title: 'More generate options' }, '▾');
-    more.addEventListener('click', () => popupMenu(more, [
-      { label: `Missing lines (${c.pending})`, sub: 'Not generated yet, or failed', onclick: () => generate('missing') },
-      { label: `Ticked lines (${sel.length})`, sub: 'A new take each; earlier takes stay selectable', onclick: () => sel.length ? generate('selected', sel) : toast('Tick rows first.', true) },
-      { label: `All lines (${c.all - c.omitted})`, sub: 'A new take for every line (overwrites which take is used)', onclick: () => generate('all') },
-    ]));
+    const verb = vc ? 'Convert' : 'Generate';
     const exp = h('button.btn', { disabled: busy }, 'Export ▾');
     exp.addEventListener('click', () => popupMenu(exp, [
-      { label: 'WAV + LIP to the WAV + LIP folder', sub: 'Also writes the DBVO Fix plugins and topic file', onclick: exportWavLip },
-      { label: 'Build .fuz into the final folder', sub: 'Also writes the DBVO Fix plugins and topic file', onclick: () => buildFuz(false) },
+      { label: 'WAV + LIP to the WAV + LIP folder', sub: vc ? 'The converted takes' : 'Also writes the DBVO Fix plugins and topic file to their folders', onclick: exportWavLip },
+      { label: 'Build .fuz into the final folder', sub: vc ? 'The converted takes as .fuz' : 'Also writes the DBVO Fix plugins and topic file', onclick: () => buildFuz(false) },
       { label: 'Build .fuz to another folder…', sub: 'Only the .fuz files', onclick: () => buildFuz(true) },
-      { label: 'Only DBVO Fix plugins + topic file', onclick: writeFix },
-    ]));
+      vc ? null : { label: 'Only DBVO Fix plugins + topic file', onclick: writeFix },
+    ].filter(Boolean)));
     clear(actions).append(
-      h('span.stat', h('b', c.generated), ` / ${c.all - c.omitted} generated`, c.omitted ? ` · ${c.omitted} omitted` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} changed since take` : ''),
+      h('span.stat', h('b', c.generated), ` / ${c.all - c.omitted} ${vc ? 'converted' : 'generated'}`, c.omitted ? ` · ${c.omitted} omitted` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} changed since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
       h('div.spacer'),
-      sel.length ? h('span.dim', `${sel.length} ticked`) : null,
-      sel.length ? h('button.btn.sm.ghost', { onclick: () => grid.selectAll(false) }, 'Clear') : null,
+      sel.length ? h('button.btn.sm.ghost', { onclick: () => grid.selectAll(false) }, 'Clear ticks') : null,
+      sel.length ? h('button.btn.sm.ghost', { title: 'Mark the ticked lines', onclick: () => bulkMark(sel, true) }, '★ Mark ticked') : null,
+      c.marked ? h('button.btn.sm.ghost', { title: 'Remove every mark', onclick: () => bulkMark(patch.lines.filter((l) => l.marked).map((l) => l.lineId), false) }, 'Clear marks') : null,
       exp,
-      h('div.btn-group', genBtn, more));
+      h('button.btn', { disabled: busy || !(c.all - c.omitted), title: 'A new take for every line (the new take becomes the one used)', onclick: () => generate('all') }, `All lines (${c.all - c.omitted})`),
+      h('button.btn', { disabled: busy || !sel.length, title: 'A new take for each ticked line', onclick: () => generate('selected', sel) }, `Ticked lines (${sel.length})`),
+      h('button.btn', { disabled: busy || !c.marked, title: 'A new take for each ★ marked line', onclick: () => generate('marked') }, `Marked lines (${c.marked})`),
+      h('button.btn.primary', { disabled: busy || !c.pending, title: 'Lines without a take yet, and failed ones', onclick: () => generate('missing') }, `${verb} missing (${c.pending})`));
+  }
+
+  async function bulkMark(ids, value) {
+    try {
+      patch = await rpc('line2.bulkMark', { id, lineIds: ids, value });
+      reindex();
+      grid.setRows(visible());
+      renderCounts();
+      renderActions();
+      renderInspector();
+    } catch (e) { fail(e); }
   }
 
   async function generate(mode, lineIds) {
     try {
       const est = await rpc('patch.estimate', { id, mode, lineIds });
-      if (!est.count) { toast('Nothing to generate.'); return; }
-      const s = est.settings;
-      const rows = [
-        ['Lines', est.count], ['Characters (≈ credits)', est.characters.toLocaleString()],
-        ['Voice', est.voice || est.voiceId || '— none —'], ['Model', est.model],
-        ['Stability', s.stability], ['Similarity', s.similarityBoost],
-        ...(s.style != null ? [['Style', s.style]] : []),
-        ...(s.useSpeakerBoost != null ? [['Speaker boost', s.useSpeakerBoost ? 'ON' : 'off']] : []),
-        ['Speed', s.speed], ['Seed', est.seed ?? 'random'], ['Output format', est.outputFormat], ['Concurrent requests', est.concurrency],
-        ['Language', est.languageCode || 'auto'], ['Read numbers (normalization)', est.textNormalization],
-        ['Loudness normalization', est.loudnorm ? 'ON' : 'off'], ['Gain', est.gainDb + ' dB'],
-        ['Tail trim / fade', `${est.trimTailMs} ms / ${est.fadeOutMs} ms`], ['Naming', est.naming],
-        ['Pronunciation entries (global + voice)', est.pronunciations], ['ElevenLabs dictionaries', est.dictionaries],
-      ];
-      const ok = await modal(mode === 'all' ? 'Generate every line again?' : 'Check before spending credits', [
+      if (!est.count) { toast(vc ? 'Nothing to convert.' : 'Nothing to generate.'); return; }
+      let rows;
+      let missingVoice = !est.voiceId;
+      if (est.kind === 'vc') {
+        rows = [['Lines', est.count], ['Source audio (billed by length)', `${est.seconds.toFixed(0)} s ≈ ${(est.seconds / 60).toFixed(1)} min`],
+          ['Target voice', est.voice || est.voiceId || '— none —'], ['Model', est.model], ['Stability', est.stability], ['Similarity', est.similarity], ['Style', est.style],
+          ['Speaker boost', est.speakerBoost ? 'ON' : 'off'], ['Remove background noise', est.removeBackgroundNoise ? 'ON' : 'off'], ['Seed', est.seed ?? 'random'],
+          ['Output format', est.outputFormat], ['Concurrent requests', est.concurrency], ['Loudness normalization', est.loudnorm ? 'ON' : 'off'], ['Gain', est.gainDb + ' dB'],
+          ['Tail trim / fade', `${est.trimTailMs} ms / ${est.fadeOutMs} ms`], ['LIP', 'new, from the text column'], ['Naming', est.naming]];
+      } else if (est.kind === 'voxcpm' || est.kind === 'omnivoice') {
+        rows = [['Lines', est.count], ['Characters', est.characters.toLocaleString()], ['Engine', est.kind], ['Reference voice', est.voiceId || '— none —'],
+          ...Object.entries(est.engineSettings).filter(([k]) => k !== 'voice').map(([k, v]) => [k, String(v)]),
+          ['Loudness normalization', est.loudnorm ? 'ON' : 'off'], ['Tail trim / fade', `${est.trimTailMs} ms / ${est.fadeOutMs} ms`], ['Naming', est.naming], ['Pronunciation entries (global + voice)', est.pronunciations]];
+      } else {
+        const s = est.settings;
+        rows = [
+          ['Lines', est.count], ['Characters (≈ credits)', est.characters.toLocaleString()],
+          ['Voice', est.voice || est.voiceId || '— none —'], ['Model', est.model],
+          ['Stability', s.stability], ['Similarity', s.similarityBoost],
+          ...(s.style != null ? [['Style', s.style]] : []),
+          ...(s.useSpeakerBoost != null ? [['Speaker boost', s.useSpeakerBoost ? 'ON' : 'off']] : []),
+          ['Speed', s.speed], ['Seed', est.seed ?? 'random'], ['Output format', est.outputFormat], ['Concurrent requests', est.concurrency],
+          ['Language', est.languageCode || 'auto'], ['Read numbers (normalization)', est.textNormalization],
+          ['Loudness normalization', est.loudnorm ? 'ON' : 'off'], ['Gain', est.gainDb + ' dB'],
+          ['Tail trim / fade', `${est.trimTailMs} ms / ${est.fadeOutMs} ms`], ['Naming', est.naming],
+          ['Pronunciation entries (global + voice)', est.pronunciations], ['ElevenLabs dictionaries', est.dictionaries],
+        ];
+      }
+      const ok = await modal(mode === 'all' ? `${vc ? 'Convert' : 'Generate'} every line again?` : 'Check before spending credits', [
+        h('div', voiceChip(voice.name, voice.color)),
         h('div.kv', rows.flatMap(([k, v]) => [h('div', k), h('div', String(v))])),
         mode === 'all' ? h('div.banner.warn', { style: { margin: 0 } }, 'Every line gets a new take, which becomes the one used. Earlier takes stay in the take list.') : null,
-        !est.voiceId ? h('div.banner.bad', { style: { margin: 0 } }, 'Pick a voice in the toolbar first.') : null,
-      ], [{ label: 'Cancel', value: false }, { label: `Generate ${est.count} line(s)`, primary: true, value: !!est.voiceId }]);
+        missingVoice ? h('div.banner.bad', { style: { margin: 0 } }, 'Pick a voice in the toolbar first.') : null,
+      ], [{ label: 'Cancel', value: false }, { label: `${vc ? 'Convert' : 'Generate'} ${est.count} line(s)`, primary: true, value: !missingVoice }]);
       if (!ok) return;
       await rpc('patch.generate', { id, mode, lineIds });
       renderActions();
     } catch (e) { fail(e); }
   }
 
-  const filesModal = (title, summary, files) => modal(title, [summary, files && files.length ? h('div', h('div.field-label', 'Also written'), h('div.box.mono', { style: { whiteSpace: 'pre-wrap', maxHeight: '180px', overflow: 'auto' } }, files.join('\n'))) : null]);
+  const filesModal = (title, summary, files) => modal(title, [summary, files && files.length ? h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), h('div.box.mono', { style: { whiteSpace: 'pre-wrap', maxHeight: '180px', overflow: 'auto' } }, files.join('\n'))) : null]);
 
   async function exportWavLip() {
     try {
@@ -564,10 +690,12 @@ export async function patchView(id) {
     try {
       const c = await rpc('patch.checks', { id });
       const t = c.tools;
-      const missing = [!t.apiKey && 'ElevenLabs API key', !t.ffmpeg && 'ffmpeg.exe', !t.faceFx && 'FaceFXWrapper.exe', !t.fonix && 'FonixData.cdf', !t.xwma && 'xWMAEncode.exe (for .fuz)'].filter(Boolean);
-      if (missing.length) banners.append(h('div.banner.bad', h('span', 'Missing: ' + missing.join(', ')), h('div.spacer'), h('button.btn.sm', { onclick: () => go('settings', { tab: 'general' }) }, 'Open Settings')));
-      if (!patch.wavLipFolder || !patch.finalRoot) banners.append(h('div.banner.warn', h('span', !patch.wavLipFolder ? 'No WAV + LIP folder set for this patch.' : 'No final folder set for this patch.'), h('div.spacer'), h('button.btn.sm', { onclick: openOptions }, 'Set folders')));
-      for (const w of c.pathWarnings) banners.append(h('div.banner.warn', h('b', 'Path length: '), h('span', `${w.where} reaches ${w.length} of ${w.limit} characters with the longest line — tools like Yakitori fail past 260.`), h('span.mono.faint', { title: w.example }, '…' + w.example.slice(-60)), h('div.spacer'), h('button.btn.sm', { onclick: openOptions }, 'Shorten folders')));
+      const eng = engine();
+      const missing = [(eng === 'elevenlabs' || eng === 'sts') && !t.apiKey && 'ElevenLabs API key', !t.ffmpeg && 'ffmpeg.exe', !t.faceFx && 'FaceFXWrapper.exe', !t.fonix && 'FonixData.cdf', !t.xwma && 'xWMAEncode.exe (for .fuz)'].filter(Boolean);
+      if (missing.length) banners.append(h('div.banner.bad', h('span', 'Missing: ' + missing.join(', ')), h('div.spacer'), h('button.btn.sm', { onclick: () => go('settings', { tab: 'general' }) }, 'Open Global Settings')));
+      const unset = [!patch.wavLipFolder && 'WAV + LIP folder', !patch.finalRoot && 'final folder', !vc && !patch.fixFolder && 'DBVO Fix folder', vc && !patch.sourceFolders.length && 'source WAV folder'].filter(Boolean);
+      if (unset.length) banners.append(h('div.banner.warn', h('span', 'Not set for this patch: ' + unset.join(', ') + '.'), h('div.spacer'), h('button.btn.sm', { onclick: openOptions }, 'Set folders')));
+      for (const w of c.pathWarnings) banners.append(h('div.banner.warn', h('b', 'Path length: '), h('span', `${w.where} reaches ${w.length} of ${w.limit} characters with the longest line — tools like Yakitori fail past 260.`), h('div.spacer'), h('button.btn.sm', { onclick: openOptions }, 'Shorten folders')));
       if (c.unreviewed.length) banners.append(h('div.banner.warn', h('span', 'Flagged lines not reviewed in Phase 1: ' + c.unreviewed.map((u) => `${u.plugin} (${u.count})`).join(', ')),
         h('div.spacer'), patch.modIds.length === 1 ? h('button.btn.sm', { onclick: () => go('mod', { id: patch.modIds[0] }) }, 'Open in Phase 1') : null));
     } catch { /* checks are advisory */ }
@@ -581,17 +709,19 @@ export async function patchView(id) {
       try { const r = await rpc('patch.switchVoice', { id, voicePackId: voiceSel.value }); go('patch', { id: r.id }); } catch (e) { fail(e); }
     });
     clear(head).append(
-      h('button.btn.ghost.sm', { onclick: () => go('patches') }, '← DBVO Patches'),
+      h('button.btn.ghost.sm', { onclick: () => go(vc ? 'vc' : 'patches') }, vc ? '← Voice Changer' : '← DBVO Patches'),
       h('h1', patch.name),
+      voiceChip(voice.name, voice.color),
       h('span.badge.b-skip', patch.category),
+      vc ? h('span.badge.b-player', 'Voice Changer') : null,
       h('div.spacer'),
       h('span.faint', 'Voice pack'),
       voiceSel,
-      h('button.icon-btn', { title: 'Edit this voice pack (Settings)', onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, '✎'),
+      h('button.icon-btn', { title: 'Edit this voice pack (Global Settings)', onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, '✎'),
       h('span.faint', voice.naming === 'Legacy' ? 'Legacy names' : 'DBVO 2.0 hash names'),
       h('button.btn.sm', { onclick: openOptions }, 'Folders & options…'),
       h('button.btn.sm.ghost', { title: 'Re-read Phase 1 now (also happens every time you open this patch)', onclick: sync }, '⟳ Refresh from Phase 1'),
-      h('button.btn.sm.ghost.danger', { onclick: async () => { if (await confirmBox('Delete DBVO Patch?', 'Deletes its takes too. Files already exported stay where they are. A backup of the project is made first.', 'Delete', true)) { await rpc('patch.delete', { id }); go('patches'); } } }, 'Delete'));
+      h('button.btn.sm.ghost.danger', { onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes its takes too. Files already exported stay where they are. A backup of the project is made first.', 'Delete', true)) { await rpc('patch.delete', { id }); go(vc ? 'vc' : 'patches'); } } }, 'Delete'));
   }
 
   async function sync() {
@@ -613,19 +743,28 @@ export async function patchView(id) {
     const name = h('input', { type: 'text', value: patch.name });
     const modBoxes = s.mods.map((m) => ({ m, box: h('input', { type: 'checkbox', checked: patch.modIds.includes(m.id) }) }));
     const refOn = new Set(patch.referenceIds);
+    const sources = [...(patch.sourceFolders || [])];
     let owWav = patch.overwriteWavLip, owFuz = patch.overwriteFuz;
     const folder = (val, title, ph) => {
-      const i = h('input', { type: 'text', value: val, placeholder: ph });
+      const i = h('input', { type: 'text', value: val || '', placeholder: ph });
       return { i, el: h('div.path-input', i, h('button.btn.sm', { onclick: async () => { const f = await rpc('pick.folder', { title }); if (f) i.value = f; } }, 'Browse')) };
     };
     const wl = folder(patch.wavLipFolder, 'WAV + LIP folder', 'e.g. D:\\DBVO\\Vampira\\Lucien\\WAV');
-    const fr = folder(patch.finalRoot, 'Final folder', 'e.g. D:\\DBVO\\Vampira\\Lucien\\Release');
+    const fx = folder(patch.fixFolder, 'DBVO Fix plugin + topic file folder', 'e.g. D:\\DBVO\\Vampira\\Lucien\\Fix');
+    const fr = folder(patch.finalRoot, 'Final folder', 'e.g. D:\\DBVO Vampira FOMOD');
     const tpl = h('input', { type: 'text', value: patch.fuzTemplate, placeholder: voice.destinations.fuzTemplate || 'Sound\\DBVO\\{packId}' });
-    const ok = await modal('Folders & options', [
+    const srcList = h('div.col');
+    const renderSrc = () => clear(srcList).append(sources.length ? sources.map((f, i) => h('div.row', h('span.mono.grow.ellipsis', f), h('button.icon-btn', { onclick: () => { sources.splice(i, 1); renderSrc(); } }, '×'))) : h('div.faint', 'No folder yet.'));
+    renderSrc();
+    const ok = await modal(h('span.row', 'Folders & options — ', voiceChip(voice.name + ' voice pack', voice.color)), [
       h('div.col', h('div.field-label', 'Name'), name),
-      h('div.col', h('div.field-label', 'WAV + LIP folder'), wl.el, h('div.faint', 'Generated WAV + LIP files are copied here (Export). The DBVO Fix plugins and topic file go here too.')),
-      h('div.col', h('div.field-label', 'Final folder'), fr.el, h('div.faint', 'The release folder. .fuz files, DBVO Fix plugins and the topic file are built into it.')),
-      h('div.col', h('div.field-label', '.fuz sub-folder inside the final folder'), tpl, h('div.faint', 'Placeholders: {packId} {voicePack} {mod} {patch}.')),
+      vc ? h('div.col', h('div.field-label', 'Source WAV folders (another voice pack)'), srcList,
+        h('button.btn.sm', { style: { alignSelf: 'flex-start' }, onclick: async () => { const f = await rpc('pick.folder', { title: 'Folder with the source WAV files' }); if (f) { sources.push(f); renderSrc(); } } }, '+ Add folder'),
+        h('div.faint', 'Searched with sub-folders; matched by Legacy and DBVO 2.0 names.')) : null,
+      h('div.col', h('div.field-label', 'WAV + LIP folder'), wl.el, h('div.faint', 'Export copies the chosen takes here as .wav + .lip.')),
+      vc ? null : h('div.col', h('div.field-label', 'DBVO Fix plugin + topic file folder'), fx.el, h('div.faint', 'Your working copy of the DBVO Fix plugins and the topic file, kept apart from the WAV + LIP files. Written by Export and Build .fuz.')),
+      h('div.col', h('div.field-label', 'Final folder'), fr.el, h('div.faint', 'The release (FOMOD) folder. .fuz files go into the sub-folder below' + (vc ? '.' : '; the DBVO Fix plugins go next to each mod\'s Sound folder, ready for Phase 3.'))),
+      h('div.col', h('div.field-label', '.fuz sub-folder inside the final folder'), tpl, h('div.faint', 'Placeholders: {packId} {voicePack} {mod} {patch}, e.g. Vamp - {mod}\\Sound\\DBVO\\{packId}.')),
       h('div.col', h('div.field-label', 'Overwrite'),
         switchEl(owWav, (v) => { owWav = v; }, 'Overwrite WAV + LIP files already in the folder'),
         switchEl(owFuz, (v) => { owFuz = v; }, 'Overwrite .fuz files already in the final folder'),
@@ -633,7 +772,7 @@ export async function patchView(id) {
       h('div.col', h('div.field-label', 'Omit lines users already have'),
         h('div.faint', 'Lines found in these topic files are left out ("Omitted"). Tick only packs every user of this patch has, such as the base game pack. Never tick optional mods.'),
         s.references.length ? h('div.col', s.references.map((r) => switchEl(refOn.has(r.id), (v) => { if (v) refOn.add(r.id); else refOn.delete(r.id); }, `${r.name}  ·  ${r.lineCount} lines`)))
-          : h('div.faint', 'No reference topic files yet — add them in Settings → References.')),
+          : h('div.faint', 'No reference topic files yet — add them in Global Settings → Omit references.')),
       h('div.col', h('div.field-label', 'Mods in this patch'), h('div.box', { style: { maxHeight: '160px', overflow: 'auto' } }, modBoxes.map(({ m, box }) => h('label.row', box, m.name, h('span.faint', m.category))))),
     ], [{ label: 'Cancel', value: false }, { label: 'Save', primary: true, value: true }]);
     if (!ok) return;
@@ -642,21 +781,34 @@ export async function patchView(id) {
     try {
       patch = await rpc('patch.saveMeta', {
         id, name: name.value, modIds, referenceIds: [...refOn],
-        wavLipFolder: wl.i.value.trim(), finalRoot: fr.i.value.trim(), fuzTemplate: tpl.value.trim(),
-        overwriteWavLip: owWav, overwriteFuz: owFuz,
+        wavLipFolder: wl.i.value.trim(), finalRoot: fr.i.value.trim(), fuzTemplate: tpl.value.trim(), fixFolder: fx.i.value.trim(),
+        overwriteWavLip: owWav, overwriteFuz: owFuz, sourceFolders: sources,
       });
+      if (vc) {
+        const r = await rpc('patch.matchSources', { id });
+        patch = r.patch;
+        toast(`${r.found} of ${r.total} lines have a source WAV.`);
+      }
       reindex();
       renderAll();
     } catch (e) { fail(e); }
   }
 
-  async function loadEleven(refresh = false) {
+  async function loadEngine(refresh = false) {
+    const eng = engine();
     try {
-      [voices, models] = await Promise.all([rpc('eleven.voices', { refresh }), rpc('eleven.models', { refresh })]);
-      renderToolbar();
+      if (eng === 'voxcpm' || eng === 'omnivoice') {
+        localVoices = await rpc('engine.voices', { engine: eng }).catch(() => []);
+      } else if (eng === 'sts') {
+        [voices, models] = await Promise.all([rpc('eleven.voices', { refresh }), rpc('eleven.stsModels', {})]);
+      } else {
+        [voices, models] = await Promise.all([rpc('eleven.voices', { refresh }), rpc('eleven.models', { refresh })]);
+      }
     } catch (e) {
       if (app.state.settings.hasApiKey) fail(e);
     }
+    renderToolbar();
+    renderTagbar();
   }
 
   // live updates from generation
@@ -675,6 +827,6 @@ export async function patchView(id) {
   }
 
   renderAll();
-  loadEleven();
+  loadEngine();
   return view;
 }

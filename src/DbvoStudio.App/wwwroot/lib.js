@@ -105,9 +105,10 @@ export function fail(e) {
 }
 
 /** Show a modal. content: Node[]; buttons: [{label, primary, value}]. Resolves to the clicked value (null on Esc). */
-export function modal(title, content, buttons = [{ label: 'OK', primary: true, value: true }]) {
+export function modal(title, content, buttons = [{ label: 'OK', primary: true, value: true }], { wide = false } = {}) {
   const m = document.getElementById('modal');
   const card = clear(m.querySelector('.modal-card'));
+  card.classList.toggle('wide', wide);
   return new Promise((resolve) => {
     const close = (v) => {
       m.classList.add('hidden');
@@ -178,6 +179,7 @@ export class VGrid {
     this.storageKey = storageKey;
     const saved = storageKey ? store.get('cols:' + storageKey, {}) : {};
     for (const c of this.columns) if (saved[c.id]) { c.width = saved[c.id]; c.flex = 0; }
+    this.hidden = new Set(storageKey ? store.get('hide:' + storageKey, []) : []);
     this.rowHeight = rowHeight;
     this.rowKey = rowKey;
     this.rowClass = rowClass;
@@ -202,9 +204,19 @@ export class VGrid {
     else { cell.style.flex = '0 0 auto'; cell.style.width = (c.width || 100) + 'px'; }
   }
 
+  /** Columns currently shown (the Columns menu can hide any column with a title). */
+  shown() { return this.columns.filter((c) => !this.hidden.has(c.id)); }
+
+  setHidden(id, hide) {
+    if (hide) this.hidden.add(id); else this.hidden.delete(id);
+    if (this.storageKey) store.set('hide:' + this.storageKey, [...this.hidden]);
+    this.renderHead();
+    this.paint(true);
+  }
+
   renderHead() {
     clear(this.head);
-    for (const c of this.columns) {
+    for (const c of this.shown()) {
       const cell = h('div.cell', c.title || '');
       this.sizeCell(cell, c);
       if (c.resizable && c.title) {
@@ -227,7 +239,7 @@ export class VGrid {
       c.width = Math.max(c.min || 40, Math.round(startW + ev.clientX - startX));
       c.flex = 0;
       this.sizeCell(cell, c);
-      this.body.querySelectorAll('.vrow').forEach((r) => this.sizeCell(r.children[this.columns.indexOf(c)], c));
+      this.body.querySelectorAll('.vrow').forEach((r) => this.sizeCell(r.children[this.shown().indexOf(c)], c));
     };
     const up = () => {
       grip.classList.remove('drag');
@@ -295,7 +307,8 @@ export class VGrid {
       frag.append(this.renderRow(r, i));
     }
     clear(this.body).append(frag);
-    if (keep && active && document.activeElement !== active) active.focus();
+    // Give the focus back without scrolling, or the list jumps back to that row while the user scrolls.
+    if (keep && active && document.activeElement !== active) active.focus({ preventScroll: true });
   }
 
   renderRow(r, i) {
@@ -306,7 +319,7 @@ export class VGrid {
     if (this.focusKey === key) row.classList.add('focus');
     const extra = this.rowClass && this.rowClass(r);
     if (extra) row.classList.add(...extra.split(' ').filter(Boolean));
-    for (const c of this.columns) {
+    for (const c of this.shown()) {
       const cell = h('div.cell' + (c.cls ? '.' + c.cls.split(' ').join('.') : ''));
       this.sizeCell(cell, c);
       const content = c.render(r, i);
@@ -440,4 +453,28 @@ export function diffAdded(a, b) {
     out.push(/^\s+$/.test(w) ? document.createTextNode(w) : h('span.diff-add', w));
   }
   return out;
+}
+
+/** A "Columns ▾" button: tick which grid columns are shown. */
+export function columnsMenu(grid) {
+  const btn = h('button.btn.sm', { title: 'Show or hide columns' }, 'Columns ▾');
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.menu').forEach((m) => m.remove());
+    const r = btn.getBoundingClientRect();
+    const m = h('div.menu', grid.columns.filter((c) => c.title).map((c) => {
+      const cb = h('input', { type: 'checkbox', checked: !grid.hidden.has(c.id) });
+      cb.addEventListener('change', () => grid.setHidden(c.id, !cb.checked));
+      return h('label.menu-check', cb, c.title);
+    }), h('button', { onclick: () => { m.remove(); grid.resetColumns(); grid.hidden.clear(); grid.setHidden('__none', false); } }, h('div', 'Reset columns')));
+    document.body.append(m);
+    m.style.left = Math.min(r.left, window.innerWidth - 260) + 'px';
+    m.style.top = r.bottom + 6 + 'px';
+    setTimeout(() => document.addEventListener('mousedown', function close(e) { if (!m.contains(e.target) && e.target !== btn) { m.remove(); document.removeEventListener('mousedown', close); } }), 0);
+  });
+  return btn;
+}
+
+/** Plain-text help tooltip icon. */
+export function tip(text) {
+  return h('span.tip', { title: text }, 'ⓘ');
 }

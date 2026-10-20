@@ -1,0 +1,517 @@
+// Phase 3: FOMOD Creation — import any ModuleConfig.xml, options from DBVO Patches, the DBVO JSON, validate, simulate, build.
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, switchEl, segmented, popupMenu } from './lib.js';
+import { app, go, refreshState } from './app.js';
+import { voiceChip } from './phase2.js';
+
+const GROUP_TYPES = [
+  ['SelectAny', 'Select any', 'Users tick as many as they like. The usual choice for patch lists.'],
+  ['SelectAll', 'Select all (always installed)', 'Everything in the group is installed; users can\'t untick. For core files and information pages.'],
+  ['SelectExactlyOne', 'Select exactly one', 'Radio buttons: one must be picked.'],
+  ['SelectAtMostOne', 'Select at most one', 'Radio buttons, or none.'],
+  ['SelectAtLeastOne', 'Select at least one', 'Tick one or more.'],
+];
+const MODES = [
+  ['Detect', 'Recommended when the mod is installed', 'Detects the mod\'s plugins: pre-ticked when they are active, greyed out (Not usable) when they are not. The usual DBVO setup.'],
+  ['Required', 'Required', 'Always installed; users can\'t untick it.'],
+  ['Recommended', 'Recommended (always pre-ticked)', 'Pre-ticked for everyone, no detection.'],
+  ['Optional', 'Optional', 'Not ticked; the user decides.'],
+  ['Manual', 'Manual (no detection)', 'For Creation Club or content that can\'t be detected. Written as Optional, so the user ticks it by hand.'],
+  ['Advanced', 'Advanced (custom XML)', 'Any type descriptor, kept exactly as written: flags, several patterns, CouldBeUsable…'],
+];
+
+// ------------------------------------------------------------------ list
+
+export async function fomodsView() {
+  const s = await refreshState();
+  const view = h('div.view');
+  view.append(h('div.view-head',
+    h('h1', 'FOMOD Creation'),
+    h('span.sub', 'Build the installer: pages of options that install each mod\'s .fuz files and DBVO Fix plugins, plus the DBVO voice pack JSON.'),
+    h('div.spacer'),
+    h('button.btn', { onclick: () => importFomod() }, 'Import FOMOD…'),
+    h('button.btn.primary', { onclick: newFomod }, '+ New FOMOD')));
+  const body = h('div.view-body');
+  view.append(body);
+  if (!s.fomods.length) {
+    body.append(h('div.empty', h('h2', 'No FOMOD projects yet'),
+      h('div', 'Start a new one and add your DBVO Patches, or import an existing ModuleConfig.xml (from FOMOD Creation Tool or anywhere else) to keep working on it.'),
+      h('div.row', { style: { justifyContent: 'center', marginTop: '14px' } }, h('button.btn', { onclick: () => importFomod() }, 'Import FOMOD…'), h('button.btn.primary', { onclick: newFomod }, '+ New FOMOD'))));
+    return view;
+  }
+  body.append(h('div.cat', h('div.cat-head', h('h3', 'FOMOD projects'), h('span.faint', s.fomods.length)),
+    h('div.cards2', s.fomods.map((f) => {
+      const v = s.voicePacks.find((x) => x.id === f.voicePackId);
+      return h('div.pcard', { onclick: () => go('fomod', { id: f.id }) },
+        h('div.row', h('span.title.grow.ellipsis', f.name), voiceChip(f.voicePack || '—', v && v.color)),
+        h('div.stat-row', h('span', h('b', f.steps), ' pages'), h('span', h('b', f.options), ' options'),
+          h('span', f.lastBuildUtc ? 'built ' + new Date(f.lastBuildUtc).toLocaleString() : 'not built yet')),
+        f.lastArchive ? h('div.mono.faint.ellipsis', f.lastArchive) : null);
+    }))));
+  return view;
+}
+
+async function newFomod() {
+  const s = app.state;
+  if (!s.voicePacks.length) { toast('Create a voice pack first.', true); go('settings', { tab: 'voices', id: 'new' }); return; }
+  const voice = h('select', s.voicePacks.map((v) => h('option', { value: v.id, selected: v.id === s.settings.lastVoicePackId }, v.name)));
+  const name = h('input', { type: 'text', placeholder: 'e.g. DBVO Vampira' });
+  const root = h('input', { type: 'text', placeholder: 'the final folder of your patches, e.g. D:\\DBVO Vampira FOMOD' });
+  const pickVoice = () => { const v = s.voicePacks.find((x) => x.id === voice.value); if (v && !root.value) root.value = (v.destinations.finalRoot || '').replace(/\\?[^\\]*\{mod\}.*$/, ''); };
+  voice.addEventListener('change', pickVoice);
+  pickVoice();
+  const ok = await modal('New FOMOD', [
+    h('div.col', h('div.field-label', 'Voice pack'), voice),
+    h('div.col', h('div.field-label', 'Name'), name),
+    h('div.col', h('div.field-label', 'FOMOD root folder'), h('div.path-input', root, h('button.btn.sm', { onclick: async () => { const f = await rpc('pick.folder', { title: 'FOMOD root folder' }); if (f) root.value = f; } }, 'Browse')),
+      h('div.faint', 'The folder that holds your patch folders, images and so on. File sources in the installer are relative to it.')),
+  ], [{ label: 'Cancel', value: false }, { label: 'Create', primary: true, value: true }]);
+  if (!ok) return;
+  try {
+    const r = await rpc('fomod.create', { voicePackId: voice.value, name: name.value, rootFolder: root.value.trim() });
+    go('fomod', { id: r.project.id });
+  } catch (e) { fail(e); }
+}
+
+async function importFomod(into) {
+  const s = app.state;
+  const path = await rpc('pick.file', { title: 'Choose ModuleConfig.xml (in the fomod folder)', filter: 'ModuleConfig.xml|ModuleConfig.xml;*.xml' });
+  if (!path) return;
+  let voicePackId = '';
+  if (!into) {
+    const voice = h('select', s.voicePacks.map((v) => h('option', { value: v.id, selected: v.id === s.settings.lastVoicePackId }, v.name)));
+    const ok = await modal('Import FOMOD', [h('div', 'Everything is kept: pages, groups, options, descriptions, images, files, detection, flags, conditions and visibility.'),
+      h('div.col', h('div.field-label', 'Voice pack this FOMOD is for'), voice)], [{ label: 'Cancel', value: false }, { label: 'Import', primary: true, value: true }]);
+    if (!ok) return;
+    voicePackId = voice.value;
+  }
+  try {
+    const r = await rpc('fomod.import', { path, into: into || '', voicePackId });
+    toast(`Imported ${r.project.project.steps.length} pages.` + (r.jsonFrom ? ` The DBVO JSON is already installed by "${r.jsonFrom}", so the app does not add another.` : ''));
+    go('fomod', { id: r.project.project.id });
+  } catch (e) { fail(e); }
+}
+
+// ------------------------------------------------------------------ editor
+
+export async function fomodView(id) {
+  await refreshState();
+  let dto = await rpc('fomod.get', { id });
+  let proj = dto.project;
+  const voice = app.state.voicePacks.find((v) => v.id === proj.voicePackId);
+  let selKey = store.get('fomodSel:' + id, 'project');
+  const collapsed = store.get('fomodCollapsed:' + id, {});
+  const savedEl = h('span.saved.ok', 'Saved ✓');
+
+  const view = h('div.view');
+  const head = h('div.view-head');
+  const tree = h('div.ftree');
+  const edit = h('div.fedit');
+  view.append(head, h('div.fomod', tree, edit));
+
+  const persist = debounce(async () => {
+    try {
+      await rpc('fomod.save', { project: proj });
+      savedEl.textContent = 'Saved ✓'; savedEl.className = 'saved ok';
+    } catch (e) { savedEl.textContent = 'Not saved'; savedEl.className = 'saved bad'; fail(e); }
+  }, 500);
+  const changed = (rerenderTree = false) => { savedEl.textContent = 'Saving…'; savedEl.className = 'saved'; persist(); if (rerenderTree) renderTree(); };
+
+  // ---- lookup helpers
+  const find = (key) => {
+    if (key === 'project' || key === 'json') return { kind: key };
+    for (const st of proj.steps) {
+      if (st.id === key) return { kind: 'step', step: st };
+      for (const g of st.groups) {
+        if (g.id === key) return { kind: 'group', step: st, group: g };
+        for (const o of g.options) if (o.id === key) return { kind: 'option', step: st, group: g, option: o };
+      }
+    }
+    return { kind: 'project' };
+  };
+  const newId = () => Math.random().toString(36).slice(2, 10);
+  const select = (key) => { selKey = key; store.set('fomodSel:' + id, key); renderTree(); renderEditor(); };
+  const move = (arr, i, d) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; changed(true); };
+
+  function renderHead() {
+    const build = h('button.btn.primary', { disabled: !!app.job }, 'Build ▾');
+    build.addEventListener('click', () => popupMenu(build, [
+      { label: `Build and pack .${proj.archiveFormat}`, sub: `Stages everything, then writes the archive to ${proj.releaseFolder || '(set the release folder)'}`, onclick: () => runBuild(true) },
+      { label: 'Stage only', sub: 'Builds the installer folder without packing, to check it or test it in MO2 / Vortex', onclick: () => runBuild(false) },
+    ]));
+    clear(head).append(
+      h('button.btn.ghost.sm', { onclick: () => go('fomods') }, '← FOMODs'),
+      h('h1', proj.name || proj.info.name || 'FOMOD'),
+      voiceChip(dto.voiceName || '—', voice && voice.color),
+      savedEl,
+      h('div.spacer'),
+      h('button.btn', { onclick: addPatches, title: 'Add an option per mod from your DBVO Patches, on the page of its category' }, '+ Add DBVO Patches…'),
+      h('button.btn', { onclick: refreshLinked, title: 'Update the files of options linked to DBVO Patches (after changing folders or rebuilding .fuz)' }, '⟳ Refresh linked'),
+      h('button.btn', { onclick: validate }, 'Validate'),
+      h('button.btn', { onclick: simulate }, 'Simulate install'),
+      h('button.btn.ghost', { onclick: previewXml }, 'View XML'),
+      h('button.btn.ghost', { onclick: () => importFomod(id) }, 'Re-import…'),
+      build,
+      h('button.btn.ghost.danger.sm', { onclick: async () => { if (await confirmBox('Delete FOMOD project?', 'Only the project in this app is deleted; built archives and your files stay.', 'Delete', true)) { await rpc('fomod.delete', { id }); go('fomods'); } } }, 'Delete'));
+  }
+
+  // ---- tree
+  let drag = null; // { option, fromGroup }
+  function renderTree() {
+    clear(tree);
+    const node = (key, cls, label, extra, onclick) => {
+      const n = h('div.fnode.' + cls + (selKey === key ? '.sel' : ''), { onclick: onclick || (() => select(key)) }, label, extra);
+      return n;
+    };
+    tree.append(
+      node('project', 'step', h('span', '⚙ Installer & info.xml'), null),
+      node('json', 'step', h('span', '{ } DBVO voice pack JSON'), h('span.n', proj.json.enabled ? (proj.steps.some((s) => s.groups.some((g) => g.options.some((o) => o.carriesJson))) ? '✓' : '⚠') : 'off')));
+    proj.steps.forEach((st, si) => {
+      const open = !collapsed[st.id];
+      const count = st.groups.reduce((a, g) => a + g.options.length, 0);
+      tree.append(node(st.id, 'step', h('span.row', h('span.faint', { onclick: (e) => { e.stopPropagation(); collapsed[st.id] = open; store.set('fomodCollapsed:' + id, collapsed); renderTree(); } }, open ? '▾' : '▸'), h('span.ellipsis', st.name || '(page)')),
+        h('span.n', count)));
+      if (!open) return;
+      st.groups.forEach((g) => {
+        const gn = node(g.id, 'group', h('span.ellipsis', g.name || '(group)'), h('span.row', { style: { marginLeft: 'auto' } }, h('span.kind', (GROUP_TYPES.find((t) => t[0] === g.type) || [0, g.type])[1]), h('span.n', g.options.length)));
+        gn.addEventListener('dragover', (e) => { if (drag) { e.preventDefault(); gn.classList.add('drop-over'); } });
+        gn.addEventListener('dragleave', () => gn.classList.remove('drop-over'));
+        gn.addEventListener('drop', (e) => { e.preventDefault(); gn.classList.remove('drop-over'); if (!drag) return; drag.fromGroup.options.splice(drag.fromGroup.options.indexOf(drag.option), 1); g.options.push(drag.option); drag = null; changed(true); });
+        tree.append(gn);
+        g.options.forEach((o) => {
+          const badge = o.mode === 'Detect' ? h('span.kind', { title: 'Detects: ' + o.plugins.join(', ') }, 'detect')
+            : h('span.kind', o.mode.toLowerCase());
+          const on = node(o.id, 'opt', h('span.ellipsis', o.carriesJson ? '{ } ' : '', o.name || '(option)'), h('span.row', { style: { marginLeft: 'auto' } }, o.patchId ? h('span.kind', { title: 'Linked to a DBVO Patch' }, '🔗') : null, badge));
+          on.draggable = true;
+          on.addEventListener('dragstart', () => { drag = { option: o, fromGroup: g }; });
+          on.addEventListener('dragend', () => { drag = null; });
+          on.addEventListener('dragover', (e) => { if (drag && drag.option !== o) { e.preventDefault(); on.classList.add('drop-over'); } });
+          on.addEventListener('dragleave', () => on.classList.remove('drop-over'));
+          on.addEventListener('drop', (e) => {
+            e.preventDefault(); e.stopPropagation(); on.classList.remove('drop-over');
+            if (!drag || drag.option === o) return;
+            drag.fromGroup.options.splice(drag.fromGroup.options.indexOf(drag.option), 1);
+            g.options.splice(g.options.indexOf(o), 0, drag.option);
+            drag = null;
+            changed(true);
+          });
+          tree.append(on);
+        });
+      });
+    });
+    tree.append(h('div.row', { style: { padding: '10px 8px' } }, h('button.btn.sm', { onclick: () => { const st = { id: newId(), name: 'New page', visibleXml: null, groupsOrder: 'Explicit', groups: [{ id: newId(), name: 'New group', type: 'SelectAny', order: 'Explicit', options: [] }] }; proj.steps.push(st); changed(); select(st.id); } }, '+ Page'),
+      h('span.faint', 'Drag options between groups.')));
+  }
+
+  // ---- editor panels
+  const sec = (title, extra, ...rows) => h('div.section', h('div.section-head', h('h2', title), extra), h('div.section-body', rows));
+  const srow = (label, help, control) => h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', control));
+  const txt = (obj, key, opts = {}) => {
+    const i = opts.area ? h('textarea', { rows: opts.rows || 6, placeholder: opts.placeholder || '' }, obj[key] ?? '') : h('input', { type: 'text', value: obj[key] ?? '', placeholder: opts.placeholder || '', style: { width: '100%' } });
+    i.addEventListener('input', () => { obj[key] = i.value; changed(opts.tree); if (opts.after) opts.after(); });
+    return i;
+  };
+  const relPath = (abs) => {
+    const root = (proj.rootFolder || '').replace(/[\\/]+$/, '');
+    if (root && abs.toLowerCase().startsWith(root.toLowerCase() + '\\')) return abs.slice(root.length + 1);
+    return abs;
+  };
+  const imagePicker = (obj, key) => {
+    const prev = h('div');
+    const load = async () => {
+      clear(prev);
+      if (!obj[key]) return;
+      try {
+        const url = await rpc('file.dataUrl', { path: obj[key], root: proj.rootFolder });
+        prev.append(url ? h('img.img-preview', { src: url }) : h('div.faint', 'Image not found (relative to the FOMOD root).'));
+      } catch (e) { prev.append(h('div.faint', e.message)); }
+    };
+    const i = h('input', { type: 'text', value: obj[key] || '', placeholder: 'Images\\Header.png' });
+    i.addEventListener('change', () => { obj[key] = i.value.trim(); changed(); load(); });
+    load();
+    return h('div.col', h('div.path-input', i, h('button.btn.sm', { onclick: async () => {
+      const f = await rpc('pick.file', { title: 'Choose an image', filter: 'Images|*.png;*.jpg;*.jpeg;*.gif;*.bmp' });
+      if (f) { i.value = relPath(f); obj[key] = i.value; changed(); load(); }
+    } }, 'Browse'), obj[key] ? h('button.btn.sm.ghost', { onclick: () => { i.value = ''; obj[key] = ''; changed(); load(); } }, 'Remove') : null), prev);
+  };
+
+  function renderEditor() {
+    clear(edit);
+    const f = find(selKey);
+    if (f.kind === 'project') edit.append(projectPanel());
+    else if (f.kind === 'json') edit.append(jsonPanel());
+    else if (f.kind === 'step') edit.append(stepPanel(f.step));
+    else if (f.kind === 'group') edit.append(groupPanel(f.step, f.group));
+    else edit.append(optionPanel(f.step, f.group, f.option));
+  }
+
+  function projectPanel() {
+    const i = proj.info;
+    const groups = h('input', { type: 'text', value: (i.groups || []).join(', '), style: { width: '100%' } });
+    groups.addEventListener('input', () => { i.groups = groups.value.split(',').map((x) => x.trim()).filter(Boolean); changed(); });
+    const pathIn = (key, title) => {
+      const el = h('input', { type: 'text', value: proj[key] || '' });
+      el.addEventListener('change', () => { proj[key] = el.value.trim(); changed(); });
+      return h('div.path-input', el, h('button.btn.sm', { onclick: async () => { const f = await rpc('pick.folder', { title }); if (f) { el.value = f; proj[key] = f; changed(); } } }, 'Browse'));
+    };
+    return h('div',
+      sec('Installer', null,
+        srow('Project name', 'Only shown in this app.', txt(proj, 'name', { after: renderHead })),
+        srow('FOMOD root folder', 'The folder that holds your patch folders and images. Relative file sources start here.', pathIn('rootFolder', 'FOMOD root folder')),
+        srow('Release folder', 'The packed archive is written here, named from the mod name and version.', pathIn('releaseFolder', 'Release folder')),
+        srow('Archive', '.zip needs nothing; .7z uses 7-Zip (Global Settings).', segmented([['zip', '.zip'], ['7z', '.7z']], proj.archiveFormat, (x) => { proj.archiveFormat = x; changed(); renderEditor(); renderHead(); })),
+        srow('XML encoding', 'UTF-16 is what FOMOD Creation Tool writes; both work in MO2 and Vortex.', segmented([['utf-16', 'UTF-16'], ['utf-8', 'UTF-8']], proj.encoding, (x) => { proj.encoding = x; changed(); renderEditor(); })),
+        srow('Title in the installer', 'moduleName in ModuleConfig.xml.', txt(proj, 'moduleName')),
+        srow('Header image', 'moduleImage: shown at the top of every page.', imagePicker(proj, 'moduleImage'))),
+      sec('info.xml', null,
+        srow('Mod name', null, txt(i, 'name')),
+        srow('Author', null, txt(i, 'author')),
+        srow('Version', 'Also used in the archive name.', txt(i, 'version')),
+        srow('Website', 'e.g. your Nexus page.', txt(i, 'website')),
+        srow('Description', null, txt(i, 'description', { area: true, rows: 8 })),
+        srow('Groups', 'Comma separated, e.g. Audio - Voice.', groups)),
+      proj.moduleDependenciesXml || proj.conditionalFileInstallsXml || (proj.requiredInstallFiles || []).length
+        ? sec('Kept from the imported FOMOD', null,
+          h('div.help', { style: { margin: '10px 0' } }, 'These parts have no simple editor. They are written back exactly as they are; edit the XML here if you know the format.'),
+          proj.moduleDependenciesXml != null ? srow('Module dependencies', null, txt(proj, 'moduleDependenciesXml', { area: true, rows: 5 })) : null,
+          proj.conditionalFileInstallsXml != null ? srow('Conditional file installs', null, txt(proj, 'conditionalFileInstallsXml', { area: true, rows: 8 })) : null,
+          (proj.requiredInstallFiles || []).length ? srow('Required install files', null, filesTable(proj.requiredInstallFiles)) : null)
+        : null);
+  }
+
+  function jsonPanel() {
+    const j = proj.json;
+    const tri = (key, label, help) => srow(label, help, segmented([['', 'Not written (DBVO default)'], ['true', 'true'], ['false', 'false']], j[key] == null ? '' : String(j[key]), (x) => { j[key] = x === '' ? null : x === 'true'; changed(); renderEditor(); }));
+    const carriers = proj.steps.flatMap((s) => s.groups.flatMap((g) => g.options.filter((o) => o.carriesJson).map((o) => ({ s, g, o }))));
+    const preview = h('div.box.mono', { style: { whiteSpace: 'pre' } });
+    const upd = () => {
+      const o = { voice_pack_name: j.voicePackName, voice_pack_id: j.voicePackId };
+      const ov = {};
+      if (j.disableAliasParsing != null) ov.disable_alias_parsing = j.disableAliasParsing;
+      if (j.forceLocalizedParsing != null) ov.force_localized_parsing = j.forceLocalizedParsing;
+      if (Object.keys(ov).length) o.override = ov;
+      preview.textContent = JSON.stringify(o, null, 2);
+    };
+    upd();
+    return h('div', sec('DBVO voice pack JSON', switchEl(j.enabled, (x) => { j.enabled = x; changed(true); renderEditor(); }, 'Add to the installer'),
+      h('div.help', { style: { margin: '10px 0' } }, 'This small file makes the voice selectable in DBVO\'s MCM. It is written when you build and installed by the option marked "Carries the DBVO JSON" (normally a Required core option).',
+        h('p', 'Location in the game\'s Data folder: ', h('span.mono', dto.jsonPath), ' (', dto.naming === 'Legacy' ? 'Legacy / DBVO 1' : 'DBVO 2.0', ', from the voice pack\'s naming).')),
+      srow('voice_pack_name', 'Shown in DBVO\'s menu.', txt(j, 'voicePackName', { after: upd })),
+      srow('voice_pack_id', 'Must match the folder under Sound\\DBVO\\.', txt(j, 'voicePackId', { after: upd })),
+      tri('disableAliasParsing', 'override.disable_alias_parsing', 'true stops DBVO from parsing <Alias> names (its alias parsing is buggy in game).'),
+      tri('forceLocalizedParsing', 'override.force_localized_parsing', 'Rarely needed.'),
+      srow('Carried by', null, carriers.length ? h('div.col', carriers.map(({ s, g, o }) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); select(o.id); } }, `${s.name} › ${g.name} › ${o.name}`)))
+        : h('span.badge.b-broken', 'No option carries it — tick "Carries the DBVO JSON" on a Required option')),
+      srow('Preview', null, preview)));
+  }
+
+  function stepPanel(st) {
+    const si = proj.steps.indexOf(st);
+    return h('div', sec('Page (install step)', h('div.row', h('div.spacer'),
+      h('button.btn.sm', { disabled: si === 0, onclick: () => move(proj.steps, si, -1) }, '↑'),
+      h('button.btn.sm', { disabled: si === proj.steps.length - 1, onclick: () => move(proj.steps, si, 1) }, '↓'),
+      h('button.btn.sm.danger', { onclick: async () => { if (await confirmBox('Delete page?', `Delete "${st.name}" and its ${st.groups.reduce((a, g) => a + g.options.length, 0)} option(s)?`, 'Delete', true)) { proj.steps.splice(si, 1); changed(); select('project'); } } }, 'Delete')),
+      srow('Name', null, txt(st, 'name', { tree: true })),
+      srow('Visibility', 'Optional conditions (flags / plugins) for showing this page. Kept from imports; edit as XML.', st.visibleXml != null ? txt(st, 'visibleXml', { area: true, rows: 4 })
+        : h('button.btn.sm', { onclick: () => { st.visibleXml = '<visible operator="And">\n  <fileDependency file="Example.esp" state="Active" />\n</visible>'; changed(); renderEditor(); } }, '+ Add a condition')),
+      srow('Groups', null, h('div.col', st.groups.map((g) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); select(g.id); } }, `${g.name} · ${g.options.length} option(s)`)),
+        h('button.btn.sm', { style: { alignSelf: 'flex-start' }, onclick: () => { const g = { id: newId(), name: 'New group', type: 'SelectAny', order: 'Explicit', options: [] }; st.groups.push(g); changed(); select(g.id); } }, '+ Group')))));
+  }
+
+  function groupPanel(st, g) {
+    const gi = st.groups.indexOf(g);
+    const typeSel = h('select', GROUP_TYPES.map(([v, t]) => h('option', { value: v, selected: v === g.type }, t)));
+    const typeHelp = h('div.faint', (GROUP_TYPES.find((t) => t[0] === g.type) || [])[2] || '');
+    typeSel.addEventListener('change', () => { g.type = typeSel.value; typeHelp.textContent = (GROUP_TYPES.find((t) => t[0] === g.type) || [])[2] || ''; changed(true); });
+    return h('div', sec('Group', h('div.row', h('div.spacer'),
+      h('button.btn.sm', { disabled: gi === 0, onclick: () => move(st.groups, gi, -1) }, '↑'),
+      h('button.btn.sm', { disabled: gi === st.groups.length - 1, onclick: () => move(st.groups, gi, 1) }, '↓'),
+      h('button.btn.sm.danger', { onclick: async () => { if (await confirmBox('Delete group?', `Delete "${g.name}" and its ${g.options.length} option(s)?`, 'Delete', true)) { st.groups.splice(gi, 1); changed(); select(st.id); } } }, 'Delete')),
+      srow('Name', null, txt(g, 'name', { tree: true })),
+      srow('Selection', null, h('div.col', typeSel, typeHelp)),
+      srow('Order', 'Explicit keeps your order; Ascending sorts A–Z in the installer.', segmented([['Explicit', 'As listed'], ['Ascending', 'A–Z'], ['Descending', 'Z–A']], g.order, (x) => { g.order = x; changed(); renderEditor(); })),
+      srow('Options', null, h('div.col',
+        h('div.row', h('button.btn.sm', { onclick: () => { const o = blankOption(); g.options.push(o); changed(); select(o.id); } }, '+ Option'),
+          h('button.btn.sm', { onclick: () => { g.options.sort((a, b) => (a.mode === 'Required' ? -1 : 0) - (b.mode === 'Required' ? -1 : 0) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })); changed(true); renderEditor(); } }, 'Sort A–Z')),
+        g.options.map((o) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); select(o.id); } }, o.name || '(option)'))))));
+  }
+
+  const blankOption = () => ({ id: newId(), name: 'New option', description: '', image: '', files: [], mode: 'Optional', plugins: [], requireAll: false, notUsableWhenMissing: true, typeDescriptorXml: null, conditionFlagsXml: null, flagsFirst: false, patchId: null, modId: null, carriesJson: false });
+
+  function filesTable(list) {
+    const tbody = h('tbody');
+    const render = () => {
+      clear(tbody);
+      list.forEach((f, i) => {
+        const kind = h('select', h('option', { value: 'folder', selected: f.kind === 'folder' }, 'folder'), h('option', { value: 'file', selected: f.kind === 'file' }, 'file'));
+        kind.addEventListener('change', () => { f.kind = kind.value; changed(); });
+        const src = h('input', { type: 'text', value: f.source, placeholder: 'relative to the FOMOD root' });
+        src.addEventListener('input', () => { f.source = src.value; changed(); });
+        const dst = h('input', { type: 'text', value: f.destination, placeholder: f.kind === 'folder' ? 'e.g. Sound' : 'e.g. DBVO Fix - Mod.esp' });
+        dst.addEventListener('input', () => { f.destination = dst.value; changed(); });
+        const pr = h('input', { type: 'number', value: f.priority || 0, style: { width: '60px' } });
+        pr.addEventListener('change', () => { f.priority = Number(pr.value) || 0; changed(); });
+        tbody.append(h('tr', h('td', { style: { width: '90px' } }, kind),
+          h('td', h('div.path-input', src, h('button.btn.sm', { onclick: async () => { const p = f.kind === 'folder' ? await rpc('pick.folder', { title: 'Source folder' }) : await rpc('pick.file', { title: 'Source file' }); if (p) { f.source = relPath(p); src.value = f.source; changed(); } } }, '…'))),
+          h('td', dst), h('td', pr), h('td', h('button.icon-btn', { title: 'Remove', onclick: () => { list.splice(i, 1); render(); changed(); } }, '×'))));
+      });
+    };
+    render();
+    return h('div', h('table.tbl.ftbl', h('thead', h('tr', h('th', 'Kind'), h('th', 'Source'), h('th', 'Installs to (Data\\…)'), h('th', 'Priority'), h('th', ''))), tbody),
+      h('div.row', { style: { marginTop: '6px' } },
+        h('button.btn.sm', { onclick: async () => { const p = await rpc('pick.folder', { title: 'Folder to install' }); if (!p) return; const name = p.split('\\').pop(); list.push({ kind: 'folder', source: relPath(p), destination: /^(sound|meshes|textures|interface|scripts|skse|dragonbornvoiceover)$/i.test(name) ? name : '', priority: 0 }); render(); changed(); } }, '+ Folder'),
+        h('button.btn.sm', { onclick: async () => { const p = await rpc('pick.file', { title: 'File to install' }); if (!p) return; list.push({ kind: 'file', source: relPath(p), destination: p.split('\\').pop(), priority: 0 }); render(); changed(); } }, '+ File'),
+        h('span.faint', 'Destination is relative to the game\'s Data folder; empty = the Data folder itself.')));
+  }
+
+  function optionPanel(st, g, o) {
+    const oi = g.options.indexOf(o);
+    const modeSel = h('select', MODES.filter(([v]) => v !== 'Advanced' || o.mode === 'Advanced' || true).map(([v, t]) => h('option', { value: v, selected: v === o.mode }, t)));
+    const modeHelp = h('div.faint', (MODES.find((m) => m[0] === o.mode) || [])[2] || '');
+    modeSel.addEventListener('change', () => {
+      o.mode = modeSel.value;
+      if (o.mode === 'Advanced' && !o.typeDescriptorXml) o.typeDescriptorXml = '<typeDescriptor>\n  <type name="Optional" />\n</typeDescriptor>';
+      changed(true);
+      renderEditor();
+    });
+    const pluginsBox = h('div.row.wrap');
+    const renderPlugins = () => {
+      const add = h('input', { type: 'text', placeholder: 'Plugin.esp, then Enter', style: { width: '200px' } });
+      add.addEventListener('keydown', (e) => { if (e.key === 'Enter' && add.value.trim()) { o.plugins.push(add.value.trim()); changed(true); renderPlugins(); } });
+      clear(pluginsBox).append(o.plugins.map((p, i) => h('span.chip', h('span.mono', p), h('button.icon-btn', { onclick: () => { o.plugins.splice(i, 1); changed(true); renderPlugins(); } }, '×'))), add);
+    };
+    renderPlugins();
+    return h('div',
+      sec('Option', h('div.row', h('div.spacer'),
+        h('button.btn.sm', { disabled: oi === 0, onclick: () => move(g.options, oi, -1) }, '↑'),
+        h('button.btn.sm', { disabled: oi === g.options.length - 1, onclick: () => move(g.options, oi, 1) }, '↓'),
+        h('button.btn.sm', { onclick: () => { const c = structuredClone(o); c.id = newId(); c.name += ' (copy)'; c.carriesJson = false; g.options.splice(oi + 1, 0, c); changed(); select(c.id); } }, 'Duplicate'),
+        h('button.btn.sm.danger', { onclick: async () => { if (await confirmBox('Delete option?', `Delete "${o.name}"?`, 'Delete', true)) { g.options.splice(oi, 1); changed(); select(g.id); } } }, 'Delete')),
+        h('div.faint', { style: { padding: '8px 0 0' } }, `${st.name} › ${g.name}`),
+        srow('Name', null, txt(o, 'name', { tree: true })),
+        srow('Description', 'Shown when the user hovers the option. Links can be copied from here by your users.', txt(o, 'description', { area: true, rows: 7 })),
+        srow('Image', 'Shown next to the description. Relative to the FOMOD root.', imagePicker(o, 'image')),
+        o.patchId ? srow('Linked to', 'Files below come from this DBVO Patch; "⟳ Refresh linked" updates them.', h('div.row', h('span.badge.b-fixed', '🔗 ' + ((app.state.patches.find((p) => p.id === o.patchId) || {}).name || 'a DBVO Patch')),
+          h('button.btn.sm.ghost', { onclick: () => { o.patchId = null; o.modId = null; changed(true); renderEditor(); } }, 'Unlink'))) : null,
+        srow('Carries the DBVO JSON', 'The voice pack file is installed with this option. Use a Required one.', switchEl(o.carriesJson, (x) => {
+          for (const s2 of proj.steps) for (const g2 of s2.groups) for (const o2 of g2.options) if (x) o2.carriesJson = false;
+          o.carriesJson = x; changed(true); renderEditor();
+        }))),
+      sec('Offered as', null,
+        srow('Type', null, h('div.col', modeSel, modeHelp)),
+        o.mode === 'Detect' ? srow('Detect these plugins', 'Plugin file names as in the load order.', h('div.col', pluginsBox,
+          h('div.row', segmented([['any', 'Any of them'], ['all', 'All of them']], o.requireAll ? 'all' : 'any', (x) => { o.requireAll = x === 'all'; changed(); renderEditor(); }),
+            switchEl(o.notUsableWhenMissing, (x) => { o.notUsableWhenMissing = x; changed(); }, 'Grey out (Not usable) when missing')))) : null,
+        o.mode === 'Advanced' ? srow('Type descriptor XML', 'Written exactly as typed.', txt(o, 'typeDescriptorXml', { area: true, rows: 12 })) : null,
+        o.conditionFlagsXml != null ? srow('Condition flags XML', 'Flags this option sets for later pages or conditional installs.', txt(o, 'conditionFlagsXml', { area: true, rows: 4 })) : null),
+      sec('Files', null, filesTable(o.files)));
+  }
+
+  // ---- actions
+  async function addPatches() {
+    await refreshState();
+    const patches = app.state.patches.filter((p) => (p.kind || 'tts') === 'tts' && (!proj.voicePackId || p.voicePackId === proj.voicePackId));
+    if (!patches.length) { toast('No DBVO Patches for this voice pack yet.', true); return; }
+    const linked = new Set(proj.steps.flatMap((s) => s.groups.flatMap((g) => g.options.map((o) => o.patchId))).filter(Boolean));
+    const boxes = patches.map((p) => ({ p, box: h('input', { type: 'checkbox', checked: !linked.has(p.id) }) }));
+    let sort = true;
+    const ok = await modal('Add DBVO Patches', [
+      h('div', 'Each mod becomes an option on the page of its category (made if missing), detecting the mod\'s plugins and installing its Sound folder and DBVO Fix plugins from the patch\'s final folder. Patches already in this FOMOD only get their files updated.'),
+      h('div.box', { style: { maxHeight: '320px', overflow: 'auto' } }, boxes.map(({ p, box }) => h('label.row', box, h('span.grow', p.name), h('span.faint', p.category), linked.has(p.id) ? h('span.badge.b-skip', 'already in') : null))),
+      switchEl(sort, (x) => { sort = x; }, 'Sort each group A–Z afterwards'),
+    ], [{ label: 'Cancel', value: false }, { label: 'Add', primary: true, value: true }]);
+    if (!ok) return;
+    try {
+      const r = await rpc('fomod.addPatches', { project: proj, patchIds: boxes.filter((x) => x.box.checked).map((x) => x.p.id), sort: sort ? 'az' : '' });
+      dto = r.project; proj = dto.project;
+      toast(`${r.added} option(s) added, ${r.updated} updated.`);
+      renderAll();
+    } catch (e) { fail(e); }
+  }
+
+  async function refreshLinked() {
+    try { dto = await rpc('fomod.refresh', { project: proj }); proj = dto.project; renderAll(); toast('Linked options updated.'); } catch (e) { fail(e); }
+  }
+
+  async function validate() {
+    try {
+      const issues = await rpc('fomod.validate', { project: proj });
+      const errors = issues.filter((i) => i.level === 'error');
+      await modal(issues.length ? `${errors.length} error(s), ${issues.length - errors.length} warning(s)` : 'No problems found', [
+        issues.length ? h('div.box', { style: { maxHeight: '60vh', overflow: 'auto', padding: 0 } }, issues.map((i) => h('div.issue', { onclick: () => { if (i.optionId) { document.getElementById('modal').classList.add('hidden'); select(i.optionId); } } },
+          h('span.badge.' + (i.level === 'error' ? 'b-broken' : 'b-toolong'), i.level), h('span.faint', i.where), h('span', i.message))))
+          : h('div', 'The XML passes the ModConfig 5.0 schema, every file is in place and the DBVO JSON is carried by an option.'),
+      ], undefined, { wide: true });
+    } catch (e) { fail(e); }
+  }
+
+  async function simulate() {
+    const linkedPlugins = new Set(['Skyrim.esm', 'Update.esm', 'Dawnguard.esm', 'HearthFires.esm', 'Dragonborn.esm']);
+    for (const s of proj.steps) for (const g of s.groups) for (const o of g.options) if (o.mode === 'Detect') o.plugins.forEach((p) => linkedPlugins.add(p));
+    const plugins = h('textarea', { rows: 8, placeholder: 'One plugin per line' }, store.get('simPlugins:' + id, [...linkedPlugins].join('\n')));
+    const out = h('div');
+    const choices = {};
+    const run = async () => {
+      store.set('simPlugins:' + id, plugins.value);
+      try {
+        const r = await rpc('fomod.simulate', { project: proj, plugins: plugins.value.split(/\r?\n/), choices });
+        clear(out).append(
+          h('div.field-label', 'Pages'),
+          h('div.box', { style: { maxHeight: '36vh', overflow: 'auto' } }, r.steps.map((s) => h('div', { style: { marginBottom: '8px' } },
+            h('div', h('b', s.name), s.visible ? null : h('span.faint', ' · hidden by its conditions')),
+            s.groups.map((g) => h('div', { style: { paddingLeft: '14px' } }, h('div.faint', `${g.name} · ${g.type}`),
+              g.options.map((o) => {
+                const cb = h('input', { type: 'checkbox', checked: o.selected, disabled: o.locked });
+                cb.addEventListener('change', () => { choices[o.id] = cb.checked; run(); });
+                return h('label.row', { style: { paddingLeft: '14px' } }, cb, h('span', o.name), h('span.badge.' + ({ Required: 'b-fixed', Recommended: 'b-valid', NotUsable: 'b-broken' }[o.type] || 'b-skip'), o.type));
+              })))))),
+          h('div.field-label', { style: { marginTop: '10px' } }, `Would install (${r.files.length} entries)`),
+          h('div.box.mono', { style: { maxHeight: '22vh', overflow: 'auto', fontSize: '12px' } }, r.files.map((f) => h('div', { style: { color: f.exists ? '' : 'var(--bad)' } }, `${f.exists ? '✓' : '✕ missing'}  ${f.source} → Data\\${f.destination}${f.kind === 'folder' || f.fileCount > 1 ? `  (${f.fileCount} files)` : ''}  · ${f.option}`))),
+          r.conflicts.length ? h('div.banner.warn', { style: { margin: '10px 0 0' } }, h('div', h('b', `${r.conflicts.length} file(s) installed by more than one option: `), h('div.mono', { style: { fontSize: '11.5px', maxHeight: '120px', overflow: 'auto' } }, r.conflicts.slice(0, 50).join('\n')))) : null,
+          r.flags.length ? h('div.faint', { style: { marginTop: '6px' } }, r.flags.join(' · ')) : null);
+      } catch (e) { fail(e); }
+    };
+    run();
+    await modal('Simulate install', [
+      h('div', 'Shows what Mod Organizer 2 or Vortex would pre-tick for a load order, and which files would install. Tick or untick options to try choices.'),
+      h('div.row', { style: { alignItems: 'flex-start' } },
+        h('div.col', { style: { width: '320px', flexShrink: 0 } }, h('div.field-label', 'Active plugins'), plugins,
+          h('div.row', h('button.btn.sm', { onclick: async () => {
+            const f = await rpc('pick.file', { title: 'plugins.txt (MO2 profile or %LOCALAPPDATA%\\Skyrim Special Edition)', filter: 'Load order|plugins.txt;loadorder.txt;*.txt' });
+            if (!f) return;
+            try { plugins.value = (await rpc('fomod.loadOrder', { path: f })).join('\n'); run(); } catch (e) { fail(e); }
+          } }, 'Load plugins.txt…'), h('button.btn.sm.primary', { onclick: run }, 'Run'))),
+        h('div.grow', out)),
+    ], undefined, { wide: true });
+  }
+
+  async function previewXml() {
+    try {
+      const r = await rpc('fomod.preview', { project: proj });
+      const tabs = { 'ModuleConfig.xml': r.moduleConfig, 'info.xml': r.info, 'DBVO JSON': r.json };
+      const box = h('textarea', { rows: 28, readonly: true, style: { fontFamily: 'Consolas, monospace', fontSize: '12px', whiteSpace: 'pre' } }, r.moduleConfig);
+      let cur = 'ModuleConfig.xml';
+      const seg = h('div');
+      const renderSeg = () => clear(seg).append(segmented(Object.keys(tabs).map((k) => [k, k]), cur, (k) => { cur = k; box.value = tabs[k]; renderSeg(); }));
+      renderSeg();
+      await modal('Generated files', [seg, box, h('div.faint', 'Before packing, file sources outside the FOMOD root are mapped into _external\\ and the DBVO JSON into _common\\.')], undefined, { wide: true });
+    } catch (e) { fail(e); }
+  }
+
+  async function runBuild(pack) {
+    try {
+      await rpc('fomod.save', { project: proj });
+      await rpc('fomod.build', { project: proj, package: pack });
+      renderHead();
+    } catch (e) { fail(e); }
+  }
+
+  document.addEventListener('job-done', (e) => {
+    if (!document.body.contains(view) || e.detail.kind !== 'fomod') return;
+    if (e.detail.project) { proj.lastBuildUtc = e.detail.project.lastBuildUtc; proj.lastArchive = e.detail.project.lastArchive; }
+    renderHead();
+  });
+
+  function renderAll() { renderHead(); renderTree(); renderEditor(); }
+  renderAll();
+  return view;
+}

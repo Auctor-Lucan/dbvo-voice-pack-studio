@@ -1,5 +1,5 @@
 // Phase 1: Mods list and the per-plugin workspace.
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const KIND_LABEL = {
@@ -12,6 +12,7 @@ const KIND_LABEL = {
 
 export function kindBadge(l) {
   if (l.status === 'Removed') return h('span.badge.b-removed', 'Removed');
+  if (l.resolved) return h('span.badge.b-fixed', { title: `Was ${(KIND_LABEL[l.kind] || [l.kind])[0]}; the final text now passes the script.` }, 'Fixed ✓');
   if (l.isPlayerName && l.kind !== 'TooLong') return h('span.badge.b-player', 'PLAYER NAME');
   const [t, c] = KIND_LABEL[l.kind] || [l.kind, 'b-skip'];
   return h('span.badge.' + c, t);
@@ -38,7 +39,7 @@ export async function modsView() {
   const view = h('div.view');
   view.append(h('div.view-head',
     h('h1', 'Mods'),
-    h('span.sub', 'Phase 1 · read plugins or topic files and make their lines DBVO-ready. Shared by every voice pack.'),
+    h('span.sub', 'Read plugins or topic files and make their lines DBVO-ready. Shared by every voice pack.'),
     h('div.spacer'),
     h('button.btn.primary', { onclick: newMod }, '+ New mod')));
   const body = h('div.view-body');
@@ -59,13 +60,18 @@ export async function modsView() {
       const mods = s.mods.filter((m) => (m.category || 'Misc') === cat && (!f || m.name.toLowerCase().includes(f)));
       if (!mods.length) continue;
       listEl.append(h('div.cat', h('div.cat-head', h('h3', cat), h('span.faint', mods.length)),
-        mods.map((m) => h('div.prow', { style: { gridTemplateColumns: 'minmax(200px,2fr) minmax(200px,3fr) 220px' }, onclick: () => go('mod', { id: m.id }) },
-          h('div.ellipsis', h('b', m.name), m.version ? h('span.faint', '  v' + m.version) : null),
-          h('div.faint.ellipsis.mono', m.plugins.map((p) => p.fileName).join(', ') || 'no plugins yet'),
-          h('div.row', { style: { justifyContent: 'flex-end' } },
-            m.plugins.some((p) => p.unreviewed) ? h('span.badge.b-broken', `${m.plugins.reduce((a, p) => a + p.unreviewed, 0)} to review`) : null,
-            m.plugins.some((p) => p.needsFix) ? h('span.badge.b-fixed', 'DBVO Fix') : null,
-            h('span.faint', `${m.plugins.reduce((a, p) => a + p.topicLines, 0)} lines`))))));
+        h('div.cards2', mods.map((m) => {
+          const unrev = m.plugins.reduce((a, p) => a + p.unreviewed, 0);
+          const lines = m.plugins.reduce((a, p) => a + p.topicLines, 0);
+          const fixes = m.plugins.reduce((a, p) => a + p.fixes, 0);
+          return h('div.pcard', { onclick: () => go('mod', { id: m.id }) },
+            h('div.row', h('span.title.ellipsis.grow', m.name, m.version ? h('span.faint', { style: { fontWeight: 400 } }, '  v' + m.version) : null),
+              unrev ? h('span.badge.b-broken', `${unrev} flagged to review`) : h('span.badge.b-valid', 'reviewed')),
+            h('div.meta.mono.ellipsis', m.plugins.map((p) => p.fileName).join(', ') || 'no plugins yet'),
+            h('div.stat-row', h('span', h('b', lines), ' topic lines'),
+              fixes ? h('span', h('b', fixes), ' in DBVO Fix') : h('span', 'no DBVO Fix needed'),
+              m.plugins.some((p) => p.playerNames) ? h('span', h('b', m.plugins.reduce((a, p) => a + (p.playerNames || 0), 0)), ' player-name') : null));
+        }))));
     }
   };
   q.addEventListener('input', render);
@@ -105,8 +111,9 @@ export async function modView(id) {
 
   const view = h('div.view');
   const head = h('div.view-head');
-  const hint = h('div.hint', h('b', 'Review flagged lines'), ' (BROKEN LINE, TOO LONG WILL CTD, PLAYER NAME), then ', h('b', 'Continue to Phase 2'),
-    '. Your edits are saved as you go; Phase 2 reads them directly and writes the DBVO Fix plugin and topic file for you. "Export…" is only for using the files outside this app.');
+  const hint = h('div.hint', h('b', 'Review flagged lines'), ' (BROKEN LINE, TOO LONG WILL CTD, PLAYER NAME), then ', h('b', 'Continue to Phase 2'), '. ',
+    'A DBVO Fix plugin is only made when at least one line needs fixing; a clean plugin gets none. ',
+    'Your edits are saved as you go. In Phase 2 they are written for you to the patch\'s DBVO Fix folder and its final folder, or use ', h('b', 'Export…'), ' (top right) to write them anywhere now.');
   const banners = h('div');
   const tabs = h('div.filters');
   const filters = h('div.filters');
@@ -128,7 +135,6 @@ export async function modView(id) {
         l.status === 'ChangedInMod' ? h('span.badge.b-changed', 'changed in mod') : null,
         l.hiddenByPrompts ? h('span.badge.b-hidden', { title: 'Every response has its own prompt, so the game never shows this topic text.' }, l.includeAnyway ? 'hidden · incl.' : 'hidden') : null) },
       { id: 'formid', title: plugin && plugin.isTopicFile ? '' : 'FormID', width: 90, cls: 'mono dim', render: (l) => l.formId },
-      { id: 'record', title: 'Record', width: 96, cls: 'dim', render: (l) => l.record },
       { id: 'orig', title: 'Original', flex: 1, width: 260, render: (l) => h('span', { title: l.original }, l.original) },
       { id: 'final', title: 'Final in-game line', flex: 1.3, width: 320, render: (l) => finalInput(l) },
       { id: 'act', title: '', width: 92, resizable: false, render: (l) => h('div.row',
@@ -203,6 +209,11 @@ export async function modView(id) {
   }
 
   function renderHead() {
+    const addBtn = h('button.btn', 'Add plugins or topic files ▾');
+    addBtn.addEventListener('click', () => popupMenu(addBtn, [
+      { label: 'Plugins (.esp / .esm / .esl)…', sub: 'Added to this mod for DBVO patching. A newer version of a plugin already here updates it and keeps your edits.', onclick: () => addFiles('plugins') },
+      { label: 'Topic files (.txt)…', sub: 'For mods without a plugin (old mods, player-name collections). Lines are checked the same way; no DBVO Fix plugin.', onclick: () => addFiles('topics') },
+    ]));
     const exportBtn = h('button.btn', { disabled: !plugin }, 'Export… ▾');
     exportBtn.addEventListener('click', () => popupMenu(exportBtn, [
       { label: 'Topic files + DBVO Fix plugins to a folder…', sub: 'Only for using them outside this app. Phase 2 writes them for you.', onclick: exportOutputs },
@@ -212,10 +223,10 @@ export async function modView(id) {
       h('h1', mod.name),
       mod.version ? h('span.sub', 'v' + mod.version) : null,
       h('button.icon-btn', { title: 'Rename / version', onclick: editMeta }, '✎'),
-      h('span.faint', 'Category'),
+      h('span.faint', 'Mod Category'),
       categorySelect(mod.category, async (c) => { try { await rpc('mod.setCategory', { id, category: c }); mod.category = c; await refreshState(); renderHead(); } catch (e) { fail(e); } }),
       h('div.spacer'),
-      h('button.btn', { onclick: addFiles }, '+ Add plugins or topic files'),
+      addBtn,
       exportBtn,
       h('button.btn.ghost.danger', { onclick: delMod }, 'Delete'));
   }
@@ -261,7 +272,7 @@ export async function modView(id) {
     }
     const drop = h('span.chip', { title: 'Drop a plugin or topic file. A newer version of an existing one updates it.' }, '+ drop file / update');
     wireDrop(drop, importPaths);
-    drop.addEventListener('click', addFiles);
+    drop.addEventListener('click', () => addFiles());
     tabs.append(drop, h('div.spacer'));
     if (plugin && !plugin.isTopicFile) {
       tabs.append(h('button.btn.sm', { onclick: importFix, title: 'Take the texts of a DBVO Fix plugin you made earlier (for example with xEdit) for this plugin' },
@@ -282,8 +293,8 @@ export async function modView(id) {
     filters.append(chip('all', 'All'), chip('fixes', 'In DBVO Fix'), chip('flagged', 'Flagged'), chip('unreviewed', 'Not reviewed'),
       c.player ? chip('player', 'Player names') : null,
       chip('changed', 'Changed in mod'), chip('edited', 'Edited by you'), chip('hidden', 'Hidden by prompts'), chip('excluded', 'Excluded'), chip('removed', 'Removed'),
-      h('div.spacer'), q,
-      h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp1', showInsp); split.classList.toggle('no-insp', !showInsp); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel'));
+      h('div.spacer'), q, columnsMenu(grid),
+      h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp1', showInsp); split.classList.toggle('no-insp', !showInsp); renderFilters(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel'));
   }
 
   function renderActions() {
@@ -356,7 +367,10 @@ export async function modView(id) {
       if (!text.trim()) return;
       try {
         const r = await rpc('rules.check', { text });
-        if (r.problem) checkEl.append(h('div.check.bad', r.problem));
+        if (r.reasons && r.reasons.length) {
+          checkEl.append(h('div.check.bad', h('b', 'Not accepted by the script yet:'), h('ul', { style: { margin: '4px 0 0', paddingLeft: '18px' } }, r.reasons.map((x) => h('li', x))),
+            r.fix && r.fix !== text.trim() ? h('div', { style: { marginTop: '6px' } }, h('button.btn.sm', { onclick: () => { finalBox.value = r.fix; act(l, 'setFinal', r.fix); } }, 'Use the script\'s version: ' + r.fix)) : null));
+        } else if (r.problem) checkEl.append(h('div.check.bad', r.problem));
         else if (text !== l.original) checkEl.append(h('div.check.ok', r.isPlayerName ? '✓ Valid player-name line' : '✓ The script accepts this line'));
       } catch { /* advisory */ }
     }, 250);
@@ -420,8 +434,9 @@ export async function modView(id) {
     } catch (e) { fail(e); }
   }
 
-  async function addFiles() {
-    const paths = await rpc('pick.files', { title: 'Choose plugins or topic files', filter: 'Plugins and topic files|*.esp;*.esm;*.esl;*.txt|Skyrim plugins|*.esp;*.esm;*.esl|Topic files|*.txt' });
+  async function addFiles(kind) {
+    const filter = kind === 'plugins' ? 'Skyrim plugins|*.esp;*.esm;*.esl' : kind === 'topics' ? 'Topic files|*.txt' : 'Plugins and topic files|*.esp;*.esm;*.esl;*.txt';
+    const paths = await rpc('pick.files', { title: kind === 'topics' ? 'Choose topic files' : 'Choose plugins', filter });
     if (paths) importPaths(paths);
   }
 

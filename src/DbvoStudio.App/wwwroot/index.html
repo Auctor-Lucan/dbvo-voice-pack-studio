@@ -8,24 +8,27 @@
 </head>
 <body>
   <div id="app">
-    <nav id="nav">
+    <header id="top">
       <div class="brand">
         <span class="logo" aria-hidden="true"></span>
-        <div>
-          <div class="brand-name">DBVO Studio</div>
-          <div class="brand-sub">Voice Pack Studio</div>
-        </div>
+        <div class="brand-name">DBVO Studio</div>
       </div>
-      <button class="nav-item" data-view="mods"><span class="n-ico">①</span>Mods</button>
-      <button class="nav-item" data-view="patches"><span class="n-ico">②</span>DBVO Patches</button>
-      <button class="nav-item" data-view="settings"><span class="n-ico">⚙</span>Settings</button>
-      <div class="nav-fill"></div>
+      <nav class="crumbs">
+        <button class="crumb" data-section="mods"><span class="num">1</span>Phase 1: Import Mods</button>
+        <span class="crumb-sep">›</span>
+        <button class="crumb" data-section="patches"><span class="num">2</span>Phase 2: DBVO Patching</button>
+        <span class="crumb-sep">›</span>
+        <button class="crumb" data-section="fomods"><span class="num">3</span>Phase 3: FOMOD Creation</button>
+      </nav>
+      <div style="flex:1"></div>
       <div id="job" class="job hidden">
         <div class="job-label"></div>
         <div class="bar"><div class="bar-fill"></div></div>
         <button class="btn sm ghost" id="job-cancel">Cancel</button>
       </div>
-    </nav>
+      <button class="top-btn" id="tools-btn" data-section="tools">Other Tools ▾</button>
+      <button class="top-btn" data-section="settings">⚙ Global Settings</button>
+    </header>
     <main id="main"></main>
   </div>
   <div id="toast" class="toast hidden"></div>
