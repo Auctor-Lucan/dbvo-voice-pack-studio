@@ -147,6 +147,51 @@ public static class ScriptRules
         return new LineResult(LineKind.Empty, val, null);
     }
 
+    /// <summary>True when the text passes the script unchanged and fits DBVO's limit: it can be voiced as is.</summary>
+    public static bool IsVoiceReady(string text)
+    {
+        var r = Classify(text, null);
+        return r.Kind == LineKind.Valid;
+    }
+
+    /// <summary>
+    /// Every reason the script would not accept this text as is, in plain words (empty when it is voice-ready).
+    /// Mirrors the checks in IsValidLine / IsFixableLine, plus the 150 character limit.
+    /// </summary>
+    public static List<string> Explain(string text)
+    {
+        var why = new List<string>();
+        if (text.Length == 0) return why;
+        string t = Trim(text);
+        if (text.Length > 0 && text[0] <= ' ') why.Add("Starts with a space: DBVO can't match the line to its file. (Removed automatically when you save.)");
+        if (text.Length > 0 && text[^1] <= ' ') why.Add("Ends with a space: DBVO can't match the line to its file. (Removed automatically when you save.)");
+        if (t.Length > MaxLength) why.Add($"{t.Length} characters: lines over {MaxLength} crash DBVO (TOO LONG WILL CTD).");
+        if (t.Contains(';')) why.Add("Contains a semicolon (;): DBVO can't find the file. Use a comma or a period instead.");
+        if (t.StartsWith("...", StringComparison.Ordinal)) why.Add("Starts with \"...\": DBVO can't pick the right file. Remove the leading dots.");
+        if (t.StartsWith("-", StringComparison.Ordinal)) why.Add("Starts with \"-\": the script removes it.");
+        if (t.Contains('*')) why.Add("Contains an asterisk (*): ElevenLabs reads it out as \"asterisk\". Use a trailing (parenthesis) for stage directions, e.g. \"(laughs)\".");
+        if (t.Contains('[') || t.Contains(']')) why.Add("Contains [brackets]: DBVO voices them. Put the words in a trailing (parenthesis) instead, which DBVO keeps silent.");
+        int open = Pos("(", t), close = Pos(")", t);
+        if (open == 1) why.Add("Starts with a parenthesis: DBVO voices text in (parentheses) at the start. Move it to the end, where it stays silent.");
+        else if (close != 0 && close != t.Length) why.Add("Has a parenthesis in the middle: only a (parenthesis) at the very end stays silent. Move it to the end.");
+        int lt = Pos("<", t);
+        if (HasPlayerAlias(t) && !HasOtherAlias(t)) { /* player-name lines are handled separately */ }
+        else if (HasPlaceholder(t)) why.Add("Contains a <Alias=…> placeholder: the subtitle shows a name chosen in game, so no file can match it. Write the name out, or reword the line.");
+        else if (lt != 0 && !(lt > open && open > 1)) why.Add("Contains a \"<\": the script only accepts it inside a trailing parenthesis.");
+        if (t.Contains(LSingle) || t.Contains(RSingle)) why.Add("Contains curly single quotes (‘ ’): use a straight apostrophe (').");
+        if (t.Contains(LDouble) || t.Contains(RDouble)) why.Add("Contains curly double quotes (“ ”): use straight quotes (\").");
+        if (t.Contains(EmDash)) why.Add("Contains an em dash (—): use two hyphens (--).");
+        if (t.Contains(EnDash)) why.Add("Contains an en dash (–): use a hyphen (-).");
+        if (t.Contains(Ellipsis)) why.Add("Contains the single \"…\" character: use three periods (...).");
+        if (why.Count == 0 && !IsVoiceReady(text))
+        {
+            var r = Classify(text, null);
+            if (r.Kind == LineKind.Fixed && r.Final != null) why.Add("The script would reformat it as: " + r.Final);
+            else if (r.Kind == LineKind.Broken) why.Add("The script can't make this line voice-ready.");
+        }
+        return why;
+    }
+
     /// <summary>True when the text contains &lt;Alias=Player&gt; in any letter case. Such lines are voiced through player-name patches.</summary>
     public static bool HasPlayerAlias(string s) => s.Contains("<Alias=Player>", StringComparison.OrdinalIgnoreCase);
 

@@ -9,4 +9,9 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Fomod\ModuleConfig.xsd" LogicalName="DbvoStudio.Core.Fomod.ModuleConfig.xsd" />
+    <None Include="Fomod\ModuleConfig.xsd.LICENSE.txt" />
+  </ItemGroup>
+
 </Project>

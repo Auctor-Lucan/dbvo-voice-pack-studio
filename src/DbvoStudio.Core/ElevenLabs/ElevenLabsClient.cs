@@ -23,6 +23,7 @@ public sealed class ElevenModel
     [JsonPropertyName("can_use_style")] public bool CanUseStyle { get; set; }
     [JsonPropertyName("can_use_speaker_boost")] public bool CanUseSpeakerBoost { get; set; }
     [JsonPropertyName("token_cost_factor")] public double TokenCostFactor { get; set; } = 1;
+    [JsonPropertyName("can_do_voice_conversion")] public bool CanDoVoiceConversion { get; set; }
 }
 
 public sealed class ElevenSubscription
@@ -103,6 +104,36 @@ public sealed class ElevenLabsClient : IDisposable
     {
         var doc = await GetJsonAsync("v1/models", ct);
         return (doc.RootElement.Deserialize<List<ElevenModel>>() ?? new()).Where(m => m.CanDoTextToSpeech).ToList();
+    }
+
+    /// <summary>Models that can convert speech to speech (Voice Changer).</summary>
+    public async Task<List<ElevenModel>> GetStsModelsAsync(CancellationToken ct = default)
+    {
+        var doc = await GetJsonAsync("v1/models", ct);
+        return (doc.RootElement.Deserialize<List<ElevenModel>>() ?? new()).Where(m => m.CanDoVoiceConversion).ToList();
+    }
+
+    /// <summary>
+    /// Speech-to-speech: revoice an existing recording with another voice (multipart upload).
+    /// Returns raw audio bytes in the requested output format.
+    /// </summary>
+    public async Task<byte[]> SpeechToSpeechAsync(string voiceId, string modelId, byte[] audio, string fileName, VoiceSettings? settings,
+        long? seed, bool removeBackgroundNoise, string outputFormat, CancellationToken ct = default)
+    {
+        var url = $"v1/speech-to-speech/{Uri.EscapeDataString(voiceId)}?output_format={Uri.EscapeDataString(outputFormat)}";
+        using var form = new MultipartFormDataContent();
+        var file = new ByteArrayContent(audio);
+        file.Headers.ContentType = new MediaTypeHeaderValue(fileName.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) ? "audio/mpeg" : "audio/wav");
+        form.Add(file, "audio", fileName);
+        form.Add(new StringContent(modelId), "model_id");
+        if (settings != null) form.Add(new StringContent(JsonSerializer.Serialize(settings, Json)), "voice_settings");
+        if (seed != null) form.Add(new StringContent(seed.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)), "seed");
+        if (removeBackgroundNoise) form.Add(new StringContent("true"), "remove_background_noise");
+        using var msg = new HttpRequestMessage(HttpMethod.Post, url) { Content = form };
+        msg.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("audio/*"));
+        using var resp = await _http.SendAsync(msg, ct);
+        if (!resp.IsSuccessStatusCode) throw await ErrorAsync(resp, ct);
+        return await resp.Content.ReadAsByteArrayAsync(ct);
     }
 
     public async Task<ElevenSubscription> GetSubscriptionAsync(CancellationToken ct = default)

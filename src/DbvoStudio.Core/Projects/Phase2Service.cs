@@ -1,5 +1,6 @@
 using DbvoStudio.Core.Audio;
 using DbvoStudio.Core.ElevenLabs;
+using DbvoStudio.Core.Engines;
 using DbvoStudio.Core.Naming;
 using DbvoStudio.Core.Plugins;
 using DbvoStudio.Core.Rules;
@@ -138,6 +139,7 @@ public sealed class Phase2Service
         report.Removed = old.Keys.Count(k => !result.ContainsKey(k));
         patch.Lines = result.Values.ToList();
         report.Total = patch.Lines.Count;
+        if (patch.Kind == "vc") MatchSources(patch);
         _lib.Save(patch);
         return report;
     }
@@ -147,6 +149,7 @@ public sealed class Phase2Service
     {
         var only = onlyLineIds?.ToHashSet();
         return patch.Lines.Where(l => !l.IsOmitted)
+            .Where(l => patch.Kind != "vc" || l.SourceWav != null)
             .Where(l => only == null || only.Contains(l.LineId))
             .Where(l => regenerate || only != null || l.Status is Phase2Status.Pending or Phase2Status.Failed or Phase2Status.Stale)
             .ToList();
@@ -181,28 +184,117 @@ public sealed class Phase2Service
         return t;
     }
 
+    /// <summary>Audio for one line from the voice pack's engine, before conversion.</summary>
+    private sealed record EngineAudio(byte[] Audio, string Format, TakeSettings Settings);
+
     /// <summary>
-    /// Generate one take for each line: ElevenLabs -> WAV (44.1 kHz mono 16-bit) -> trim 15 ms + fade 10 ms ->
-    /// LIP from the trimmed WAV with tags removed. Tools only see short work-folder paths; finished files are
-    /// saved as takes\&lt;lineId&gt;\NN\&lt;stem&gt;.wav/.lip and the new take is selected.
+    /// Generate one take for each line: engine (ElevenLabs, VoxCPM, OmniVoice, or ElevenLabs speech-to-speech for
+    /// Voice Changer patches) -> WAV (44.1 kHz mono 16-bit) -> trim 15 ms + fade 10 ms -> LIP from the trimmed WAV
+    /// with tags removed. Tools only see short work-folder paths; finished files are saved as
+    /// takes\&lt;lineId&gt;\NN\&lt;stem&gt;.wav/.lip and the new take is selected.
     /// </summary>
     /// <param name="stateGate">Lock shared with any other code that edits or saves the same patch object.</param>
     public async Task GenerateAsync(DbvoPatch patch, VoicePack voice, IReadOnlyList<Phase2Line> lines, ExternalTools tools,
         IProgress<GenerationProgress>? progress = null, Func<Phase2Line, Task>? onLineDone = null, CancellationToken ct = default,
         SemaphoreSlim? stateGate = null)
     {
-        if (string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey)) throw new InvalidOperationException("Enter your ElevenLabs API key in Settings.");
-        if (string.IsNullOrWhiteSpace(voice.Eleven.VoiceId)) throw new InvalidOperationException("Pick a voice for this voice pack.");
-
+        bool vc = patch.Kind == "vc";
+        string engine = vc ? "sts" : voice.Engine;
         var es = voice.Eleven.Clone();
+        var sts = voice.Sts;
         var pronunciations = MergePronunciations(_settings.Pronunciations, voice.Pronunciations);
-        using var client = new ElevenLabsClient(_settings.ElevenLabsApiKey);
-        var limiter = new AdaptiveLimiter(es.Concurrency);
+        ElevenLabsClient? client = null;
+        LocalEngineClient? local = null;
+        int concurrency;
+        switch (engine)
+        {
+            case "sts":
+                if (string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey)) throw new InvalidOperationException("Enter your ElevenLabs API key in Settings.");
+                if (string.IsNullOrWhiteSpace(sts.VoiceId)) throw new InvalidOperationException("Pick the target voice for the Voice Changer.");
+                client = new ElevenLabsClient(_settings.ElevenLabsApiKey);
+                concurrency = sts.Concurrency;
+                break;
+            case LocalEngineClient.VoxCpm:
+                local = new LocalEngineClient(_settings.LocalEngines.VoxCpmAddress);
+                if (string.IsNullOrWhiteSpace(voice.VoxCpm.Voice)) throw new InvalidOperationException("Pick a VoxCPM reference voice for this voice pack.");
+                concurrency = voice.VoxCpm.Concurrency;
+                break;
+            case LocalEngineClient.OmniVoice:
+                local = new LocalEngineClient(_settings.LocalEngines.OmniVoiceAddress);
+                if (string.IsNullOrWhiteSpace(voice.OmniVoice.Voice)) throw new InvalidOperationException("Pick an OmniVoice reference voice for this voice pack.");
+                concurrency = voice.OmniVoice.Concurrency;
+                break;
+            default:
+                if (string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey)) throw new InvalidOperationException("Enter your ElevenLabs API key in Settings.");
+                if (string.IsNullOrWhiteSpace(es.VoiceId)) throw new InvalidOperationException("Pick a voice for this voice pack.");
+                client = new ElevenLabsClient(_settings.ElevenLabsApiKey);
+                concurrency = es.Concurrency;
+                break;
+        }
+        using var _c = client;
+        using var _l = local;
+        var limiter = new AdaptiveLimiter(Math.Max(1, concurrency));
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
         Directory.CreateDirectory(workRoot);
         int done = 0, failed = 0, total = lines.Count;
         var saveLock = stateGate ?? new SemaphoreSlim(1, 1);
         var convertGate = new SemaphoreSlim(Math.Max(2, Environment.ProcessorCount / 2));
+
+        async Task<EngineAudio> Synthesize(Phase2Line line, CancellationToken c)
+        {
+            switch (engine)
+            {
+                case "sts":
+                {
+                    if (line.SourceWav == null || !File.Exists(line.SourceWav)) throw new InvalidOperationException("No source WAV found for this line in the source folders.");
+                    var bytes = await File.ReadAllBytesAsync(line.SourceWav, c);
+                    var vs = ModelCapabilities.Build(sts.ModelId, sts.Stability, sts.Similarity, sts.Style, sts.SpeakerBoost, 1.0);
+                    if (vs != null) vs.Speed = null;
+                    var audio = await limiter.RunAsync(x => client!.SpeechToSpeechAsync(sts.VoiceId, sts.ModelId, bytes, "source.wav", vs, sts.Seed, sts.RemoveBackgroundNoise, sts.OutputFormat, x),
+                        ex => ex is ElevenLabsException { Retryable: true }, ct: c);
+                    return new EngineAudio(audio, sts.OutputFormat, new TakeSettings
+                    {
+                        Engine = "elevenlabs-sts", VoiceId = sts.VoiceId, ModelId = sts.ModelId, Stability = sts.Stability, Similarity = sts.Similarity,
+                        Style = sts.Style, SpeakerBoost = sts.SpeakerBoost, Speed = 1, Seed = sts.Seed, OutputFormat = sts.OutputFormat,
+                    });
+                }
+                case LocalEngineClient.VoxCpm:
+                {
+                    var text = ApplyPronunciations(SpokenText.StripTags(line.Spoken), pronunciations, "local");
+                    var audio = await limiter.RunAsync(x => local!.VoxCpmAsync(text, voice.VoxCpm, x), ex => ex is HttpRequestException, ct: c);
+                    return new EngineAudio(audio, "wav", new TakeSettings { Engine = "voxcpm", VoiceId = voice.VoxCpm.Voice, ModelId = "voxcpm", Stability = voice.VoxCpm.CfgValue, OutputFormat = "wav" });
+                }
+                case LocalEngineClient.OmniVoice:
+                {
+                    var text = ApplyPronunciations(SpokenText.StripTags(line.Spoken), pronunciations, "local");
+                    var audio = await limiter.RunAsync(x => local!.OmniVoiceAsync(text, voice.OmniVoice, x), ex => ex is HttpRequestException, ct: c);
+                    return new EngineAudio(audio, "wav", new TakeSettings { Engine = "omnivoice", VoiceId = voice.OmniVoice.Voice, ModelId = voice.OmniVoice.Model, Speed = voice.OmniVoice.Speed, OutputFormat = "wav" });
+                }
+                default:
+                {
+                    var text = ApplyPronunciations(line.Spoken, pronunciations, es.ModelId);
+                    var req = new TtsRequest
+                    {
+                        VoiceId = es.VoiceId,
+                        ModelId = es.ModelId,
+                        Text = text,
+                        OutputFormat = es.OutputFormat,
+                        Seed = es.Seed,
+                        LanguageCode = string.IsNullOrWhiteSpace(es.LanguageCode) ? null : es.LanguageCode,
+                        ApplyTextNormalization = es.TextNormalization == "auto" ? null : es.TextNormalization,
+                        VoiceSettings = ModelCapabilities.Build(es.ModelId, es.Stability, es.Similarity, es.Style, es.SpeakerBoost, es.Speed),
+                        PronunciationDictionaries = es.PronunciationDictionaryIds.Count == 0 ? null
+                            : es.PronunciationDictionaryIds.Take(3).Select(id => new PronunciationLocator { DictionaryId = id }).ToList(),
+                    };
+                    var audio = await limiter.RunAsync(x => client!.TextToSpeechAsync(req, x), ex => ex is ElevenLabsException { Retryable: true }, ct: c);
+                    return new EngineAudio(audio, es.OutputFormat, new TakeSettings
+                    {
+                        Engine = "elevenlabs", VoiceId = es.VoiceId, ModelId = es.ModelId, Stability = req.VoiceSettings?.Stability ?? 0,
+                        Similarity = es.Similarity, Style = es.Style, SpeakerBoost = es.SpeakerBoost, Speed = es.Speed, Seed = es.Seed, OutputFormat = es.OutputFormat,
+                    });
+                }
+            }
+        }
 
         async Task One(Phase2Line line)
         {
@@ -212,69 +304,49 @@ public sealed class Phase2Service
             Take? newTake = null;
             try
             {
-                var text = ApplyPronunciations(line.Spoken, pronunciations, es.ModelId);
-                var req = new TtsRequest
-                {
-                    VoiceId = es.VoiceId,
-                    ModelId = es.ModelId,
-                    Text = text,
-                    OutputFormat = es.OutputFormat,
-                    Seed = es.Seed,
-                    LanguageCode = string.IsNullOrWhiteSpace(es.LanguageCode) ? null : es.LanguageCode,
-                    ApplyTextNormalization = es.TextNormalization == "auto" ? null : es.TextNormalization,
-                    VoiceSettings = ModelCapabilities.Build(es.ModelId, es.Stability, es.Similarity, es.Style, es.SpeakerBoost, es.Speed),
-                    PronunciationDictionaries = es.PronunciationDictionaryIds.Count == 0 ? null
-                        : es.PronunciationDictionaryIds.Take(3).Select(id => new PronunciationLocator { DictionaryId = id }).ToList(),
-                };
-                var audio = await limiter.RunAsync(c => client.TextToSpeechAsync(req, c),
-                    ex => ex is ElevenLabsException { Retryable: true }, ct: ct);
-
+                var got = await Synthesize(line, ct);
                 await convertGate.WaitAsync(ct);
                 try
                 {
-                using var work = new WorkFolder(workRoot);
-                var src = work.File(es.OutputFormat.StartsWith("pcm", StringComparison.OrdinalIgnoreCase) ? "a.pcm" : "a.mp3");
-                var wav = work.File("a.wav");
-                if (es.OutputFormat.StartsWith("pcm_", StringComparison.OrdinalIgnoreCase))
-                {
-                    int rate = int.Parse(es.OutputFormat.Split('_')[1]);
-                    var raw = work.File("raw.wav");
-                    ExternalTools.PcmToWav(audio, rate, raw);
-                    await tools.ToWavAsync(raw, wav, 44100, voice.Loudnorm, voice.GainDb, ct);
-                }
-                else
-                {
-                    await File.WriteAllBytesAsync(src, audio, ct);
-                    await tools.ToWavAsync(src, wav, 44100, voice.Loudnorm, voice.GainDb, ct);
-                }
-
-                var w = WavFile.Read(wav);
-                w.TrimTailAndFade(voice.TrimTailMs, voice.FadeOutMs);
-                w.Write(wav);
-
-                var lip = work.File("a.lip");
-                await tools.MakeLipAsync(wav, work.File("r.wav"), lip, SpokenText.StripTags(line.Spoken), ct);
-
-                var take = new Take
-                {
-                    Slot = line.Takes.Count == 0 ? 1 : line.Takes.ToList().Max(t => t.Slot) + 1,
-                    SpokenText = line.Spoken,
-                    DurationSeconds = w.DurationSeconds,
-                    Settings = new TakeSettings
+                    using var work = new WorkFolder(workRoot);
+                    var wav = work.File("a.wav");
+                    if (got.Format.StartsWith("pcm_", StringComparison.OrdinalIgnoreCase))
                     {
-                        Engine = "elevenlabs", VoiceId = es.VoiceId, ModelId = es.ModelId, Stability = req.VoiceSettings!.Stability ?? 0,
-                        Similarity = es.Similarity, Style = es.Style, SpeakerBoost = es.SpeakerBoost, Speed = es.Speed, Seed = es.Seed, OutputFormat = es.OutputFormat,
-                    },
-                };
-                var stem = LineNaming.Stem(line.FinalLine, voice.Naming);
-                var rel = Path.Combine("takes", line.LineId, take.Slot.ToString("00"));
-                var dir = Path.Combine(_lib.PatchFolder(patch.Id), rel);
-                Directory.CreateDirectory(dir);
-                take.WavPath = Path.Combine(rel, stem + ".wav");
-                take.LipPath = Path.Combine(rel, stem + ".lip");
-                File.Copy(wav, Path.Combine(_lib.PatchFolder(patch.Id), take.WavPath), true);
-                File.Copy(lip, Path.Combine(_lib.PatchFolder(patch.Id), take.LipPath), true);
-                newTake = take;
+                        int rate = int.Parse(got.Format.Split('_')[1]);
+                        var raw = work.File("raw.wav");
+                        ExternalTools.PcmToWav(got.Audio, rate, raw);
+                        await tools.ToWavAsync(raw, wav, 44100, voice.Loudnorm, voice.GainDb, ct);
+                    }
+                    else
+                    {
+                        var src = work.File(got.Format == "wav" ? "src.wav" : "a.mp3");
+                        await File.WriteAllBytesAsync(src, got.Audio, ct);
+                        await tools.ToWavAsync(src, wav, 44100, voice.Loudnorm, voice.GainDb, ct);
+                    }
+
+                    var w = WavFile.Read(wav);
+                    w.TrimTailAndFade(voice.TrimTailMs, voice.FadeOutMs);
+                    w.Write(wav);
+
+                    var lip = work.File("a.lip");
+                    await tools.MakeLipAsync(wav, work.File("r.wav"), lip, SpokenText.StripTags(line.Spoken), ct);
+
+                    var take = new Take
+                    {
+                        Slot = line.Takes.Count == 0 ? 1 : line.Takes.ToList().Max(t => t.Slot) + 1,
+                        SpokenText = line.Spoken,
+                        DurationSeconds = w.DurationSeconds,
+                        Settings = got.Settings,
+                    };
+                    var stem = LineNaming.Stem(line.FinalLine, voice.Naming);
+                    var rel = Path.Combine("takes", line.LineId, take.Slot.ToString("00"));
+                    var dir = Path.Combine(_lib.PatchFolder(patch.Id), rel);
+                    Directory.CreateDirectory(dir);
+                    take.WavPath = Path.Combine(rel, stem + ".wav");
+                    take.LipPath = Path.Combine(rel, stem + ".lip");
+                    File.Copy(wav, Path.Combine(_lib.PatchFolder(patch.Id), take.WavPath), true);
+                    File.Copy(lip, Path.Combine(_lib.PatchFolder(patch.Id), take.LipPath), true);
+                    newTake = take;
                 }
                 finally { convertGate.Release(); }
             }
@@ -311,6 +383,57 @@ public sealed class Phase2Service
 
         // Network concurrency is enforced by the limiter; convertGate only bounds the CPU-bound conversion stage.
         await Task.WhenAll(lines.Select(One));
+    }
+
+    /// <summary>
+    /// Voice Changer: find each line's source WAV in the source folders (with sub-folders). Files are matched by
+    /// both naming modes, so a Legacy source pack works for a DBVO 2.0 target and the other way round.
+    /// Returns how many lines have a source.
+    /// </summary>
+    public static int MatchSources(DbvoPatch patch)
+    {
+        var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var folder in patch.SourceFolders.Where(Directory.Exists))
+        {
+            foreach (var f in Directory.EnumerateFiles(folder, "*.wav", SearchOption.AllDirectories))
+                index.TryAdd(Path.GetFileNameWithoutExtension(f), f);
+        }
+        int found = 0;
+        foreach (var line in patch.Lines)
+        {
+            line.SourceWav = index.TryGetValue(LineNaming.Stem(line.FinalLine, NamingMode.Legacy), out var a) ? a
+                : index.TryGetValue(LineNaming.Stem(line.FinalLine, NamingMode.Dbvo2Hash), out var b) ? b : null;
+            if (line.SourceWav != null) found++;
+        }
+        return found;
+    }
+
+    /// <summary>Seconds of audio in a WAV file, from its header (0 if unreadable).</summary>
+    public static double WavSeconds(string path)
+    {
+        try
+        {
+            using var fs = File.OpenRead(path);
+            using var br = new BinaryReader(fs);
+            if (new string(br.ReadChars(4)) != "RIFF") return 0;
+            br.ReadInt32();
+            if (new string(br.ReadChars(4)) != "WAVE") return 0;
+            int byteRate = 0;
+            while (fs.Position + 8 <= fs.Length)
+            {
+                var id = new string(br.ReadChars(4));
+                int size = br.ReadInt32();
+                if (id == "fmt ")
+                {
+                    var fmt = br.ReadBytes(size);
+                    byteRate = BitConverter.ToInt32(fmt, 8);
+                }
+                else if (id == "data") return byteRate > 0 ? (double)size / byteRate : 0;
+                else fs.Seek(size + (size & 1), SeekOrigin.Current);
+            }
+        }
+        catch { }
+        return 0;
     }
 
     /// <summary>Copy (hardlink) each selected take into the WAV + LIP folder. Existing files are skipped unless overwrite is on.</summary>

@@ -28,7 +28,7 @@ public sealed class Library
     {
         Root = Path.GetFullPath(root);
         Directory.CreateDirectory(Root);
-        foreach (var d in new[] { "voicepacks", "references", "mods", "patches", "backups" })
+        foreach (var d in new[] { "voicepacks", "references", "mods", "patches", "fomods", "backups" })
             Directory.CreateDirectory(Path.Combine(Root, d));
     }
 
@@ -74,6 +74,19 @@ public sealed class Library
     {
         p.UpdatedUtc = DateTime.UtcNow;
         SaveJson(Path.Combine(PatchFolder(p.Id), "patch.json"), p);
+    }
+
+    // ---------- FOMOD projects (Phase 3) ----------
+    public string FomodFolder(string id) => Path.Combine(Root, "fomods", id);
+    public List<Fomod.FomodProject> LoadFomods() =>
+        Directory.EnumerateDirectories(Path.Combine(Root, "fomods"))
+            .Select(d => Load<Fomod.FomodProject>(Path.Combine(d, "fomod.json"))).Where(p => p != null).Select(p => p!)
+            .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    public Fomod.FomodProject? LoadFomod(string id) => Load<Fomod.FomodProject>(Path.Combine(FomodFolder(id), "fomod.json"));
+    public void Save(Fomod.FomodProject p)
+    {
+        p.UpdatedUtc = DateTime.UtcNow;
+        SaveJson(Path.Combine(FomodFolder(p.Id), "fomod.json"), p);
     }
 
     // ---------- references ----------

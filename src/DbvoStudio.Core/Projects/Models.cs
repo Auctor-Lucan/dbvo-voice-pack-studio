@@ -15,6 +15,9 @@ public sealed class AppSettings
     /// <summary>Empty = the bundled copy next to the app.</summary>
     public string FfmpegPath { get; set; } = "";
     public string FaceFxWrapperPath { get; set; } = "";
+    /// <summary>7z.exe from 7-Zip, for .7z FOMOD archives (zip needs nothing).</summary>
+    public string SevenZipPath { get; set; } = "";
+    public WavToLipSettings WavToLip { get; set; } = new();
     /// <summary>Folder holding Skyrim.esm, Update.esm and the DLC masters for parsing.</summary>
     public string BaseGameFolder { get; set; } = "";
     /// <summary>Folder holding localized strings (e.g. Data\Strings).</summary>
@@ -56,6 +59,26 @@ public sealed class AiProviderSettings
     public string Model { get; set; } = "";
 }
 
+/// <summary>WAV to LIP tool (Other Tools): Whisper transcription + FaceFXWrapper, as in the WAV_to_LIP Python app.</summary>
+public sealed class WavToLipSettings
+{
+    /// <summary>"builtin" = Whisper.net inside this app; "faster-whisper" = the user's Python faster-whisper install.</summary>
+    public string Engine { get; set; } = "builtin";
+    public string Model { get; set; } = "large-v3";
+    public string Language { get; set; } = "auto";
+    public string Device { get; set; } = "cuda";
+    public string Compute { get; set; } = "float16";
+    public bool CpuFallback { get; set; } = true;
+    /// <summary>Use the Legacy filename as the text instead of transcribing (instant, never mishears).</summary>
+    public bool UseFilename { get; set; }
+    /// <summary>faster-whisper: python.exe of the environment that has faster-whisper (e.g. ...\WAV_to_LIP_App\.venv\Scripts\python.exe).</summary>
+    public string PythonPath { get; set; } = "";
+    /// <summary>faster-whisper: folder with the CUDA DLLs (cuBLAS/cuDNN), put on PATH (e.g. ...\WAV_to_LIP_App\cuda_libs).</summary>
+    public string CudaLibsFolder { get; set; } = "";
+    /// <summary>Built-in: folder for the downloaded ggml Whisper models (empty = inside the library).</summary>
+    public string ModelsFolder { get; set; } = "";
+}
+
 public sealed class LocalEngineSettings
 {
     public string VoxCpmAddress { get; set; } = "http://localhost:7861";
@@ -86,6 +109,48 @@ public sealed class ElevenSettings
     public ElevenSettings Clone() => (ElevenSettings)MemberwiseClone();
 }
 
+/// <summary>VoxCPM local server settings (same fields and defaults as DBVO Voice Pack Maker 2.7.0).</summary>
+public sealed class VoxCpmSettings
+{
+    /// <summary>Reference voice name on the server (its speaker_wav).</summary>
+    public string Voice { get; set; } = "";
+    public double CfgValue { get; set; } = 2.1;
+    public int InferenceTimesteps { get; set; } = 12;
+    public bool Normalize { get; set; } = true;
+    public bool RetryBadcase { get; set; } = true;
+    public bool ReferenceMode { get; set; }
+    public double ControlCfgValue { get; set; } = 2.7;
+    public string Language { get; set; } = "en";
+    public int Concurrency { get; set; } = 1;
+}
+
+/// <summary>OmniVoice local server settings (same fields and defaults as 2.7.0).</summary>
+public sealed class OmniVoiceSettings
+{
+    public string Voice { get; set; } = "";
+    public string Model { get; set; } = "k2-fsa/OmniVoice";
+    public int NumStep { get; set; } = 32;
+    public double Speed { get; set; } = 1.0;
+    public double GuidanceScale { get; set; } = 3.0;
+    public int Concurrency { get; set; } = 1;
+}
+
+/// <summary>ElevenLabs speech-to-speech (Voice Changer) settings, as in the Voice Changer tool.</summary>
+public sealed class StsSettings
+{
+    public string VoiceId { get; set; } = "";
+    public string VoiceName { get; set; } = "";
+    public string ModelId { get; set; } = "eleven_multilingual_sts_v2";
+    public double Stability { get; set; } = 0.5;
+    public double Similarity { get; set; } = 0.75;
+    public double Style { get; set; }
+    public bool SpeakerBoost { get; set; }
+    public long? Seed { get; set; }
+    public bool RemoveBackgroundNoise { get; set; }
+    public string OutputFormat { get; set; } = "mp3_44100_128";
+    public int Concurrency { get; set; } = 5;
+}
+
 public sealed class Pronunciation
 {
     public string Word { get; set; } = "";
@@ -108,6 +173,8 @@ public sealed class Destinations
     public string FinalRoot { get; set; } = "";
     /// <summary>Sub-folder under the final folder where .fuz files go.</summary>
     public string FuzTemplate { get; set; } = @"Sound\DBVO\{packId}";
+    /// <summary>Template for a patch's DBVO Fix plugin + topic file folder (kept apart from the WAV + LIP files).</summary>
+    public string FixFolder { get; set; } = "";
     public string ReleaseFolder { get; set; } = "";
 }
 
@@ -132,6 +199,12 @@ public sealed class VoicePack
     public bool AliasParsing { get; set; }
     public bool OverwriteWavLip { get; set; }
     public bool OverwriteFuz { get; set; }
+    public VoxCpmSettings VoxCpm { get; set; } = new();
+    public OmniVoiceSettings OmniVoice { get; set; } = new();
+    /// <summary>Voice Changer (speech-to-speech) settings of this voice pack.</summary>
+    public StsSettings Sts { get; set; } = new();
+    /// <summary>Accent colour for this voice pack in lists and headers, e.g. #a371f7.</summary>
+    public string Color { get; set; } = "";
     public double TrimTailMs { get; set; } = 15;
     public double FadeOutMs { get; set; } = 10;
 }
@@ -170,8 +243,17 @@ public sealed class Phase1Line
     /// <summary>Contains &lt;Alias=Player&gt; (any case): voiced through separate player-name patches, not here.</summary>
     [JsonIgnore] public bool IsPlayerName => ScriptRules.HasPlayerAlias(Final ?? Original);
 
+    /// <summary>The script flagged the plugin's text (BROKEN LINE / TOO LONG WILL CTD), whether or not it has been fixed since.</summary>
     [JsonIgnore]
-    public bool IsFlagged => (Kind == LineKind.Broken && !IsPlayerName) || Kind == LineKind.TooLong;
+    public bool WasFlagged => (Kind == LineKind.Broken && !IsPlayerName) || Kind == LineKind.TooLong;
+
+    /// <summary>A flagged line whose final text now passes the script (fixed by hand or by an imported DBVO Fix plugin).</summary>
+    [JsonIgnore]
+    public bool IsResolved => WasFlagged && Final != null && Final != Original && ScriptRules.IsVoiceReady(Final);
+
+    /// <summary>Still needs the user's decision.</summary>
+    [JsonIgnore]
+    public bool IsFlagged => WasFlagged && !IsResolved;
 
     /// <summary>Text written to the DBVO Fix plugin when it differs from the original.</summary>
     [JsonIgnore]
@@ -283,6 +365,10 @@ public sealed class Phase2Line
     public string? LastError { get; set; }
     /// <summary>Pending AI auto-tag suggestion shown inline until accepted or undone.</summary>
     public string? TagSuggestion { get; set; }
+    /// <summary>The user's persistent mark (separate from the ticks used for selection).</summary>
+    public bool Marked { get; set; }
+    /// <summary>Voice Changer: the source WAV this line is converted from (absolute path), if found.</summary>
+    public string? SourceWav { get; set; }
 
     [JsonIgnore] public Take? SelectedTake => Takes.FirstOrDefault(t => t.Id == SelectedTakeId);
     [JsonIgnore] public bool IsOmitted => OmittedBy != null && !OverrideOmit;
@@ -303,8 +389,16 @@ public sealed class DbvoPatch
     public string WavLipFolder { get; set; } = "";
     public string FinalRoot { get; set; } = "";
     public string FuzTemplate { get; set; } = "";
+    /// <summary>Folder for the DBVO Fix plugins and topic file (empty = not written there).</summary>
+    public string FixFolder { get; set; } = "";
     public bool OverwriteWavLip { get; set; }
     public bool OverwriteFuz { get; set; }
+    /// <summary>"tts" = a normal DBVO Patch; "vc" = a Voice Changer patch (speech-to-speech from another voice pack's WAVs).</summary>
+    public string Kind { get; set; } = "tts";
+    /// <summary>Voice Changer: folders holding the source voice pack's WAV files (searched with sub-folders).</summary>
+    public List<string> SourceFolders { get; set; } = new();
+    /// <summary>When .fuz files were last built, and how many.</summary>
+    public DateTime? LastFuzUtc { get; set; }
     public List<Phase2Line> Lines { get; set; } = new();
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
