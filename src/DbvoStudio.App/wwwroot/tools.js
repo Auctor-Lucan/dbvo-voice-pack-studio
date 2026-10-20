@@ -78,15 +78,15 @@ export async function wavLipView() {
   const bar = h('div.bar', h('div.bar-fill', { style: { width: '0%' } }));
   const logEl = h('div.log', logLines.join('\n'));
   const log = (t) => { logLines.push(t); if (logLines.length > 2000) logLines.shift(); logEl.textContent = logLines.join('\n'); logEl.scrollTop = logEl.scrollHeight; };
-  const startBtn = h('button.btn.primary', { disabled: !!app.job, onclick: start }, 'Transcribe + Generate .LIP');
+  const startBtn = h('button.btn.primary', { title: 'Transcribe each WAV and write a .lip next to it', disabled: !!app.job, onclick: start }, 'Transcribe + Generate .LIP');
 
   tool.append(tools, whisper,
     h('div.section', h('div.section-head', h('h2', 'WAV files'), counter), h('div.section-body', { style: { padding: '10px 16px' } }, list,
       h('div.row', { style: { marginTop: '10px' } },
         h('button.btn', { onclick: async () => addPaths(await rpc('pick.files', { title: 'Select WAV files', filter: 'WAV audio|*.wav' })) }, 'Add WAV files…'),
         h('button.btn', { onclick: async () => { const f = await rpc('pick.folder', { title: 'Select folder containing WAV files' }); if (f) addPaths([f]); } }, 'Add folder…'),
-        h('button.btn', { onclick: () => { files = files.filter((_, i) => !selected.has(i)); selected.clear(); renderList(); } }, 'Remove selected'),
-        h('button.btn.ghost', { onclick: () => { files = []; selected.clear(); renderList(); } }, 'Clear'),
+        h('button.btn', { title: 'Remove the selected files from the list (not from disk)', onclick: () => { files = files.filter((_, i) => !selected.has(i)); selected.clear(); renderList(); } }, 'Remove selected'),
+        h('button.btn.ghost', { title: 'Empty the list (files stay on disk)', onclick: () => { files = []; selected.clear(); renderList(); } }, 'Clear'),
         h('div.spacer'), startBtn))),
     bar, statusEl, logEl);
 

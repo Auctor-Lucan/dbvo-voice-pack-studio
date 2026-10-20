@@ -28,14 +28,14 @@ export async function fomodsView() {
     h('h1', 'FOMOD Creation'),
     h('span.sub', 'Build the installer: pages of options that install each mod\'s .fuz files and DBVO Fix plugins, plus the DBVO voice pack JSON.'),
     h('div.spacer'),
-    h('button.btn', { onclick: () => importFomod() }, 'Import FOMOD…'),
-    h('button.btn.primary', { onclick: newFomod }, '+ New FOMOD')));
+    h('button.btn', { title: 'Read an existing FOMOD folder or archive into an editable project', onclick: () => importFomod() }, 'Import FOMOD…'),
+    h('button.btn.primary', { title: 'Start a FOMOD installer from your DBVO Patches', onclick: newFomod }, '+ New FOMOD')));
   const body = h('div.view-body');
   view.append(body);
   if (!s.fomods.length) {
     body.append(h('div.empty', h('h2', 'No FOMOD projects yet'),
       h('div', 'Start a new one and add your DBVO Patches, or import an existing ModuleConfig.xml (from FOMOD Creation Tool or anywhere else) to keep working on it.'),
-      h('div.row', { style: { justifyContent: 'center', marginTop: '14px' } }, h('button.btn', { onclick: () => importFomod() }, 'Import FOMOD…'), h('button.btn.primary', { onclick: newFomod }, '+ New FOMOD'))));
+      h('div.row', { style: { justifyContent: 'center', marginTop: '14px' } }, h('button.btn', { title: 'Read an existing FOMOD folder or archive into an editable project', onclick: () => importFomod() }, 'Import FOMOD…'), h('button.btn.primary', { title: 'Start a FOMOD installer from your DBVO Patches', onclick: newFomod }, '+ New FOMOD'))));
     return view;
   }
   body.append(h('div.cat', h('div.cat-head', h('h3', 'FOMOD projects'), h('span.faint', s.fomods.length)),
@@ -133,7 +133,7 @@ export async function fomodView(id) {
   const move = (arr, i, d) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; changed(true); };
 
   function renderHead() {
-    const build = h('button.btn.primary', { disabled: !!app.job }, 'Build ▾');
+    const build = h('button.btn.primary', { disabled: !!app.job, title: 'Stage the installer and pack the archive' }, 'Build ▾');
     build.addEventListener('click', () => popupMenu(build, [
       { label: `Build and pack .${proj.archiveFormat}`, sub: `Stages everything, then writes the archive to ${proj.releaseFolder || '(set the release folder)'}`, onclick: () => runBuild(true) },
       { label: 'Stage only', sub: 'Builds the installer folder without packing, to check it or test it in MO2 / Vortex', onclick: () => runBuild(false) },
@@ -146,12 +146,12 @@ export async function fomodView(id) {
       h('div.spacer'),
       h('button.btn', { onclick: addPatches, title: 'Add an option per mod from your DBVO Patches, on the page of its category' }, '+ Add DBVO Patches…'),
       h('button.btn', { onclick: refreshLinked, title: 'Update the files of options linked to DBVO Patches (after changing folders or rebuilding .fuz)' }, '⟳ Refresh linked'),
-      h('button.btn', { onclick: validate }, 'Validate'),
-      h('button.btn', { onclick: simulate }, 'Simulate install'),
-      h('button.btn.ghost', { onclick: previewXml }, 'View XML'),
-      h('button.btn.ghost', { onclick: () => importFomod(id) }, 'Re-import…'),
+      h('button.btn', { title: 'Check against the ModuleConfig 5.0 schema and for missing files', onclick: validate }, 'Validate'),
+      h('button.btn', { title: 'Show what each option would be with a given plugin list', onclick: simulate }, 'Simulate install'),
+      h('button.btn.ghost', { title: 'Show the generated info.xml and ModuleConfig.xml', onclick: previewXml }, 'View XML'),
+      h('button.btn.ghost', { title: 'Replace this project with a FOMOD read from disk', onclick: () => importFomod(id) }, 'Re-import…'),
       build,
-      h('button.btn.ghost.danger.sm', { onclick: async () => { if (await confirmBox('Delete FOMOD project?', 'Only the project in this app is deleted; built archives and your files stay.', 'Delete', true)) { await rpc('fomod.delete', { id }); go('fomods'); } } }, 'Delete'));
+      h('button.btn.ghost.danger.sm', { title: 'Delete this FOMOD project (your files stay)', onclick: async () => { if (await confirmBox('Delete FOMOD project?', 'Only the project in this app is deleted; built archives and your files stay.', 'Delete', true)) { await rpc('fomod.delete', { id }); go('fomods'); } } }, 'Delete'));
   }
 
   // ---- tree
@@ -210,6 +210,20 @@ export async function fomodView(id) {
     i.addEventListener('input', () => { obj[key] = i.value; changed(opts.tree); if (opts.after) opts.after(); });
     return i;
   };
+  // Description field with a small toolbar that inserts the icons at the caret.
+  const ICONS = [['⚠️', 'Warning'], ['✅', 'Required / done'], ['⭐', 'Recommended'], ['ℹ️', 'Info']];
+  const descArea = (obj, key, rows) => {
+    const area = txt(obj, key, { area: true, rows });
+    const insert = (ch) => {
+      const a = area.selectionStart ?? area.value.length, b = area.selectionEnd ?? a;
+      area.setRangeText(ch, a, b, 'end');
+      area.focus();
+      area.dispatchEvent(new Event('input'));
+    };
+    return h('div.col', { style: { gap: '4px' } },
+      h('div.row.icon-bar', ICONS.map(([ch, name]) => h('button.btn.sm.ghost', { type: 'button', title: `Insert ${ch} (${name}) at the cursor`, onmousedown: (e) => e.preventDefault(), onclick: () => insert(ch) }, ch))),
+      area);
+  };
   const relPath = (abs) => {
     const root = (proj.rootFolder || '').replace(/[\\/]+$/, '');
     if (root && abs.toLowerCase().startsWith(root.toLowerCase() + '\\')) return abs.slice(root.length + 1);
@@ -267,7 +281,7 @@ export async function fomodView(id) {
         srow('Author', null, txt(i, 'author')),
         srow('Version', 'Also used in the archive name.', txt(i, 'version')),
         srow('Website', 'e.g. your Nexus page.', txt(i, 'website')),
-        srow('Description', null, txt(i, 'description', { area: true, rows: 8 })),
+        srow('Description', null, descArea(i, 'description', 8)),
         srow('Groups', 'Comma separated, e.g. Audio - Voice.', groups)),
       proj.moduleDependenciesXml || proj.conditionalFileInstallsXml || (proj.requiredInstallFiles || []).length
         ? sec('Kept from the imported FOMOD', null,
@@ -307,8 +321,8 @@ export async function fomodView(id) {
   function stepPanel(st) {
     const si = proj.steps.indexOf(st);
     return h('div', sec('Page (install step)', h('div.row', h('div.spacer'),
-      h('button.btn.sm', { disabled: si === 0, onclick: () => move(proj.steps, si, -1) }, '↑'),
-      h('button.btn.sm', { disabled: si === proj.steps.length - 1, onclick: () => move(proj.steps, si, 1) }, '↓'),
+      h('button.btn.sm', { title: 'Move up', disabled: si === 0, onclick: () => move(proj.steps, si, -1) }, '↑'),
+      h('button.btn.sm', { title: 'Move down', disabled: si === proj.steps.length - 1, onclick: () => move(proj.steps, si, 1) }, '↓'),
       h('button.btn.sm.danger', { onclick: async () => { if (await confirmBox('Delete page?', `Delete "${st.name}" and its ${st.groups.reduce((a, g) => a + g.options.length, 0)} option(s)?`, 'Delete', true)) { proj.steps.splice(si, 1); changed(); select('project'); } } }, 'Delete')),
       srow('Name', null, txt(st, 'name', { tree: true })),
       srow('Visibility', 'Optional conditions (flags / plugins) for showing this page. Kept from imports; edit as XML.', st.visibleXml != null ? txt(st, 'visibleXml', { area: true, rows: 4 })
@@ -323,8 +337,8 @@ export async function fomodView(id) {
     const typeHelp = h('div.faint', (GROUP_TYPES.find((t) => t[0] === g.type) || [])[2] || '');
     typeSel.addEventListener('change', () => { g.type = typeSel.value; typeHelp.textContent = (GROUP_TYPES.find((t) => t[0] === g.type) || [])[2] || ''; changed(true); });
     return h('div', sec('Group', h('div.row', h('div.spacer'),
-      h('button.btn.sm', { disabled: gi === 0, onclick: () => move(st.groups, gi, -1) }, '↑'),
-      h('button.btn.sm', { disabled: gi === st.groups.length - 1, onclick: () => move(st.groups, gi, 1) }, '↓'),
+      h('button.btn.sm', { title: 'Move up', disabled: gi === 0, onclick: () => move(st.groups, gi, -1) }, '↑'),
+      h('button.btn.sm', { title: 'Move down', disabled: gi === st.groups.length - 1, onclick: () => move(st.groups, gi, 1) }, '↓'),
       h('button.btn.sm.danger', { onclick: async () => { if (await confirmBox('Delete group?', `Delete "${g.name}" and its ${g.options.length} option(s)?`, 'Delete', true)) { st.groups.splice(gi, 1); changed(); select(st.id); } } }, 'Delete')),
       srow('Name', null, txt(g, 'name', { tree: true })),
       srow('Selection', null, h('div.col', typeSel, typeHelp)),
@@ -382,16 +396,16 @@ export async function fomodView(id) {
     renderPlugins();
     return h('div',
       sec('Option', h('div.row', h('div.spacer'),
-        h('button.btn.sm', { disabled: oi === 0, onclick: () => move(g.options, oi, -1) }, '↑'),
-        h('button.btn.sm', { disabled: oi === g.options.length - 1, onclick: () => move(g.options, oi, 1) }, '↓'),
+        h('button.btn.sm', { title: 'Move up', disabled: oi === 0, onclick: () => move(g.options, oi, -1) }, '↑'),
+        h('button.btn.sm', { title: 'Move down', disabled: oi === g.options.length - 1, onclick: () => move(g.options, oi, 1) }, '↓'),
         h('button.btn.sm', { onclick: () => { const c = structuredClone(o); c.id = newId(); c.name += ' (copy)'; c.carriesJson = false; g.options.splice(oi + 1, 0, c); changed(); select(c.id); } }, 'Duplicate'),
         h('button.btn.sm.danger', { onclick: async () => { if (await confirmBox('Delete option?', `Delete "${o.name}"?`, 'Delete', true)) { g.options.splice(oi, 1); changed(); select(g.id); } } }, 'Delete')),
         h('div.faint', { style: { padding: '8px 0 0' } }, `${st.name} › ${g.name}`),
         srow('Name', null, txt(o, 'name', { tree: true })),
-        srow('Description', 'Shown when the user hovers the option. Links can be copied from here by your users.', txt(o, 'description', { area: true, rows: 7 })),
+        srow('Description', 'Shown when the user hovers the option. Links can be copied from here by your users.', descArea(o, 'description', 7)),
         srow('Image', 'Shown next to the description. Relative to the FOMOD root.', imagePicker(o, 'image')),
         o.patchId ? srow('Linked to', 'Files below come from this DBVO Patch; "⟳ Refresh linked" updates them.', h('div.row', h('span.badge.b-fixed', '🔗 ' + ((app.state.patches.find((p) => p.id === o.patchId) || {}).name || 'a DBVO Patch')),
-          h('button.btn.sm.ghost', { onclick: () => { o.patchId = null; o.modId = null; changed(true); renderEditor(); } }, 'Unlink'))) : null,
+          h('button.btn.sm.ghost', { title: 'Stop updating this option\'s files from the DBVO Patch', onclick: () => { o.patchId = null; o.modId = null; changed(true); renderEditor(); } }, 'Unlink'))) : null,
         srow('Carries the DBVO JSON', 'The voice pack file is installed with this option. Use a Required one.', switchEl(o.carriesJson, (x) => {
           for (const s2 of proj.steps) for (const g2 of s2.groups) for (const o2 of g2.options) if (x) o2.carriesJson = false;
           o.carriesJson = x; changed(true); renderEditor();
@@ -479,7 +493,7 @@ export async function fomodView(id) {
             const f = await rpc('pick.file', { title: 'plugins.txt (MO2 profile or %LOCALAPPDATA%\\Skyrim Special Edition)', filter: 'Load order|plugins.txt;loadorder.txt;*.txt' });
             if (!f) return;
             try { plugins.value = (await rpc('fomod.loadOrder', { path: f })).join('\n'); run(); } catch (e) { fail(e); }
-          } }, 'Load plugins.txt…'), h('button.btn.sm.primary', { onclick: run }, 'Run'))),
+          } }, 'Load plugins.txt…'), h('button.btn.sm.primary', { title: 'Simulate the install with these plugins active', onclick: run }, 'Run'))),
         h('div.grow', out)),
     ], undefined, { wide: true });
   }

@@ -147,6 +147,15 @@ public static class ScriptRules
         return new LineResult(LineKind.Empty, val, null);
     }
 
+    /// <summary>The whole line is one (parenthesis) or [bracket] group: a stage direction such as "(Laughs)" or "[Sighs]".</summary>
+    public static bool IsStageDirection(string text)
+    {
+        var t = Trim(text);
+        if (t.Length < 3) return false;
+        return (t[0] == '(' && t[^1] == ')' && t.IndexOf(')') == t.Length - 1)
+            || (t[0] == '[' && t[^1] == ']' && t.IndexOf(']') == t.Length - 1);
+    }
+
     /// <summary>True when the text passes the script unchanged and fits DBVO's limit: it can be voiced as is.</summary>
     public static bool IsVoiceReady(string text)
     {

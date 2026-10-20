@@ -129,3 +129,52 @@ public class Phase1ExtrasTests : IDisposable
         Assert.Equal("Aldooin's fall. Aldooin rises. Yarl", Phase2Service.ApplyPronunciations("Alduin's fall. Alduin rises. Jarl", merged, "eleven_v4"));
     }
 }
+
+public class ApprovalTests
+{
+    private static Phase1Line Broken(string original, string? final) =>
+        new() { FormId = 1, Original = original, Final = final, Kind = Rules.LineKind.Broken, UserEdited = final != null };
+
+    [Fact]
+    public void Silent_stage_direction_goes_to_the_plugin_but_needs_a_voice_decision()
+    {
+        var l = Broken("*Sip your drink*.", "(Sip your drink)");
+        Assert.True(l.IsStageDirection);
+        Assert.True(l.NeedsVoiceDecision);
+        Assert.True(l.IsFlagged);
+        Assert.Empty(l.TopicLines());
+        Assert.True(l.NeedsOverride);
+
+        l.VoiceApproved = false;
+        Assert.False(l.IsFlagged);
+        Assert.True(l.IsResolved);
+        Assert.Empty(l.TopicLines());
+        Assert.True(l.NeedsOverride);
+    }
+
+    [Fact]
+    public void Voiced_stage_direction_is_performed_as_a_tag()
+    {
+        var l = Broken("*laughs*", "(Laughs)");
+        l.VoiceApproved = true;
+        Assert.Equal(new[] { "(Laughs)" }, l.TopicLines());
+        Assert.Equal("[laughs]", Naming.SpokenText.DefaultFor("(Laughs)"));
+        Assert.Equal("[sighs]", Naming.SpokenText.DefaultFor("[Sighs]"));
+        Assert.False(Rules.ScriptRules.IsStageDirection("(M) Hello (laughs)"));
+    }
+
+    [Fact]
+    public void Approvals_override_both_outputs_independently()
+    {
+        var l = new Phase1Line { FormId = 2, Original = "Hello there", Final = "Hello there.", Kind = Rules.LineKind.Valid, UserEdited = true };
+        Assert.True(l.Voiced);
+        Assert.True(l.NeedsOverride);
+        l.VoiceApproved = false;
+        Assert.Empty(l.TopicLines());
+        Assert.True(l.NeedsOverride);
+        l.VoiceApproved = null;
+        l.FixApproved = false;
+        Assert.Single(l.TopicLines());
+        Assert.False(l.NeedsOverride);
+    }
+}

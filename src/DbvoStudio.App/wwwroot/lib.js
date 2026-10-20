@@ -130,7 +130,7 @@ export function modal(title, content, buttons = [{ label: 'OK', primary: true, v
 }
 
 export async function confirmBox(title, text, okLabel = 'OK', danger = false) {
-  return modal(title, [h('div', text)], [
+  return modal(title, [h('div', { style: { whiteSpace: 'pre-line' } }, text)], [
     { label: 'Cancel', value: false },
     { label: okLabel, primary: !danger, danger, value: true },
   ]);

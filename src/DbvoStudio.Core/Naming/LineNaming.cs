@@ -86,6 +86,12 @@ public static partial class SpokenText
     /// </summary>
     public static string DefaultFor(string finalLine)
     {
+        // A stage direction that is voiced, such as "(Laughs)", is performed as an audio tag: "[laughs]".
+        if (Rules.ScriptRules.IsStageDirection(finalLine))
+        {
+            var inner = finalLine.Trim()[1..^1].Trim();
+            return "[" + inner.ToLowerInvariant() + "]";
+        }
         var t = LineNaming.SpokenPart(finalLine);
         string prev;
         do

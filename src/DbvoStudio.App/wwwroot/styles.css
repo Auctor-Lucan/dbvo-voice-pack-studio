@@ -317,3 +317,10 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .steps-help li { margin-bottom: 3px; }
 .filelist.over { border-color: var(--accent); background: #0d1d33; }
 .col > .badge { align-self: flex-start; }
+.appr { background: transparent; border: 1px solid var(--line); color: var(--faint); border-radius: 5px; font-size: 11px; font-weight: 700; padding: 1px 7px; cursor: pointer; line-height: 17px; }
+.appr:hover { border-color: #8b949e; color: var(--text); }
+.appr.on { color: var(--ok); border-color: #238636aa; background: #12261a; }
+.appr.against { box-shadow: inset 0 -2px 0 var(--warn); }
+.appr:disabled { opacity: .35; cursor: default; }
+.panes { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+.cards1 { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 10px 12px 12px; }

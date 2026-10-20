@@ -243,29 +243,53 @@ public sealed class Phase1Line
     /// <summary>Contains &lt;Alias=Player&gt; (any case): voiced through separate player-name patches, not here.</summary>
     [JsonIgnore] public bool IsPlayerName => ScriptRules.HasPlayerAlias(Final ?? Original);
 
+    /// <summary>The user's approval to voice this line (topic file). Null = the default for the line.</summary>
+    public bool? VoiceApproved { get; set; }
+    /// <summary>The user's approval to write the edited text to the DBVO Fix plugin. Null = the default.</summary>
+    public bool? FixApproved { get; set; }
+
     /// <summary>The script flagged the plugin's text (BROKEN LINE / TOO LONG WILL CTD), whether or not it has been fixed since.</summary>
     [JsonIgnore]
     public bool WasFlagged => (Kind == LineKind.Broken && !IsPlayerName) || Kind == LineKind.TooLong;
 
-    /// <summary>A flagged line whose final text now passes the script (fixed by hand or by an imported DBVO Fix plugin).</summary>
+    /// <summary>The final text is only a stage direction in (parentheses) or [brackets], e.g. "(Laughs)" or "(Sip your drink)".</summary>
+    [JsonIgnore] public bool IsStageDirection => Final != null && ScriptRules.IsStageDirection(Final);
+
+    /// <summary>A stage direction nobody has decided on yet: voice it (e.g. a laugh) or keep it silent.</summary>
+    [JsonIgnore] public bool NeedsVoiceDecision => IsStageDirection && VoiceApproved == null && Status != Phase1Status.Removed && !Excluded;
+
+    /// <summary>A flagged line whose final text now passes the script (fixed by hand or by an imported DBVO Fix plugin), or a decided stage direction.</summary>
     [JsonIgnore]
-    public bool IsResolved => WasFlagged && Final != null && Final != Original && ScriptRules.IsVoiceReady(Final);
+    public bool IsResolved => WasFlagged && Final != null && Final != Original
+                              && (ScriptRules.IsVoiceReady(Final) || (IsStageDirection && VoiceApproved != null));
 
     /// <summary>Still needs the user's decision.</summary>
     [JsonIgnore]
-    public bool IsFlagged => WasFlagged && !IsResolved;
+    public bool IsFlagged => (WasFlagged && !IsResolved) || NeedsVoiceDecision;
 
-    /// <summary>Text written to the DBVO Fix plugin when it differs from the original.</summary>
+    private bool Active => Status != Phase1Status.Removed && !Excluded && !(HiddenByPrompts && !IncludeAnyway);
+
+    /// <summary>What the line gets without an explicit approval: voiced when the final text is usable and not a stage direction.</summary>
     [JsonIgnore]
-    public bool NeedsOverride => Status != Phase1Status.Removed && !Excluded && Final != null && Final != Original
-                                 && !(HiddenByPrompts && !IncludeAnyway);
+    public bool DefaultVoice => Final != null && Final.Length > 0 && !IsStageDirection && !ScriptRules.HasPlaceholder(LineNaming.SpokenPart(Final));
+
+    /// <summary>Default for the DBVO Fix plugin: the edit goes in unless it is an untouched flagged line.</summary>
+    [JsonIgnore]
+    public bool DefaultFix => !(WasFlagged && !IsResolved && !UserEdited && !IsStageDirection);
+
+    /// <summary>The line goes into the topic file (and is generated in Phase 2).</summary>
+    [JsonIgnore] public bool Voiced => Active && Final != null && (VoiceApproved ?? DefaultVoice);
+
+    /// <summary>Text written to the DBVO Fix plugin when it differs from the original (and the user didn't turn it off).</summary>
+    [JsonIgnore]
+    public bool NeedsOverride => Active && Final != null && Final != Original && (FixApproved ?? DefaultFix);
 
     /// <summary>Lines this row contributes to the topic file.</summary>
     public IEnumerable<string> TopicLines()
     {
         if (Status == Phase1Status.Removed || Excluded) yield break;
         if (HiddenByPrompts && !IncludeAnyway) yield break;
-        if (Final != null && !ScriptRules.HasPlaceholder(LineNaming.SpokenPart(Final)) && Final.Length > 0) yield return Final;
+        if (Voiced) yield return Final!;
         foreach (var v in Variants.Where(v => !string.IsNullOrWhiteSpace(v))) yield return v.Trim();
     }
 }

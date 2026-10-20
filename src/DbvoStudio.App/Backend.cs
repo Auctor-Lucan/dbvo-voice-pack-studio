@@ -191,6 +191,32 @@ public sealed partial class Backend
                     return State();
                 });
             case "mod.import": return await Locked(() => ImportPlugins(p));
+            case "mod.deletePlugin":
+                return await Locked(() =>
+                {
+                    var mod = LoadMod(S(p, "id"));
+                    var pl = mod.Plugins.FirstOrDefault(x => x.FileName == S(p, "plugin")) ?? throw new InvalidOperationException("Plugin not found.");
+                    _lib.Backup("before-delete-plugin-" + pl.FileName, _settings.BackupsToKeep);
+                    mod.Plugins.Remove(pl);
+                    try { if (File.Exists(pl.StoredFile) && pl.StoredFile.StartsWith(_lib.Root, StringComparison.OrdinalIgnoreCase)) File.Delete(pl.StoredFile); } catch { }
+                    _lib.Save(mod);
+                    return ModDto(mod);
+                });
+            case "plugin.inspect":
+                // Is this file an earlier DBVO Fix plugin (only dialogue overrides of another plugin)?
+                return Paths(p, "paths").Select(f =>
+                {
+                    bool fix = Path.GetFileName(f).StartsWith("DBVO Fix", StringComparison.OrdinalIgnoreCase);
+                    try
+                    {
+                        if (f.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) return new { path = f, looksLikeFix = false, masters = new List<string>() };
+                        var pf = PluginFile.Read(f, new HashSet<string>());
+                        bool onlyDialogue = pf.Records.Count > 0 && pf.Records.All(r => r.Signature is "DIAL" or "INFO");
+                        bool overrides = pf.Records.Count > 0 && pf.Records.All(r => (r.FormId >> 24) < pf.Masters.Count);
+                        return new { path = f, looksLikeFix = fix || (onlyDialogue && overrides && (pf.HeaderFlags & PluginFile.HeaderFlagLight) != 0), masters = pf.Masters.ToList() };
+                    }
+                    catch { return new { path = f, looksLikeFix = fix, masters = new List<string>() }; }
+                }).ToList();
             case "mod.importFix":
                 return await Locked(() =>
                 {
@@ -594,6 +620,9 @@ public sealed partial class Backend
         l.EditorId, l.Original, l.Suggested, l.Final, kind = l.Kind.ToString(), l.UserEdited, l.Reviewed,
         l.HiddenByPrompts, l.IncludeAnyway, l.Excluded, status = l.Status.ToString(), l.PreviousFinal, l.PreviousOriginal,
         l.Variants, needsOverride = !topicFile && l.NeedsOverride, flagged = l.IsFlagged, resolved = l.IsResolved, wasFlagged = l.WasFlagged,
+        voiced = l.Voiced, l.VoiceApproved, l.FixApproved, defaultVoice = l.DefaultVoice, defaultFix = l.DefaultFix,
+        inFix = !topicFile && l.NeedsOverride, stage = l.IsStageDirection, needsDecision = l.NeedsVoiceDecision,
+        changed = l.Final != null && l.Final != l.Original,
         isPlayerName = l.IsPlayerName, l.PlayerNameExported,
         hasOtherAlias = ScriptRules.HasOtherAlias(l.Original),
         hasPlaceholder = l.Final != null && ScriptRules.HasPlaceholder(LineNaming.SpokenPart(l.Final)),
@@ -614,12 +643,20 @@ public sealed partial class Backend
         };
         var reasons = ScriptRules.Explain(text);
         if (problem == null && r.Kind == LineKind.Valid) reasons.Clear();
+        bool stage = ScriptRules.IsStageDirection(text);
+        if (stage)
+        {
+            // A whole-line stage direction is a choice (voice it or keep it silent), not an error.
+            reasons = reasons.Where(x => x.Contains("space") || x.Contains("asterisk") || x.Contains("semicolon") || x.Contains("150")).ToList();
+            problem = null;
+        }
         return new
         {
             kind = r.Kind.ToString(), length = ScriptRules.Trim(text).Length, max = ScriptRules.MaxLength,
             problem = reasons.Count > 0 ? string.Join("\n", reasons) : problem, reasons,
             fix = r.Kind == LineKind.Fixed ? r.Final : null,
             isPlayerName = ScriptRules.HasPlayerAlias(text),
+            stage,
         };
     }
 
@@ -661,6 +698,15 @@ public sealed partial class Backend
                 line.Status = Phase1Status.Active;
                 break;
             case "acceptChange": line.Status = Phase1Status.Active; line.Reviewed = true; break;
+            case "voice": line.VoiceApproved = NB(p, "value"); line.Reviewed = true; break;
+            case "fix": line.FixApproved = NB(p, "value"); line.Reviewed = true; break;
+            case "approve":
+                // Confirm both outputs as they stand now (a stage direction needs "value": voice it or not).
+                bool voiceNow = line.Voiced, fixNow = line.NeedsOverride;
+                line.VoiceApproved ??= line.IsStageDirection ? B(p, "value") : voiceNow;
+                line.FixApproved ??= fixNow;
+                line.Reviewed = true;
+                break;
             default: throw new InvalidOperationException("Unknown line action.");
         }
         _lib.Save(mod);
@@ -681,6 +727,15 @@ public sealed partial class Backend
                 case "review": line.Reviewed = true; break;
                 case "exclude": line.Excluded = true; line.Reviewed = true; break;
                 case "include": line.Excluded = false; break;
+                case "voiceOn": line.VoiceApproved = true; line.Reviewed = true; break;
+                case "voiceOff": line.VoiceApproved = false; line.Reviewed = true; break;
+                case "fixOn": line.FixApproved = true; line.Reviewed = true; break;
+                case "fixOff": line.FixApproved = false; line.Reviewed = true; break;
+                case "approve":
+                    line.VoiceApproved ??= line.IsStageDirection ? false : line.Voiced;
+                    line.FixApproved ??= line.NeedsOverride;
+                    line.Reviewed = true;
+                    break;
             }
         }
         _lib.Save(mod);
@@ -1109,6 +1164,10 @@ public sealed partial class Backend
 
     private static string S(JsonElement p, string name, string fallback = "") =>
         p.ValueKind == JsonValueKind.Object && p.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString()! : fallback;
+
+    /// <summary>true / false, or null (back to the default).</summary>
+    private static bool? NB(JsonElement p, string name) =>
+        p.ValueKind == JsonValueKind.Object && p.TryGetProperty(name, out var v) ? v.ValueKind switch { JsonValueKind.True => true, JsonValueKind.False => false, _ => null } : null;
 
     private static bool B(JsonElement p, string name) =>
         p.ValueKind == JsonValueKind.Object && p.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;

@@ -358,8 +358,10 @@ public sealed class Phase2Service
             {
                 case "sts":
                 {
-                    if (line.SourceWav == null || !File.Exists(line.SourceWav)) throw new InvalidOperationException("No source WAV found for this line in the source folders.");
-                    var bytes = await File.ReadAllBytesAsync(line.SourceWav, c);
+                    if (line.SourceWav == null || !File.Exists(line.SourceWav)) throw new InvalidOperationException("No source WAV or .fuz found for this line in the source folders.");
+                    var bytes = line.SourceWav.EndsWith(".fuz", StringComparison.OrdinalIgnoreCase)
+                        ? await FuzToWavAsync(line.SourceWav, tools, workRoot, c)
+                        : await File.ReadAllBytesAsync(line.SourceWav, c);
                     var vs = ModelCapabilities.Build(sts.ModelId, sts.Stability, sts.Similarity, sts.Style, sts.SpeakerBoost, 1.0);
                     if (vs != null) vs.Speed = null;
                     var audio = await limiter.RunAsync(x => client!.SpeechToSpeechAsync(sts.VoiceId, sts.ModelId, bytes, "source.wav", vs, sts.Seed, sts.RemoveBackgroundNoise, sts.OutputFormat, x),
@@ -505,11 +507,11 @@ public sealed class Phase2Service
     public static int MatchSources(DbvoPatch patch)
     {
         var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var folder in patch.SourceFolders.Where(Directory.Exists))
-        {
-            foreach (var f in Directory.EnumerateFiles(folder, "*.wav", SearchOption.AllDirectories))
-                index.TryAdd(Path.GetFileNameWithoutExtension(f), f);
-        }
+        // WAV first; a .fuz (as in a released voice pack) is used when there is no WAV of that name.
+        foreach (var pattern in new[] { "*.wav", "*.fuz" })
+            foreach (var folder in patch.SourceFolders.Where(Directory.Exists))
+                foreach (var f in Directory.EnumerateFiles(folder, pattern, SearchOption.AllDirectories))
+                    index.TryAdd(Path.GetFileNameWithoutExtension(f), f);
         int found = 0;
         foreach (var line in patch.Lines)
         {
@@ -520,9 +522,46 @@ public sealed class Phase2Service
         return found;
     }
 
+    /// <summary>Decode a .fuz's xWMA audio to WAV bytes (for Voice Changer sources and previews).</summary>
+    public static async Task<byte[]> FuzToWavAsync(string fuzPath, ExternalTools tools, string workRoot, CancellationToken ct)
+    {
+        Directory.CreateDirectory(workRoot);
+        using var work = new WorkFolder(workRoot);
+        var (_, xwm) = FuzFile.Split(await File.ReadAllBytesAsync(fuzPath, ct));
+        var x = work.File("s.xwm");
+        await File.WriteAllBytesAsync(x, xwm, ct);
+        var wav = work.File("s.wav");
+        await tools.ToWavAsync(x, wav, 44100, false, 0, ct);
+        return await File.ReadAllBytesAsync(wav, ct);
+    }
+
+    /// <summary>Delete every take except the one in use (for the given lines, or all). Returns how many were removed.</summary>
+    public int PurgeUnusedTakes(DbvoPatch patch, IEnumerable<string>? lineIds = null)
+    {
+        var only = lineIds?.ToHashSet();
+        int n = 0;
+        foreach (var line in patch.Lines.Where(l => only == null || only.Contains(l.LineId)))
+        {
+            foreach (var t in line.Takes.Where(t => t.Id != line.SelectedTakeId).ToList())
+            {
+                var dir = Path.GetDirectoryName(Path.Combine(_lib.PatchFolder(patch.Id), t.WavPath));
+                try { if (dir != null && Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
+                line.Takes.Remove(t);
+                n++;
+            }
+        }
+        _lib.Save(patch);
+        return n;
+    }
+
     /// <summary>Seconds of audio in a WAV file, from its header (0 if unreadable).</summary>
     public static double WavSeconds(string path)
     {
+        if (path.EndsWith(".fuz", StringComparison.OrdinalIgnoreCase))
+        {
+            // xWMA: estimate from size at the 48 kbps Yakitori/2.7.0 bitrate
+            try { return Math.Max(0, new FileInfo(path).Length - 2000) / 6000.0; } catch { return 0; }
+        }
         try
         {
             using var fs = File.OpenRead(path);

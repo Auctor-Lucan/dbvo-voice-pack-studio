@@ -332,7 +332,7 @@ public sealed class Phase1Service
     /// <summary>The edits for the DBVO Fix plugin. Unresolved flagged lines get no override.</summary>
     public static List<LineEdit> FixEdits(ModPlugin p) =>
         p.IsTopicFile ? new List<LineEdit>()
-        : p.Lines.Where(l => l.NeedsOverride && !(l.IsFlagged && !l.UserEdited))
+        : p.Lines.Where(l => l.NeedsOverride)
             .Select(l => new LineEdit(l.FormId, l.Field, l.Final!)).ToList();
 
     /// <summary>File name of the topic file written for a plugin (a topic-file source keeps its own name).</summary>

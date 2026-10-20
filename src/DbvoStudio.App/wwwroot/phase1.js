@@ -1,5 +1,5 @@
 // Phase 1: Mods list and the per-plugin workspace.
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const KIND_LABEL = {
@@ -12,6 +12,8 @@ const KIND_LABEL = {
 
 export function kindBadge(l) {
   if (l.status === 'Removed') return h('span.badge.b-removed', 'Removed');
+  if (l.needsDecision) return h('span.badge.b-toolong', { title: 'A stage direction: decide whether it is voiced (e.g. a laugh) or stays silent.' }, 'VOICE OR SILENT?');
+  if (l.resolved && l.stage) return h('span.badge.b-fixed', { title: `Was ${(KIND_LABEL[l.kind] || [l.kind])[0]}; now a stage direction you ${l.voiced ? 'voice' : 'keep silent'}.` }, l.voiced ? 'Fixed · voiced' : 'Fixed · silent');
   if (l.resolved) return h('span.badge.b-fixed', { title: `Was ${(KIND_LABEL[l.kind] || [l.kind])[0]}; the final text now passes the script.` }, 'Fixed ✓');
   if (l.isPlayerName && l.kind !== 'TooLong') return h('span.badge.b-player', 'PLAYER NAME');
   const [t, c] = KIND_LABEL[l.kind] || [l.kind, 'b-skip'];
@@ -41,13 +43,13 @@ export async function modsView() {
     h('h1', 'Mods'),
     h('span.sub', 'Read plugins or topic files and make their lines DBVO-ready. Shared by every voice pack.'),
     h('div.spacer'),
-    h('button.btn.primary', { onclick: newMod }, '+ New mod')));
+    h('button.btn.primary', { title: 'Create a mod project and add its plugins', onclick: newMod }, '+ New mod')));
   const body = h('div.view-body');
   view.append(body);
   if (!s.mods.length) {
     body.append(h('div.empty', h('h2', 'No mods yet'),
       h('div', 'Create a mod, then drop its .esp / .esm files (or topic .txt files) into it.'),
-      h('div', { style: { marginTop: '14px' } }, h('button.btn.primary', { onclick: newMod }, '+ New mod'))));
+      h('div', { style: { marginTop: '14px' } }, h('button.btn.primary', { title: 'Create a mod project and add its plugins', onclick: newMod }, '+ New mod'))));
     return view;
   }
   const q = h('input', { type: 'text', placeholder: 'Filter mods…', style: { width: '260px', marginBottom: '12px' } });
@@ -135,8 +137,9 @@ export async function modView(id) {
         l.status === 'ChangedInMod' ? h('span.badge.b-changed', 'changed in mod') : null,
         l.hiddenByPrompts ? h('span.badge.b-hidden', { title: 'Every response has its own prompt, so the game never shows this topic text.' }, l.includeAnyway ? 'hidden · incl.' : 'hidden') : null) },
       { id: 'formid', title: plugin && plugin.isTopicFile ? '' : 'FormID', width: 90, cls: 'mono dim', render: (l) => l.formId },
-      { id: 'orig', title: 'Original', flex: 1, width: 260, render: (l) => h('span', { title: l.original }, l.original) },
+      { id: 'orig', title: 'Original', flex: 1, width: 260, render: (l) => h('span.dim', { title: l.original }, l.original) },
       { id: 'final', title: 'Final in-game line', flex: 1.3, width: 320, render: (l) => finalInput(l) },
+      { id: 'appr', title: 'Voice / Fix', width: 104, render: (l) => approvalChips(l) },
       { id: 'act', title: '', width: 92, resizable: false, render: (l) => h('div.row',
         l.suggested && l.final !== l.suggested ? h('button.icon-btn', { title: 'Use the script\'s suggestion', onclick: () => act(l, 'accept') }, '✓') : null,
         l.final != null && l.final !== l.original ? h('button.icon-btn', { title: 'Undo: back to the original text', onclick: () => act(l, 'revert') }, '↶') : null,
@@ -144,6 +147,20 @@ export async function modView(id) {
     ],
   });
   grid.el.addEventListener('selection', () => renderActions());
+
+  // Two independent approvals: voiced (topic file) and the edit in the DBVO Fix plugin.
+  function approvalChips(l) {
+    if (l.status === 'Removed' || l.excluded) return h('span.faint', l.excluded ? 'excluded' : '');
+    const chip = (on, explicit, against, label, title, onclick) => h('button.appr' + (on ? '.on' : '') + (against ? '.against' : '') + (explicit ? '.explicit' : ''), { title, onclick }, label);
+    const v = chip(l.voiced, l.voiceApproved != null, l.voiceApproved != null && l.voiceApproved !== l.defaultVoice,
+      '♪', (l.voiced ? 'Voiced: in the topic file and generated in Phase 2.' : 'Not voiced.') + (l.voiceApproved == null ? ' (default)' : ' (your choice)') + ' Click to switch.',
+      () => act(l, 'voice', !l.voiced));
+    const f = plugin.isTopicFile ? null : chip(l.inFix, l.fixApproved != null, l.fixApproved != null && l.fixApproved !== l.defaultFix,
+      'Fix', !l.changed ? 'The text is unchanged, so nothing goes into the DBVO Fix plugin.' : (l.inFix ? 'Your edit goes into the DBVO Fix plugin (the subtitle changes in game).' : 'Your edit is NOT written to the DBVO Fix plugin.') + (l.fixApproved == null ? ' (default)' : ' (your choice)') + ' Click to switch.',
+      () => { if (l.changed) act(l, 'fix', !l.inFix); });
+    if (f && !l.changed) f.disabled = true;
+    return h('div.row', { style: { gap: '4px' } }, v, f);
+  }
 
   function finalInput(l) {
     if (l.status === 'Removed') return h('span.faint', l.final || '');
@@ -178,6 +195,8 @@ export async function modView(id) {
     return {
       all: L.length,
       fixes: L.filter((l) => l.needsOverride).length,
+      notvoiced: L.filter((l) => !l.voiced && l.status !== 'Removed' && !l.excluded && l.kind !== 'SkippedEditorId').length,
+      stage: L.filter((l) => l.stage && live(l)).length,
       flagged: L.filter((l) => l.flagged && live(l)).length,
       unreviewed: L.filter((l) => l.flagged && !l.reviewed && live(l)).length,
       player: L.filter((l) => l.isPlayerName && live(l)).length,
@@ -195,6 +214,8 @@ export async function modView(id) {
     return plugin.lines.filter((l) => {
       switch (filter) {
         case 'fixes': if (!l.needsOverride) return false; break;
+        case 'notvoiced': if (!(!l.voiced && l.status !== 'Removed' && !l.excluded && l.kind !== 'SkippedEditorId')) return false; break;
+        case 'stage': if (!(l.stage && live(l))) return false; break;
         case 'flagged': if (!(l.flagged && live(l))) return false; break;
         case 'unreviewed': if (!(l.flagged && !l.reviewed && live(l))) return false; break;
         case 'player': if (!(l.isPlayerName && live(l))) return false; break;
@@ -209,12 +230,12 @@ export async function modView(id) {
   }
 
   function renderHead() {
-    const addBtn = h('button.btn', 'Add plugins or topic files ▾');
+    const addBtn = h('button.btn', { title: 'Add plugins or topic files to this mod' }, 'Add plugins or topic files ▾');
     addBtn.addEventListener('click', () => popupMenu(addBtn, [
       { label: 'Plugins (.esp / .esm / .esl)…', sub: 'Added to this mod for DBVO patching. A newer version of a plugin already here updates it and keeps your edits.', onclick: () => addFiles('plugins') },
       { label: 'Topic files (.txt)…', sub: 'For mods without a plugin (old mods, player-name collections). Lines are checked the same way; no DBVO Fix plugin.', onclick: () => addFiles('topics') },
     ]));
-    const exportBtn = h('button.btn', { disabled: !plugin }, 'Export… ▾');
+    const exportBtn = h('button.btn', { disabled: !plugin, title: 'Export topic files, DBVO Fix plugins or player-name lines' }, 'Export… ▾');
     exportBtn.addEventListener('click', () => popupMenu(exportBtn, [
       { label: 'Topic files + DBVO Fix plugins to a folder…', sub: 'Only for using them outside this app. Phase 2 writes them for you.', onclick: exportOutputs },
     ]));
@@ -228,7 +249,7 @@ export async function modView(id) {
       h('div.spacer'),
       addBtn,
       exportBtn,
-      h('button.btn.ghost.danger', { onclick: delMod }, 'Delete'));
+      h('button.btn.ghost.danger', { title: 'Delete this mod project (a backup is made first)', onclick: delMod }, 'Delete'));
   }
 
   function renderBanners() {
@@ -251,9 +272,9 @@ export async function modView(id) {
         plugin.missingMasters.map((m) => h('span.row', h('span.mono', m.fileName),
           m.nexusSearchUrl ? h('a', { href: '#', onclick: (e) => { e.preventDefault(); rpc('open.url', { url: m.nexusSearchUrl }); } }, 'find on Nexus') : h('span.faint', '(set the base game folder in Settings)'))),
         h('div.spacer'),
-        h('button.btn.sm', { onclick: uploadMasters }, 'Upload masters…')));
+        h('button.btn.sm', { title: 'Upload the master files this plugin needs so its lines can be read', onclick: uploadMasters }, 'Upload masters…')));
     }
-    for (const n of plugin.notices) banners.append(h('div.banner.bad', h('span', n), h('div.spacer'), h('button.btn.sm', { onclick: uploadStrings }, 'Add strings files…')));
+    for (const n of plugin.notices) banners.append(h('div.banner.bad', h('span', n), h('div.spacer'), h('button.btn.sm', { title: 'Add the .strings files of a localized plugin', onclick: uploadStrings }, 'Add strings files…')));
     if (mod.uploadedMasters.length) {
       banners.append(h('div.banner.info', h('span', `Uploaded masters kept in this mod: ${mod.uploadedMasters.join(', ')}`), h('div.spacer'),
         h('button.btn.sm', { onclick: async () => { if (await confirmBox('Delete uploaded masters?', 'They are only needed for reading the plugin. You can upload them again for the next update.', 'Delete', true)) { await rpc('mod.deleteMasters', { id }); reload(); } } }, 'Delete to save space')));
@@ -264,23 +285,42 @@ export async function modView(id) {
     clear(tabs);
     if (!mod.plugins.length) { tabs.classList.add('hidden'); return; }
     tabs.classList.remove('hidden');
-    for (const p of mod.plugins) {
-      tabs.append(h('span.chip' + (p === plugin ? '.on' : ''), { onclick: () => { plugin = p; save(); renderAll(); } },
-        h('span.mono', p.fileName),
-        p.isTopicFile ? h('span.n', '· topic file') : p.needsFix ? h('span.n', `· fix ${p.fixes}`) : h('span.n', '· clean'),
-        p.unreviewed ? h('span.badge.b-broken', p.unreviewed) : null));
-    }
-    const drop = h('span.chip', { title: 'Drop a plugin or topic file. A newer version of an existing one updates it.' }, '+ drop file / update');
+    const label = (p) => `${p.fileName}  ·  ${p.isTopicFile ? 'topic file' : p.needsFix ? `fix ${p.fixes}` : 'clean'}${p.unreviewed ? `  ·  ${p.unreviewed} to review` : ''}`;
+    const sel = h('select.mono', { title: 'The plugin (or topic file) you are working on', style: { maxWidth: '520px' } },
+      mod.plugins.map((p) => h('option', { value: p.fileName, selected: p === plugin }, label(p))));
+    sel.addEventListener('change', () => { plugin = mod.plugins.find((p) => p.fileName === sel.value); save(); renderAll(); });
+    const unrev = mod.plugins.filter((p) => p.unreviewed).length;
+    const drop = h('span.chip', { title: 'Drop plugins or topic files here (or click to choose). A newer version of a plugin already in this mod updates it and keeps your edits.' }, '+ drop file / update');
     wireDrop(drop, importPaths);
     drop.addEventListener('click', () => addFiles());
-    tabs.append(drop, h('div.spacer'));
+    tabs.append(h('span.faint', 'Plugin'), sel,
+      mod.plugins.length > 1 ? h('span.badge.b-fixed', { title: mod.plugins.map((p) => p.fileName).join('\n') }, `${mod.plugins.length} plugins in this mod`) : null,
+      unrev && mod.plugins.length > 1 ? h('span.badge.b-broken', { title: 'Plugins with flagged lines not reviewed yet' }, `${unrev} with lines to review`) : null,
+      drop, h('div.spacer'));
     if (plugin && !plugin.isTopicFile) {
-      tabs.append(h('button.btn.sm', { onclick: importFix, title: 'Take the texts of a DBVO Fix plugin you made earlier (for example with xEdit) for this plugin' },
+      tabs.append(h('button.btn.sm', { onclick: importFix, title: 'Take the texts of a DBVO Fix plugin you made earlier (for example with xEdit) into this plugin\'s lines' },
         plugin.importedFixPlugin ? `Imported: ${plugin.importedFixPlugin} · import again…` : 'Import existing DBVO Fix plugin…'));
     }
     if (plugin && plugin.playerNames) {
-      tabs.append(h('button.btn.sm', { onclick: () => exportPlayerNames([]) }, `Export ${plugin.playerNames} player-name line(s)`));
+      tabs.append(h('button.btn.sm', { onclick: () => exportPlayerNames([]), title: 'Save the <Alias=Player> lines as a topic .txt in Downloads, for your player-name patches' }, `Export ${plugin.playerNames} player-name line(s)`));
     }
+    if (plugin) tabs.append(h('button.btn.sm.ghost.danger', { onclick: deletePlugin, title: 'Remove this plugin (or topic file) and its Phase 1 work from the mod' }, 'Remove plugin…'));
+  }
+
+  async function deletePlugin() {
+    const edited = plugin.lines.filter((l) => l.userEdited).length;
+    const fixes = plugin.fixes || 0;
+    const ok = await confirmBox(`Remove ${plugin.fileName}?`,
+      `This removes the plugin from "${mod.name}" with all its Phase 1 work:\n• ${plugin.lines.length} lines\n• ${edited} line(s) you edited\n• ${fixes} line(s) in its DBVO Fix plugin\n• your approvals, variants and reviews\n\nDBVO Patches using this mod lose these lines the next time they open (takes already generated stay in the patch). A backup is made first, and you can add the plugin again later, but your edits only come back from the backup.`,
+      'Remove', true);
+    if (!ok) return;
+    try {
+      mod = await rpc('mod.deletePlugin', { id, plugin: plugin.fileName });
+      plugin = mod.plugins[0] || null;
+      save();
+      renderAll();
+      toast('Plugin removed. A backup was made first.');
+    } catch (e) { fail(e); }
   }
 
   function renderFilters() {
@@ -290,7 +330,8 @@ export async function modView(id) {
     if (!plugin) return;
     const q = h('input', { type: 'text', placeholder: 'Search text, FormID, EditorID…', value: search });
     q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visibleLines()); }, 150));
-    filters.append(chip('all', 'All'), chip('fixes', 'In DBVO Fix'), chip('flagged', 'Flagged'), chip('unreviewed', 'Not reviewed'),
+    filters.append(chip('all', 'All'), chip('fixes', 'In DBVO Fix'), chip('notvoiced', 'Not voiced'), chip('flagged', 'Flagged'), chip('unreviewed', 'Not reviewed'),
+      c.stage ? chip('stage', 'Stage directions') : null,
       c.player ? chip('player', 'Player names') : null,
       chip('changed', 'Changed in mod'), chip('edited', 'Edited by you'), chip('hidden', 'Hidden by prompts'), chip('excluded', 'Excluded'), chip('removed', 'Removed'),
       h('div.spacer'), q, columnsMenu(grid),
@@ -310,16 +351,39 @@ export async function modView(id) {
         c.unreviewed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.unreviewed} flagged not reviewed`) : null),
       h('div.spacer'),
       sel.length ? h('span.dim', `${sel.length} selected`) : null,
-      sel.length ? h('button.btn.sm', { onclick: () => bulk('accept') }, 'Use suggestions') : null,
-      sel.length ? h('button.btn.sm', { onclick: () => bulk('revert') }, 'Back to original') : null,
-      sel.length ? h('button.btn.sm', { onclick: () => bulk('review') }, 'Mark reviewed') : null,
-      sel.length ? h('button.btn.sm', { onclick: () => bulk('exclude') }, 'Exclude') : null,
-      sel.length ? h('button.btn.sm', { onclick: () => bulk('include') }, 'Include') : null,
+      sel.length ? h('button.btn.sm', { title: 'Use the script\'s suggestion for the ticked lines', onclick: () => bulk('accept') }, 'Use suggestions') : null,
+      sel.length ? h('button.btn.sm', { title: 'Undo edits on the ticked lines', onclick: () => bulk('revert') }, 'Back to original') : null,
+      sel.length ? h('button.btn.sm', { title: 'Confirm voicing and the DBVO Fix edit as they stand, and mark the rows reviewed (stage directions stay silent)', onclick: () => bulk('approve') }, 'Approve') : null,
+      sel.length ? h('button.btn.sm', { title: 'Voice the ticked lines (topic file)', onclick: () => bulk('voiceOn') }, '♪ Voice') : null,
+      sel.length ? h('button.btn.sm', { title: 'Don\'t voice the ticked lines', onclick: () => bulk('voiceOff') }, '♪ Silent') : null,
+      sel.length ? h('button.btn.sm', { title: 'Write the ticked lines\' edits to the DBVO Fix plugin', onclick: () => bulk('fixOn') }, 'Fix on') : null,
+      sel.length ? h('button.btn.sm', { title: 'Keep the ticked lines\' edits out of the DBVO Fix plugin', onclick: () => bulk('fixOff') }, 'Fix off') : null,
+      sel.length ? h('button.btn.sm', { title: 'Mark the ticked rows as looked at, without changing anything', onclick: () => bulk('review') }, 'Mark reviewed') : null,
+      sel.length ? h('button.btn.sm', { title: 'Leave the ticked lines out of the topic file and DBVO Fix plugin', onclick: () => bulk('exclude') }, 'Exclude') : null,
+      sel.length ? h('button.btn.sm', { title: 'Bring excluded lines back', onclick: () => bulk('include') }, 'Include') : null,
       h('button.btn.sm.ghost', { onclick: () => grid.selectAll(!sel.length) }, sel.length ? 'Clear selection' : 'Select all shown'),
-      h('button.btn.primary', { onclick: toPhase2 }, 'Continue to Phase 2 →'));
+      h('button.btn.primary', { title: 'Write the topic files and DBVO Fix plugins, then open the DBVO Patches', onclick: toPhase2 }, 'Continue to Phase 2 →'));
   }
 
   // ---- inspector
+  function approvalPanel(l) {
+    if (l.status === 'Removed' || l.excluded) return null;
+    const tag = (explicit) => h('span.faint', explicit ? ' (your choice)' : ' (default)');
+    return h('div.box', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+      h('div.field-label', { style: { margin: 0 } }, 'What happens with this line'),
+      l.stage ? h('div.help', { style: { margin: 0 } }, h('b', 'Stage direction. '),
+        'The whole line is in (parentheses) or [brackets]. Some are meant to be heard, like (Laughs) with the Eleven v4 model; others, like (Sip your drink), are silent subtitles. Your call:',
+        h('div.row', { style: { marginTop: '6px' } },
+          h('button.btn.sm' + (l.voiceApproved === true ? '.primary' : ''), { title: 'Voice it: Phase 2 starts its spoken text as an audio tag, e.g. [laughs]', onclick: () => act(l, 'voice', true) }, '♪ Voice it'),
+          h('button.btn.sm' + (l.voiceApproved === false ? '.primary' : ''), { title: 'Keep it silent: the subtitle changes, nothing is generated', onclick: () => act(l, 'voice', false) }, 'Keep silent'))) : null,
+      switchEl(l.voiced, (v) => act(l, 'voice', v), h('span', '♪ Voice it — in the topic file, generated in Phase 2', tag(l.voiceApproved != null)), { title: 'Off: no sound file is made for this line' }),
+      plugin.isTopicFile ? null : switchEl(l.inFix, (v) => act(l, 'fix', v), h('span', 'Fix the subtitle — write this text to ' + plugin.fixFileName, tag(l.fixApproved != null)),
+        { disabled: !l.changed, title: l.changed ? 'Off: the game keeps the plugin\'s original text' : 'The text is unchanged, so there is nothing to write' }),
+      l.voiceApproved != null || l.fixApproved != null ? h('button.btn.sm.ghost', { style: { alignSelf: 'flex-start' }, title: 'Forget your choices and use the defaults again', onclick: async () => { await act(l, 'voice', null); await act(l, 'fix', null); } }, 'Back to defaults') : null,
+      l.voiced && l.final && l.final.includes('*') ? h('div.check.bad', 'Still contains *: ElevenLabs reads it as "asterisk".') : null,
+      l.flagged && !l.stage ? h('button.btn.sm.primary', { style: { alignSelf: 'flex-start' }, title: 'Confirm both choices as shown and mark the line reviewed', onclick: () => act(l, 'approve') }, 'Approve') : null);
+  }
+
   function helpFor(l) {
     if (l.isPlayerName) {
       return h('div.help', { style: { borderColor: '#4c2f7a', background: '#1f1533', color: '#dccbf5' } },
@@ -327,6 +391,7 @@ export async function modView(id) {
         h('p', 'Export the line below. It is saved as a topic .txt in your ', h('b', 'Downloads'), ' folder; add it to your master player-name topic file. More player-name lines to patch are collected on the ', h('b', 'DBVO Repository'), ' mod page on Nexus Mods.'),
         l.needsOverride ? h('p', 'The script also reformatted this line, so the formatted version goes into the DBVO Fix plugin.') : null);
     }
+    if (l.stage && (l.kind === 'Broken' || l.kind === 'TooLong')) return null; // the approval panel explains stage directions
     if (l.kind === 'Broken') {
       return h('div.help.bad',
         h('p', h('b', 'BROKEN LINE. '), 'The script can\'t make this line voice-ready on its own: usually an alias placeholder like <Alias=…>, asterisks such as *laughs*, or a < or parenthesis in the wrong place.'),
@@ -369,8 +434,9 @@ export async function modView(id) {
         const r = await rpc('rules.check', { text });
         if (r.reasons && r.reasons.length) {
           checkEl.append(h('div.check.bad', h('b', 'Not accepted by the script yet:'), h('ul', { style: { margin: '4px 0 0', paddingLeft: '18px' } }, r.reasons.map((x) => h('li', x))),
-            r.fix && r.fix !== text.trim() ? h('div', { style: { marginTop: '6px' } }, h('button.btn.sm', { onclick: () => { finalBox.value = r.fix; act(l, 'setFinal', r.fix); } }, 'Use the script\'s version: ' + r.fix)) : null));
-        } else if (r.problem) checkEl.append(h('div.check.bad', r.problem));
+            r.fix && r.fix !== text.trim() ? h('div', { style: { marginTop: '6px' } }, h('button.btn.sm', { title: 'Replace the text with what the script would make of it', onclick: () => { finalBox.value = r.fix; act(l, 'setFinal', r.fix); } }, 'Use the script\'s version: ' + r.fix)) : null));
+        } else if (r.stage) checkEl.append(h('div.check.ok', '✓ A stage direction: choose below whether it is voiced or stays silent.'));
+        else if (r.problem) checkEl.append(h('div.check.bad', r.problem));
         else if (text !== l.original) checkEl.append(h('div.check.ok', r.isPlayerName ? '✓ Valid player-name line' : '✓ The script accepts this line'));
       } catch { /* advisory */ }
     }, 250);
@@ -386,11 +452,11 @@ export async function modView(id) {
       l.suggested && l.suggested !== l.original ? h('div', h('div.field-label', 'Script suggestion'), h('div.box.suggest', l.suggested)) : null,
       h('div', h('div.row', h('div.field-label.grow', plugin.isTopicFile ? 'Final line (topic file)' : 'Final in-game line (topic file + DBVO Fix plugin)'), counter), finalBox, checkEl,
         h('div.row', { style: { marginTop: '6px' } },
-          l.suggested && l.suggested !== l.final ? h('button.btn.sm', { onclick: () => act(l, 'accept') }, 'Use suggestion') : null,
-          l.final != null && l.final !== l.original ? h('button.btn.sm', { onclick: () => act(l, 'revert') }, 'Back to original') : null,
+          l.suggested && l.suggested !== l.final ? h('button.btn.sm', { title: 'Replace the text with the script\'s suggestion', onclick: () => act(l, 'accept') }, 'Use suggestion') : null,
+          l.final != null && l.final !== l.original ? h('button.btn.sm', { title: 'Undo your edit and use the in-game text', onclick: () => act(l, 'revert') }, 'Back to original') : null,
           h('div.spacer'),
-          h('button.btn.sm', { onclick: () => act(l, 'exclude', !l.excluded) }, l.excluded ? 'Include' : 'Exclude'))),
-      l.needsOverride ? h('div.banner.info', { style: { margin: 0 } }, 'This text is written to ' + plugin.fixFileName + '.') : null,
+          h('button.btn.sm', { title: l.excluded ? 'Bring this line back' : 'Leave this line out of the topic file and DBVO Fix plugin', onclick: () => act(l, 'exclude', !l.excluded) }, l.excluded ? 'Include' : 'Exclude'))),
+      approvalPanel(l),
       l.isPlayerName ? h('div.row', h('button.btn.primary.sm', { onclick: () => exportPlayerNames([l.key]) }, 'Export this line to Downloads'),
         l.playerNameExported ? h('span.badge.b-valid', 'exported') : null) : null,
       l.hasOtherAlias && !l.isPlayerName ? variantsEditor(l) : null,
@@ -398,7 +464,7 @@ export async function modView(id) {
         'Include anyway (every response in this plugin has its own prompt, so the game normally never shows this text)') : null,
       l.status === 'ChangedInMod' ? h('div.help.warn', h('p', h('b', 'The mod changed this line.')),
         h('p', h('span.dim', 'Was: '), l.previousOriginal || '—'), h('p', h('span.dim', 'Your earlier final: '), l.previousFinal || '—'),
-        h('div.row', h('button.btn.sm', { onclick: () => act(l, 'keepPrevious') }, 'Keep my earlier edit'), h('button.btn.sm', { onclick: () => act(l, 'acceptChange') }, 'Use the new text'))) : null,
+        h('div.row', h('button.btn.sm', { title: 'The mod update changed this line; keep your edit', onclick: () => act(l, 'keepPrevious') }, 'Keep my earlier edit'), h('button.btn.sm', { title: 'Drop your edit and use the updated text', onclick: () => act(l, 'acceptChange') }, 'Use the new text'))) : null,
     );
     if (!l.reviewed && l.flagged) act(l, 'review');
   }
@@ -407,7 +473,7 @@ export async function modView(id) {
     const ta = h('textarea', { rows: 4, placeholder: 'One line per variant, e.g.\nAlvor sent me. Riverwood is in danger.\nGerdur sent me. Riverwood is in danger.' }, (l.variants || []).join('\n'));
     return h('div', h('div.field-label', 'Written-out variants (each becomes its own topic line and file)'), ta,
       h('div.row', { style: { marginTop: '6px' } }, h('span.faint.grow', 'Write each exactly as the subtitle will read in game. The plugin is not changed.'),
-        h('button.btn.sm', { onclick: () => act(l, 'variants', ta.value.split('\n')) }, 'Save variants')));
+        h('button.btn.sm', { title: 'Extra spellings of this line that also go into the topic file', onclick: () => act(l, 'variants', ta.value.split('\n')) }, 'Save variants')));
   }
 
   async function bulk(action) {
@@ -422,6 +488,29 @@ export async function modView(id) {
   async function importPaths(paths) {
     if (!paths || !paths.length) return;
     try {
+      const real = mod.plugins.filter((p) => !p.isTopicFile);
+      if (real.length) {
+        const info = await rpc('plugin.inspect', { paths });
+        const fixes = info.filter((x) => x.looksLikeFix);
+        for (const fx of fixes) {
+          const name = fx.path.split('\\').pop();
+          const guess = real.find((p) => fx.masters.some((m) => m.toLowerCase() === p.fileName.toLowerCase())) || plugin || real[0];
+          const target = h('select', real.map((p) => h('option', { value: p.fileName, selected: p === guess }, p.fileName)));
+          const choice = await modal('This looks like a DBVO Fix plugin', [
+            h('div', h('span.mono', name), ' only overrides dialogue of another plugin, so it is probably an earlier DBVO Fix plugin, not a mod plugin to voice.'),
+            h('div.col', h('div.field-label', 'Import its texts into'), target),
+          ], [{ label: 'Skip this file', value: 'skip' }, { label: 'Add as a plugin anyway', value: 'plugin' }, { label: 'Import as DBVO Fix', primary: true, value: 'fix' }]);
+          if (!choice || choice === 'skip') { paths = paths.filter((x) => x !== fx.path); continue; }
+          if (choice === 'fix') {
+            paths = paths.filter((x) => x !== fx.path);
+            const r = await rpc('mod.importFix', { id, plugin: target.value, path: fx.path });
+            mod = r.mod;
+            plugin = mod.plugins.find((p) => p.fileName === target.value) || plugin;
+            toast(`${r.applied} line(s) taken from ${name}.`);
+          }
+        }
+        if (!paths.length) { renderAll(); return; }
+      }
       toast('Reading files…');
       const r = await rpc('mod.import', { id: mod.id, paths });
       mod = r.mod;

@@ -22,44 +22,42 @@ export function voiceChip(name, color) {
 
 export async function patchesView(kind = 'tts') {
   const s = await refreshState();
-  const vc = kind === 'vc';
-  const patches = s.patches.filter((p) => (p.kind || 'tts') === kind);
+  const vcPage = kind === 'vc';
+  // The Phase 2 page lists every patch (Voice Changer ones carry a badge); the Voice Changer page only those.
+  const patches = s.patches.filter((p) => !vcPage || p.kind === 'vc');
   const view = h('div.view');
   view.append(h('div.view-head',
-    h('h1', vc ? 'Voice Changer' : 'DBVO Patches'),
-    h('span.sub', vc
-      ? 'Other Tools · revoice WAV files another voice pack already has (ElevenLabs speech-to-speech). Works like Phase 2, without DBVO Fix plugins or topic files.'
-      : 'One voice pack × one or more mods. Drag a patch onto another header to change its category.'),
+    h('h1', vcPage ? 'Voice Changer' : 'DBVO Patches'),
+    h('span.sub', vcPage
+      ? 'Other Tools · revoice WAV or .fuz files another voice pack already has (ElevenLabs speech-to-speech). Works like Phase 2, without DBVO Fix plugins or topic files.'
+      : 'One voice pack × one or more mods. Drag a patch onto another header to change its category. Two lists side by side, so you can compare voice packs.'),
     h('div.spacer'),
-    vc ? null : h('button.btn', { onclick: addCategory }, '+ Category'),
-    h('button.btn.primary', { onclick: () => newPatch(kind) }, vc ? '+ New Voice Changer patch' : '+ New DBVO Patch')));
+    vcPage ? null : h('button.btn', { onclick: addCategory, title: 'Add a category header (also used for mods and FOMOD pages)' }, '+ Category'),
+    vcPage ? null : h('button.btn', { onclick: () => newPatch('vc'), title: 'Revoice another voice pack\'s files with speech-to-speech' }, '+ Voice Changer patch'),
+    h('button.btn.primary', { onclick: () => newPatch(kind), title: vcPage ? 'Revoice another voice pack\'s files with speech-to-speech' : 'A voice pack × one or more Phase 1 mods' }, vcPage ? '+ New Voice Changer patch' : '+ New DBVO Patch')));
   const body = h('div.view-body');
   view.append(body);
-  if (!patches.length) {
-    body.append(h('div.empty', h('h2', vc ? 'No Voice Changer patches yet' : 'No DBVO Patches yet'),
-      h('div', vc ? 'Pick a Phase 1 mod, the voice pack to make, and the folder with the WAV files of another voice pack for the same mod.'
-        : 'Open a mod in Phase 1 and click "Continue to Phase 2", or create one here.'),
-      h('div', { style: { marginTop: '14px' } }, s.voicePacks.length
-        ? h('button.btn.primary', { onclick: () => newPatch(kind) }, vc ? '+ New Voice Changer patch' : '+ New DBVO Patch')
-        : h('button.btn.primary', { onclick: () => go('settings', { tab: 'voices', id: 'new' }) }, '+ New voice pack'))));
+  if (!patches.length && vcPage) {
+    body.append(h('div.empty', h('h2', 'No Voice Changer patches yet'),
+      h('div', 'Pick a Phase 1 mod, the voice pack to make, and the folder with the WAV or .fuz files of another voice pack for the same mod.'),
+      h('div', { style: { marginTop: '14px' } }, h('button.btn.primary', { onclick: () => newPatch('vc') }, '+ New Voice Changer patch'))));
     return view;
   }
-  const collapsed = store.get('cats-collapsed', {});
-  const voiceFilter = h('select', h('option', { value: '' }, 'All voice packs'), s.voicePacks.map((v) => h('option', { value: v.id }, v.name)));
-  voiceFilter.value = store.get('patches-voice', '');
-  const q = h('input', { type: 'text', placeholder: 'Filter patches…', style: { width: '240px' } });
-  const listEl = h('div');
-  body.append(h('div.row', { style: { marginBottom: '12px' } }, q, voiceFilter), listEl);
+  if (!s.voicePacks.length) {
+    body.append(h('div.empty', h('h2', 'Create a voice pack first'), h('div', { style: { marginTop: '14px' } }, h('button.btn.primary', { onclick: () => go('settings', { tab: 'voices', id: 'new' }) }, '+ New voice pack'))));
+    return view;
+  }
   let dragId = null;
 
   const card = (p) => {
     const n = p.total - p.omitted;
-    const el = h('div.pcard', { draggable: !vc, onclick: () => go('patch', { id: p.id }) },
-      h('div.row', h('span.title.ellipsis.grow', p.name), voiceChip(p.voicePack, p.voiceColor)),
-      h('div.row', { title: 'Phase 1: flagged lines (BROKEN LINE / TOO LONG WILL CTD) not yet reviewed' },
+    const vc = p.kind === 'vc';
+    const el = h('div.pcard', { draggable: !vc, onclick: () => go('patch', { id: p.id }), title: 'Open this patch' },
+      h('div.row', h('span.title.ellipsis.grow', p.name), vc ? h('span.badge.b-player', { title: 'Speech-to-speech from another voice pack\'s files' }, 'Voice Changer') : null, voiceChip(p.voicePack, p.voiceColor)),
+      vc ? null : h('div.row', { title: 'Phase 1: flagged lines (BROKEN LINE / TOO LONG WILL CTD / stage directions) not yet decided' },
         h('span.faint', 'Phase 1'),
         p.unreviewed ? h('span.badge.b-broken', `${p.unreviewed} flagged not reviewed`) : h('span.badge.b-valid', 'all flagged lines reviewed')),
-      h('div.row', { title: 'Phase 2: lines with a take' },
+      h('div.row', { title: 'Phase 2: lines with a take (generated, converted or imported from existing files)' },
         h('span.faint', 'Phase 2'),
         h('div.grow', h('div.bar' + (n && p.generated >= n ? '.ok' : ''), h('div.bar-fill', { style: { width: pct(p) + '%' } }))),
         h('span.mono', `${p.generated} / ${n}`)),
@@ -74,19 +72,24 @@ export async function patchesView(kind = 'tts') {
     return el;
   };
 
-  const render = () => {
-    clear(listEl);
-    const f = q.value.toLowerCase();
-    const cats = [...s.settings.categories, ...new Set(patches.map((p) => p.category).filter((c) => !s.settings.categories.includes(c)))];
-    for (const cat of cats) {
-      const list = patches.filter((p) => p.category === cat && (!voiceFilter.value || p.voicePackId === voiceFilter.value) && (!f || p.name.toLowerCase().includes(f) || p.voicePack.toLowerCase().includes(f)));
-      if (vc && !list.length) continue;
-      const isOpen = !collapsed[cat];
-      const sec = h('div.cat',
-        h('div.cat-head', { onclick: () => { collapsed[cat] = isOpen; store.set('cats-collapsed', collapsed); render(); } },
-          h('span.caret', isOpen ? '▾' : '▸'), h('h3', cat), h('span.faint', list.length || 'empty · drop a patch here')),
-        isOpen && list.length ? h('div.cards2', list.map(card)) : null);
-      if (!vc) {
+  function pane(key, defaultVoice) {
+    const collapsed = store.get('cats-collapsed:' + key, {});
+    const voiceFilter = h('select', { title: 'Show the patches of one voice pack' }, h('option', { value: '' }, 'All voice packs'), s.voicePacks.map((v) => h('option', { value: v.id }, v.name)));
+    voiceFilter.value = store.get('patches-voice:' + key, defaultVoice);
+    const q = h('input', { type: 'text', placeholder: 'Filter patches…', title: 'Filter by patch or voice pack name', style: { width: '220px' } });
+    const listEl = h('div');
+    const render = () => {
+      clear(listEl);
+      const f = q.value.toLowerCase();
+      const cats = [...s.settings.categories, ...new Set(patches.map((p) => p.category).filter((c) => !s.settings.categories.includes(c)))];
+      for (const cat of cats) {
+        const list = patches.filter((p) => p.category === cat && (!voiceFilter.value || p.voicePackId === voiceFilter.value) && (!f || p.name.toLowerCase().includes(f) || p.voicePack.toLowerCase().includes(f)));
+        if (vcPage && !list.length) continue;
+        const isOpen = !collapsed[cat];
+        const sec = h('div.cat',
+          h('div.cat-head', { title: isOpen ? 'Click to fold' : 'Click to unfold', onclick: () => { collapsed[cat] = isOpen; store.set('cats-collapsed:' + key, collapsed); render(); } },
+            h('span.caret', isOpen ? '▾' : '▸'), h('h3', cat), h('span.faint', list.length || 'empty · drop a patch here')),
+          isOpen && list.length ? h('div.cards1', list.map(card)) : null);
         sec.addEventListener('dragover', (e) => { if (dragId) { e.preventDefault(); sec.classList.add('drop-over'); } });
         sec.addEventListener('dragleave', (e) => { if (!sec.contains(e.relatedTarget)) sec.classList.remove('drop-over'); });
         sec.addEventListener('drop', async (e) => {
@@ -96,17 +99,22 @@ export async function patchesView(kind = 'tts') {
           if (!p || p.category === cat) return;
           try {
             for (const mid of p.modIds) await rpc('mod.setCategory', { id: mid, category: cat });
-            go('patches');
+            go(vcPage ? 'vc' : 'patches');
             toast(`Moved to ${cat}. The mod's category changed too (it is shared by all its patches).`);
           } catch (err) { fail(err); }
         });
+        listEl.append(sec);
       }
-      listEl.append(sec);
-    }
-  };
-  q.addEventListener('input', render);
-  voiceFilter.addEventListener('change', () => { store.set('patches-voice', voiceFilter.value); render(); });
-  render();
+    };
+    q.addEventListener('input', render);
+    voiceFilter.addEventListener('change', () => { store.set('patches-voice:' + key, voiceFilter.value); render(); });
+    render();
+    return h('div.pane', h('div.row', { style: { marginBottom: '12px' } }, q, voiceFilter), listEl);
+  }
+
+  const first = s.settings.lastVoicePackId || s.voicePacks[0].id;
+  const second = (s.voicePacks.find((v) => v.id !== first) || s.voicePacks[0]).id;
+  body.append(vcPage ? pane('vc', '') : h('div.panes', pane('left', first), pane('right', second)));
   return view;
 }
 
@@ -206,15 +214,17 @@ export async function patchView(id) {
       { id: 'mark', title: 'Marked', width: 62, resizable: false, render: (l) => h('button.mark-btn' + (l.marked ? '.on' : ''), { title: l.marked ? 'Marked: click to unmark' : 'Mark this line (kept until you unmark it; "Generate · Marked" uses it)', onclick: () => upd(l, 'mark', !l.marked) }, '★') },
       { id: 'orig', title: 'Original mod line', width: 240, render: (l) => h('span.dim', { title: l.originalLine }, l.originalLine) },
       { id: 'file', title: 'Filename', flex: 1, width: 240, render: (l) => h('span.faint.mono', { title: `In-game line: ${l.finalLine}\nFile: ${l.stem}.wav / .lip / .fuz` }, l.editedInPhase1 ? h('span.mark.info', { title: 'Edited in Phase 1' }, 'P1 ') : null, l.stem + '.wav') },
-      vc ? { id: 'src', title: 'Source', width: 80, render: (l) => l.hasSource ? h('span.row', h('button.icon-btn', { title: 'Play the source WAV: ' + l.sourceWav, onclick: () => playSource(l) }, '▶'), h('span.badge.b-valid', '✓')) : h('span.badge.b-broken', { title: 'No WAV with this line\'s name in the source folders' }, 'missing') } : null,
+      vc ? { id: 'src', title: 'Source', width: 80, render: (l) => l.hasSource ? h('span.row', h('button.icon-btn', { title: 'Play the source: ' + l.sourceWav, onclick: () => playSource(l) }, '▶'), h('span.badge.b-valid', { title: l.sourceWav }, l.sourceWav.toLowerCase().endsWith('.fuz') ? '.fuz' : '✓')) : h('span.badge.b-broken', { title: `No ${l.stem}.wav or .fuz (Legacy or DBVO 2.0 name) in the source folders. New lines from a mod update have no source until the source pack has them.` }, 'missing') } : null,
       { id: 'spoken', title: vc ? 'Text for the LIP' : 'Spoken text (tags anywhere)', flex: 1.3, width: 320, render: (l) => spokenCell(l) },
       { id: 'restore', title: '', width: 34, resizable: false, render: (l) => l.spokenEdited ? h('button.icon-btn', { title: 'Restore the in-game line: ' + l.finalLine, onclick: () => upd(l, 'resetSpoken') }, '↺') : null },
-      { id: 'take', title: 'Take', width: 92, render: (l) => h('span.row', statusDot(l), l.takes.length > 1
-        ? h('select', { style: { padding: '1px 2px' }, onchange: (e) => upd(l, 'selectTake', e.target.value) }, l.takes.map((t) => h('option', { value: t.id, selected: t.id === l.selectedTakeId }, '#' + t.slot)))
-        : h('span.faint', l.takes.length ? '#' + l.takes[0].slot : '—')) },
+      { id: 'take', title: 'Take', width: 92, render: (l) => h('span.row', statusDot(l), l.takes.length
+        ? h('button.btn.sm.ghost', { title: `${l.takes.length} take(s). Click to play, switch, or delete takes.`, onclick: () => takesModal(l) },
+          '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? ` of ${l.takes.length}` : '') + ' ▾')
+        : h('span.faint', { title: 'No take yet' }, '—')) },
       { id: 'act', title: '', width: 84, resizable: false, render: (l) => h('span.row',
-        h('button.icon-btn.big', { title: 'Play (or double-click the row)', disabled: !l.selectedTakeId, onclick: () => play(l) }, '▶'),
-        h('button.icon-btn.big', { title: vc ? 'Convert again (new take)' : 'Generate a new take', disabled: l.omitted || !!app.job || (vc && !l.hasSource), onclick: () => generate('selected', [l.lineId]) }, '↻')) },
+        h('button.icon-btn.big', { title: l.selectedTakeId ? 'Play (or double-click the row)' : vc ? 'No take yet: convert the line first (↻)' : 'No take yet: generate the line first (↻)', disabled: !l.selectedTakeId, onclick: () => play(l) }, '▶'),
+        h('button.icon-btn.big', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running (see the top bar)' : vc && !l.hasSource ? 'No source WAV or .fuz with this line\'s name in the source folders' : vc ? 'Convert again (new take)' : 'Generate a new take (no confirmation for one line)',
+          disabled: l.omitted || !!app.job || (vc && !l.hasSource), onclick: () => generate('selected', [l.lineId]) }, '↻')) },
     ].filter(Boolean),
   });
   grid.el.addEventListener('selection', () => renderActions());
@@ -252,10 +262,40 @@ export async function patchView(id) {
 
   async function playSource(l) {
     try {
-      const url = await rpc('file.dataUrl', { path: l.sourceWav });
+      const url = await rpc('audio.preview', { path: l.sourceWav });
       if (!url) { toast('The source file is gone.', true); return; }
       audio.src = url;
       audio.play().catch(fail);
+    } catch (e) { fail(e); }
+  }
+
+  async function takesModal(l) {
+    const list = h('div.col');
+    const render = () => {
+      const line = index.get(l.lineId) || l;
+      clear(list).append(line.takes.slice().reverse().map((t) => h('div.take' + (t.id === line.selectedTakeId ? '.sel' : ''),
+        h('button.icon-btn.big', { title: 'Play this take', onclick: () => play(line, t) }, '▶'),
+        h('div.grow', { style: { minWidth: 0 } }, h('div', '#' + t.slot + (t.id === line.selectedTakeId ? ' · used for export and .fuz' : '')),
+          h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.settings.engine || ''} · ${t.settings.modelId || ''} · ${new Date(t.createdUtc).toLocaleString()}`),
+          t.spokenText !== line.spoken ? h('div.meta.ellipsis', { title: t.spokenText }, 'Text then: ' + t.spokenText) : null),
+        t.id !== line.selectedTakeId ? h('button.btn.sm', { title: 'Use this take for export and .fuz', onclick: async () => { await upd(line, 'selectTake', t.id); render(); } }, 'Use') : null,
+        h('button.icon-btn', { title: 'Delete this take and its files', onclick: async () => { await upd(line, 'deleteTake', t.id); render(); } }, '🗑'))));
+    };
+    render();
+    await modal(`Takes · ${l.finalLine}`, [list,
+      h('div.row', h('button.btn.sm', { title: 'Delete every take of this line except the one in use', onclick: async () => {
+        try { const r = await rpc('patch.purgeTakes', { id, lineIds: [l.lineId] }); patch = r.patch; reindex(); grid.setRows(visible()); render(); toast(`${r.removed} take(s) deleted.`); } catch (e) { fail(e); }
+      } }, 'Keep only the used take'),
+      h('button.btn.sm', { title: 'Make another take of this line', onclick: () => { document.getElementById('modal').classList.add('hidden'); generate('selected', [l.lineId]); } }, vc ? 'Convert again' : 'New take'))]);
+  }
+
+  async function purge(ids) {
+    const n = ids ? ids.length : patch.lines.length;
+    if (!(await confirmBox('Delete unused takes?', `For ${n} line(s), every take except the one in use is deleted with its files. This can't be undone.`, 'Delete', true))) return;
+    try {
+      const r = await rpc('patch.purgeTakes', { id, lineIds: ids });
+      patch = r.patch; reindex(); grid.setRows(visible()); renderInspector();
+      toast(`${r.removed} take(s) deleted.`);
     } catch (e) { fail(e); }
   }
 
@@ -332,8 +372,8 @@ export async function patchView(id) {
         (models.length ? models : [{ modelId: st.modelId }]).map((m) => h('option', { value: m.modelId, selected: m.modelId === st.modelId }, m.modelId)));
       tb.append(voicePicker(st, 'voiceId', 'voiceName', voices, 'Target voice'), grp('Model', modelSel),
         slider(st, 'stability', 0, 1, 0.01, 'Stability', locked), slider(st, 'similarity', 0, 1, 0.01, 'Similarity', locked), slider(st, 'style', 0, 1, 0.01, 'Style', locked),
-        grp('Speaker boost', switchEl(st.speakerBoost, (v) => setIn(st, 'speakerBoost', v), '', { disabled: locked })),
-        grp('Remove background noise', switchEl(st.removeBackgroundNoise, (v) => setIn(st, 'removeBackgroundNoise', v), '', { disabled: locked })),
+        grp('Speaker boost', switchEl(st.speakerBoost, (v) => setIn(st, 'speakerBoost', v), '', { disabled: locked, title: 'Boosts similarity to the target voice; slightly slower' })),
+        grp('Remove background noise', switchEl(st.removeBackgroundNoise, (v) => setIn(st, 'removeBackgroundNoise', v), '', { disabled: locked, title: 'Strip background noise from the source before converting' })),
         grp('Format', fmt), numIn(st, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px' }),
         numIn(st, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'Your ElevenLabs plan\'s concurrency limit' }));
     } else if (eng === 'voxcpm' || eng === 'omnivoice') {
@@ -347,9 +387,9 @@ export async function patchView(id) {
       tb.append(engineSel, grp('Reference voice', vsel, h('button.icon-btn', { title: 'Reload', onclick: () => loadEngine(true) }, '⟳')), grp('Server', health));
       if (eng === 'voxcpm') {
         tb.append(numIn(o, 'cfgValue', 'CFG', { step: 0.1 }), numIn(o, 'inferenceTimesteps', 'Timesteps', { min: 1 }),
-          grp('Normalize', switchEl(o.normalize, (v) => setIn(o, 'normalize', v), '', { disabled: locked })),
-          grp('Retry bad cases', switchEl(o.retryBadcase, (v) => setIn(o, 'retryBadcase', v), '', { disabled: locked })),
-          grp('Reference mode', switchEl(o.referenceMode, (v) => setIn(o, 'referenceMode', v), '', { disabled: locked })),
+          grp('Normalize', switchEl(o.normalize, (v) => setIn(o, 'normalize', v), '', { disabled: locked, title: 'Normalize numbers and abbreviations in the text before speaking' })),
+          grp('Retry bad cases', switchEl(o.retryBadcase, (v) => setIn(o, 'retryBadcase', v), '', { disabled: locked, title: 'Regenerate automatically when the result is too long or garbled' })),
+          grp('Reference mode', switchEl(o.referenceMode, (v) => setIn(o, 'referenceMode', v), '', { disabled: locked, title: 'Use the reference audio as a voice prompt (closer timbre)' })),
           o.referenceMode ? numIn(o, 'controlCfgValue', 'Control CFG', { step: 0.1 }) : null,
           numIn(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
       } else {
@@ -378,7 +418,7 @@ export async function patchView(id) {
       tb.append(engineSel, voicePicker(e, 'voiceId', 'voiceName', voices), grp('Model', modelSel), stability,
         slider(e, 'similarity', 0, 1, 0.01, 'Similarity', locked),
         supportsStyle ? slider(e, 'style', 0, 1, 0.01, 'Style', locked) : null,
-        supportsBoost ? grp('Speaker boost', switchEl(e.speakerBoost, (v) => setE('speakerBoost', v), '', { disabled: locked })) : null,
+        supportsBoost ? grp('Speaker boost', switchEl(e.speakerBoost, (v) => setE('speakerBoost', v), '', { disabled: locked, title: 'Boosts similarity to the voice; slightly slower' })) : null,
         slider(e, 'speed', 0.7, 1.2, 0.01, 'Speed', locked),
         grp('Language', lang), grp('Read numbers ⓘ', norm), grp('Format', fmt),
         numIn(e, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px', title: 'Same seed + same text + same settings ≈ same take. Empty = random.' }),
@@ -459,8 +499,8 @@ export async function patchView(id) {
       } }, 'Add to all shown…'),
       h('div.spacer'),
       columnsMenu(grid),
-      h('button.btn.sm', { onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, '✨ Auto-tag ticked'),
-      h('button.btn.sm.ghost', { onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, 'Edit tags…'));
+      h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, '✨ Auto-tag ticked'),
+      h('button.btn.sm.ghost', { title: 'Edit the tag list in the voice pack settings', onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, 'Edit tags…'));
   }
 
   async function autotag(ids) {
@@ -559,12 +599,12 @@ export async function patchView(id) {
       vc ? h('div', h('div.field-label', 'Source WAV'), l.hasSource ? h('div.row', h('button.btn.sm', { onclick: () => playSource(l) }, '▶ Play source'), h('span.mono.faint.ellipsis', { title: l.sourceWav }, l.sourceWav)) : h('div.banner.bad', { style: { margin: 0 } }, 'No source WAV found with this name.')) : null,
       h('div', h('div.field-label', vc ? 'Text for the LIP' : 'Spoken text (tags allowed)'), spoken,
         h('div.row', { style: { marginTop: '6px' } },
-          vc || engine() !== 'elevenlabs' ? null : h('button.btn.sm', { disabled: l.omitted, onclick: () => autotag([l.lineId]) }, '✨ Auto-tag'),
-          l.spokenEdited ? h('button.btn.sm.ghost', { onclick: () => upd(l, 'resetSpoken') }, '↺ Restore in-game line') : null,
+          vc || engine() !== 'elevenlabs' ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.omitted, onclick: () => autotag([l.lineId]) }, '✨ Auto-tag'),
+          l.spokenEdited ? h('button.btn.sm.ghost', { title: 'Put the in-game line back as the spoken text', onclick: () => upd(l, 'resetSpoken') }, '↺ Restore in-game line') : null,
           h('div.spacer'),
-          h('button.btn.sm.primary', { disabled: l.omitted || !!app.job || (vc && !l.hasSource), onclick: () => generate('selected', [l.lineId]) }, l.takes.length ? 'New take' : vc ? 'Convert' : 'Generate'))),
+          h('button.btn.sm.primary', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running' : vc && !l.hasSource ? 'No source file for this line' : 'Make a new take of this line', disabled: l.omitted || !!app.job || (vc && !l.hasSource), onclick: () => generate('selected', [l.lineId]) }, l.takes.length ? 'New take' : vc ? 'Convert' : 'Generate'))),
       l.tagSuggestion ? h('div.box', h('div.field-label', 'AI suggestion'), h('div', diffAdded(l.spoken, l.tagSuggestion)),
-        h('div.row', { style: { marginTop: '6px' } }, h('button.btn.sm.primary', { onclick: () => upd(l, 'acceptTags') }, 'Accept'), h('button.btn.sm', { onclick: () => upd(l, 'rejectTags') }, 'Undo'))) : null,
+        h('div.row', { style: { marginTop: '6px' } }, h('button.btn.sm.primary', { title: 'Keep the suggested tags', onclick: () => upd(l, 'acceptTags') }, 'Accept'), h('button.btn.sm', { title: 'Go back to the text before tagging', onclick: () => upd(l, 'rejectTags') }, 'Undo'))) : null,
       l.omittedBy ? switchEl(l.overrideOmit, (v) => upd(l, 'overrideOmit', v), `Generate anyway (it is in "${l.omittedBy}")`) : null,
       h('h3', `Takes (${l.takes.length})`),
       l.takes.length ? h('div.col', l.takes.slice().reverse().map((t) => h('div.take' + (t.id === l.selectedTakeId ? '.sel' : ''),
@@ -572,7 +612,7 @@ export async function patchView(id) {
         h('div.grow', { style: { minWidth: 0 } }, h('div', '#' + t.slot + (t.id === l.selectedTakeId ? ' · used' : '')),
           h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.settings.engine} · ${t.settings.modelId}${t.settings.engine && t.settings.engine.startsWith('elevenlabs') ? ` · stab ${t.settings.stability} · sim ${t.settings.similarity}${t.settings.speakerBoost ? ' · boost' : ''}` : ''}${t.settings.seed != null ? ' · seed ' + t.settings.seed : ''}`),
           t.spokenText !== l.spoken ? h('div.meta.ellipsis', { title: t.spokenText }, 'Text then: ' + t.spokenText) : null),
-        t.id !== l.selectedTakeId ? h('button.btn.sm', { onclick: () => upd(l, 'selectTake', t.id) }, 'Use') : null,
+        t.id !== l.selectedTakeId ? h('button.btn.sm', { title: 'Use this take for export and .fuz', onclick: () => upd(l, 'selectTake', t.id) }, 'Use') : null,
         h('button.icon-btn', { title: 'Discard take', onclick: async () => { if (await confirmBox('Discard take?', `Delete take #${t.slot} and its files?`, 'Discard', true)) upd(l, 'deleteTake', t.id); } }, '🗑'))))
         : h('div.faint', 'No takes yet.'),
       h('h3', 'Used by'),
@@ -587,19 +627,25 @@ export async function patchView(id) {
     const c = counts();
     if (busy) actions.title = 'A job is running (see the top bar). Wait for it, or Cancel it.'; else actions.removeAttribute('title');
     const verb = vc ? 'Convert' : 'Generate';
-    const exp = h('button.btn', { disabled: busy }, 'Export ▾');
+    const exp = h('button.btn', { disabled: busy, title: 'Write WAV + LIP files and build .fuz files' }, 'Export ▾');
     exp.addEventListener('click', () => popupMenu(exp, [
       { label: 'WAV + LIP to the WAV + LIP folder', sub: vc ? 'The converted takes' : 'Also writes the DBVO Fix plugins and topic file to their folders', onclick: exportWavLip },
       { label: 'Build .fuz into the final folder', sub: vc ? 'The converted takes as .fuz' : 'Also writes the DBVO Fix plugins and topic file', onclick: () => buildFuz(false) },
       { label: 'Build .fuz to another folder…', sub: 'Only the .fuz files', onclick: () => buildFuz(true) },
       vc ? null : { label: 'Only DBVO Fix plugins + topic file', onclick: writeFix },
     ].filter(Boolean)));
+    const takesBtn = h('button.btn', { disabled: busy, title: 'Clean up takes you no longer need' }, 'Takes ▾');
+    takesBtn.addEventListener('click', () => popupMenu(takesBtn, [
+      { label: `Keep only the used take · ticked lines (${sel.length})`, sub: 'Deletes the other takes and their files', onclick: () => sel.length ? purge(sel) : toast('Tick rows first.', true) },
+      { label: 'Keep only the used take · all lines', sub: 'Deletes every take that is not in use', onclick: () => purge(null) },
+    ]));
     clear(actions).append(
       h('span.stat', h('b', c.generated), ` / ${c.all - c.omitted} ${vc ? 'converted' : 'generated'}`, c.omitted ? ` · ${c.omitted} omitted` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} changed since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
       h('div.spacer'),
-      sel.length ? h('button.btn.sm.ghost', { onclick: () => grid.selectAll(false) }, 'Clear ticks') : null,
+      sel.length ? h('button.btn.sm.ghost', { title: 'Untick all rows', onclick: () => grid.selectAll(false) }, 'Clear ticks') : null,
       sel.length ? h('button.btn.sm.ghost', { title: 'Mark the ticked lines', onclick: () => bulkMark(sel, true) }, '★ Mark ticked') : null,
       c.marked ? h('button.btn.sm.ghost', { title: 'Remove every mark', onclick: () => bulkMark(patch.lines.filter((l) => l.marked).map((l) => l.lineId), false) }, 'Clear marks') : null,
+      takesBtn,
       exp,
       h('button.btn', { disabled: busy || !(c.all - c.omitted), title: 'A new take for every line (the new take becomes the one used)', onclick: () => generate('all') }, `All lines (${c.all - c.omitted})`),
       h('button.btn', { disabled: busy || !sel.length, title: 'A new take for each ticked line', onclick: () => generate('selected', sel) }, `Ticked lines (${sel.length})`),
@@ -622,6 +668,14 @@ export async function patchView(id) {
     try {
       const est = await rpc('patch.estimate', { id, mode, lineIds });
       if (!est.count) { toast(vc ? 'Nothing to convert.' : 'Nothing to generate.'); return; }
+      // One line never asks; batches ask unless that is turned off in Global Settings.
+      const confirmBatch = (app.state.settings.ui || {}).confirmBatch !== 'false';
+      if (est.count === 1 || !confirmBatch) {
+        if (!est.voiceId) { toast('Pick a voice in the toolbar first.', true); return; }
+        await rpc('patch.generate', { id, mode, lineIds });
+        renderActions();
+        return;
+      }
       let rows;
       let missingVoice = !est.voiceId;
       if (est.kind === 'vc') {
@@ -695,14 +749,14 @@ export async function patchView(id) {
       const t = c.tools;
       const eng = engine();
       const missing = [(eng === 'elevenlabs' || eng === 'sts') && !t.apiKey && 'ElevenLabs API key', !t.ffmpeg && 'ffmpeg.exe', !t.faceFx && 'FaceFXWrapper.exe', !t.fonix && 'FonixData.cdf', !t.xwma && 'xWMAEncode.exe (for .fuz)'].filter(Boolean);
-      if (missing.length) banners.append(h('div.banner.bad', h('span', 'Missing: ' + missing.join(', ')), h('div.spacer'), h('button.btn.sm', { onclick: () => go('settings', { tab: 'general' }) }, 'Open Global Settings')));
+      if (missing.length) banners.append(h('div.banner.bad', h('span', 'Missing: ' + missing.join(', ')), h('div.spacer'), h('button.btn.sm', { title: 'Set the tool paths', onclick: () => go('settings', { tab: 'general' }) }, 'Open Global Settings')));
       const unset = [!patch.wavLipFolder && 'WAV + LIP folder', !patch.finalRoot && 'final folder', !vc && !patch.fixFolder && 'DBVO Fix folder', vc && !patch.sourceFolders.length && 'source WAV folder'].filter(Boolean);
-      if (unset.length) banners.append(h('div.banner.warn', h('span', 'Not set for this patch: ' + unset.join(', ') + '.'), h('div.spacer'), h('button.btn.sm', { onclick: openOptions }, 'Set folders')));
+      if (unset.length) banners.append(h('div.banner.warn', h('span', 'Not set for this patch: ' + unset.join(', ') + '.'), h('div.spacer'), h('button.btn.sm', { title: 'Choose where files go for this patch', onclick: openOptions }, 'Set folders')));
       for (const w of c.pathWarnings) banners.append(h('div.banner.warn', h('b', 'Path length: '), h('span', `${w.where} reaches ${w.length} of ${w.limit} characters with the longest line — tools like Yakitori fail past 260.`), h('div.spacer'), h('button.btn.sm', { onclick: openOptions }, 'Shorten folders')));
       if (c.fuzOnly) banners.append(h('div.banner.info', h('span', `${c.fuzOnly} line(s) have no WAV + LIP here but a .fuz in the final folder. Import them as takes so they count as done and can be played.`),
-        h('div.spacer'), h('button.btn.sm', { disabled: !!app.job, onclick: async () => { try { await rpc('patch.importFuz', { id }); } catch (e) { fail(e); } } }, 'Import from .fuz')));
+        h('div.spacer'), h('button.btn.sm', { title: 'Unpack the .fuz files into WAV + LIP takes so they show as generated', disabled: !!app.job, onclick: async () => { try { await rpc('patch.importFuz', { id }); } catch (e) { fail(e); } } }, 'Import from .fuz')));
       if (c.unreviewed.length) banners.append(h('div.banner.warn', h('span', 'Flagged lines not reviewed in Phase 1: ' + c.unreviewed.map((u) => `${u.plugin} (${u.count})`).join(', ')),
-        h('div.spacer'), patch.modIds.length === 1 ? h('button.btn.sm', { onclick: () => go('mod', { id: patch.modIds[0] }) }, 'Open in Phase 1') : null));
+        h('div.spacer'), patch.modIds.length === 1 ? h('button.btn.sm', { title: 'Open the mod this patch reads its lines from', onclick: () => go('mod', { id: patch.modIds[0] }) }, 'Open in Phase 1') : null));
     } catch { /* checks are advisory */ }
   }
 
@@ -724,9 +778,9 @@ export async function patchView(id) {
       voiceSel,
       h('button.icon-btn', { title: 'Edit this voice pack (Global Settings)', onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, '✎'),
       h('span.faint', voice.naming === 'Legacy' ? 'Legacy names' : 'DBVO 2.0 hash names'),
-      h('button.btn.sm', { onclick: openOptions }, 'Folders & options…'),
+      h('button.btn.sm', { title: 'Output folders, DBVO Fix folder, reference topic files and overwrite options', onclick: openOptions }, 'Folders & options…'),
       h('button.btn.sm.ghost', { title: 'Re-read Phase 1 now (also happens every time you open this patch)', onclick: sync }, '⟳ Refresh from Phase 1'),
-      h('button.btn.sm.ghost.danger', { onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes its takes too. Files already exported stay where they are. A backup of the project is made first.', 'Delete', true)) { await rpc('patch.delete', { id }); go(vc ? 'vc' : 'patches'); } } }, 'Delete'));
+      h('button.btn.sm.ghost.danger', { title: 'Delete this patch and its takes', onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes its takes too. Files already exported stay where they are. A backup of the project is made first.', 'Delete', true)) { await rpc('patch.delete', { id }); go(vc ? 'vc' : 'patches'); } } }, 'Delete'));
   }
 
   async function sync() {

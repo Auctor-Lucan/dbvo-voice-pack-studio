@@ -123,6 +123,24 @@ public sealed partial class Backend
                 });
 
             case "patch.importFuz": return StartImportFuz(S(p, "id"));
+            case "patch.purgeTakes":
+                return await Locked(() =>
+                {
+                    var patch = LoadPatch(S(p, "id"));
+                    List<string>? ids = p.TryGetProperty("lineIds", out var li) && li.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds") : null;
+                    int n = new Phase2Service(_lib, Runtime()).PurgeUnusedTakes(patch, ids);
+                    return new { removed = n, patch = PatchDto(patch) };
+                });
+            case "audio.preview":
+            {
+                // Any WAV or .fuz as a playable data URL (.fuz audio is decoded with ffmpeg).
+                var path = S(p, "path");
+                if (!File.Exists(path)) return null;
+                byte[] bytes = path.EndsWith(".fuz", StringComparison.OrdinalIgnoreCase)
+                    ? await Phase2Service.FuzToWavAsync(path, Tools(), Path.Combine(Path.GetTempPath(), "dbvo"), CancellationToken.None)
+                    : await File.ReadAllBytesAsync(path);
+                return "data:audio/wav;base64," + Convert.ToBase64String(bytes);
+            }
 
             // ---- Other Tools: WAV to LIP
             case "wavlip.scan": return ScanWavs(Strings(p, "paths"));

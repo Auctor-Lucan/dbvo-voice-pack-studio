@@ -137,7 +137,7 @@ async function general(_, rerender) {
         h('li', 'Point "Python" at the python.exe of the environment that has faster-whisper installed. For the WAV_to_LIP app that is ', h('span.mono', 'WAV_to_LIP_App\\.venv\\Scripts\\python.exe'), '.'),
         h('li', 'Point "CUDA libraries" at the folder with cuBLAS / cuDNN DLLs (', h('span.mono', 'WAV_to_LIP_App\\cuda_libs'), '); it is put on PATH like run.bat does.'),
         h('li', 'No setup yet? Install Python 3.9+, then: ', h('span.mono', 'py -m venv .venv'), ' and ', h('span.mono', '.venv\\Scripts\\pip install faster-whisper==1.2.1'), '.'),
-        h('li', h('button.btn.sm', { onclick: async () => { const r = await rpc('wavlip.detect'); if (r.python) { w.pythonPath = r.python; w.cudaLibsFolder = r.cuda; await saveW(); renderWl(); toast('Found your WAV_to_LIP app.'); } else toast('Not found in Documents\\DBVO Programs\\WAV_to_LIP_App. Pick python.exe yourself.', true); } }, 'Find my WAV_to_LIP app')))),
+        h('li', h('button.btn.sm', { title: 'Look for the Python and CUDA folders of your WAV_to_LIP install', onclick: async () => { const r = await rpc('wavlip.detect'); if (r.python) { w.pythonPath = r.python; w.cudaLibsFolder = r.cuda; await saveW(); renderWl(); toast('Found your WAV_to_LIP app.'); } else toast('Not found in Documents\\DBVO Programs\\WAV_to_LIP_App. Pick python.exe yourself.', true); } }, 'Find my WAV_to_LIP app')))),
     w.engine === 'faster-whisper' ? srow('Python', 'python.exe with faster-whisper installed.', h('div.col', pathField(w.pythonPath, async (x) => { w.pythonPath = x; await saveW(); }, { filter: 'python.exe|python.exe;python*.exe', title: 'python.exe' }), status(t.python, 'found'))) : null,
     w.engine === 'faster-whisper' ? srow('CUDA libraries', 'Optional. Folder with cublas64_12.dll / cudnn DLLs.', pathField(w.cudaLibsFolder, async (x) => { w.cudaLibsFolder = x; await saveW(); }, { folder: true, title: 'CUDA libraries folder' })) : null,
     w.engine === 'builtin' ? srow('Model folder', 'Where downloaded Whisper models are kept. Empty = inside the library.', pathField(w.modelsFolder, async (x) => { w.modelsFolder = x; await saveW(); }, { folder: true, title: 'Whisper models folder' })) : null);
@@ -160,9 +160,12 @@ async function general(_, rerender) {
     section('ElevenLabs', null,
       srow('API key', 'Stored encrypted for your Windows user.', h('div.col',
         h('div.row', apiKey,
-          h('button.btn.sm.primary', { onclick: async () => { try { await rpc('settings.setApiKey', { key: apiKey.value.trim() }); apiKey.value = ''; await refreshState(); rerender(); } catch (e) { fail(e); } } }, 'Save key'),
-          h('button.btn.sm', { onclick: test }, 'Test')),
+          h('button.btn.sm.primary', { title: 'Save the key encrypted for your Windows user', onclick: async () => { try { await rpc('settings.setApiKey', { key: apiKey.value.trim() }); apiKey.value = ''; await refreshState(); rerender(); } catch (e) { fail(e); } } }, 'Save key'),
+          h('button.btn.sm', { title: 'Check the key and show your remaining credits', onclick: test }, 'Test')),
         apiStatus))),
+    section('Generation', null,
+      srow('Confirm batch generation', 'Shows the count, characters and engine before generating or converting several lines. Single lines never ask.',
+        switchEl((st.ui || {}).confirmBatch !== 'false', (x) => save({ ui: { confirmBatch: x ? 'true' : 'false' } }), null, { title: 'Ask before generating more than one line' }))),
     section('Tools', h('div.row', status(t.fonix, 'FonixData'), status(t.xwma, 'xWMAEncode'), status(t.ffmpeg, 'ffmpeg'), status(t.faceFx, 'FaceFXWrapper'), status(t.sevenZip, '7-Zip')),
       srow('FonixData.cdf', 'Needed for LIP files.', pathField(st.fonixDataPath, (x) => save({ fonixDataPath: x }), { filter: 'FonixData|*.cdf', title: 'FonixData.cdf' })),
       srow('xWMAEncode.exe', 'Comes with Yakitori Audio Converter. Needed for .fuz files.', pathField(st.xwmaEncodePath, (x) => save({ xwmaEncodePath: x }), { filter: 'xWMAEncode|*.exe', title: 'xWMAEncode.exe' })),
@@ -182,8 +185,8 @@ async function general(_, rerender) {
       srow('Endpoint', 'An OpenAI-compatible address (ends in /v1).', textInput(st.aiProvider.endpoint, (x) => save({ aiEndpoint: x }), 'http://localhost:11434/v1')),
       srow('Model', 'The model name exactly as the provider lists it.', textInput(st.aiProvider.model, (x) => save({ aiModel: x }), 'llama3.1, gpt-4o-mini, …')),
       srow('API key', 'Only for online providers. Stored encrypted.',
-        h('div.row', aiKey, h('button.btn.sm', { onclick: async () => { await rpc('settings.setAiKey', { key: aiKey.value.trim() }); aiKey.value = ''; await refreshState(); rerender(); toast('Saved.'); } }, 'Save key'))),
-      srow('Test', 'Sends one sample line.', h('div.row', h('button.btn.sm', { onclick: async () => {
+        h('div.row', aiKey, h('button.btn.sm', { title: 'Save the key encrypted for your Windows user', onclick: async () => { await rpc('settings.setAiKey', { key: aiKey.value.trim() }); aiKey.value = ''; await refreshState(); rerender(); toast('Saved.'); } }, 'Save key'))),
+      srow('Test', 'Sends one sample line.', h('div.row', h('button.btn.sm', { title: 'Send one sample line to the AI and show its answer', onclick: async () => {
         aiResult.textContent = 'Asking…';
         try {
           const r = await rpc('ai.test');
@@ -339,7 +342,7 @@ async function voices(selectedId, rerender, onSelect) {
 
 /** Import / export buttons for a pronunciation list ("global" or a voice pack id). */
 function pronFileButtons(target, after) {
-  const imp = h('button.btn.sm', 'Import ▾');
+  const imp = h('button.btn.sm', { title: 'Import pronunciations (CSV, PLS or DBVO Voice Pack Maker 2.7.0)' }, 'Import ▾');
   imp.addEventListener('click', () => popupMenu(imp, [
     { label: 'From DBVO Voice Pack Maker 2.7.0…', sub: 'Its settings.json; whole-word, case-sensitive entries', onclick: async () => {
       const found = await rpc('pron.find27');
@@ -362,7 +365,7 @@ function pronFileButtons(target, after) {
       after();
     } catch (e) { fail(e); }
   }
-  const exp = h('button.btn.sm', 'Export ▾');
+  const exp = h('button.btn.sm', { title: 'Export pronunciations to CSV or PLS' }, 'Export ▾');
   exp.addEventListener('click', () => popupMenu(exp, [
     { label: 'CSV (Excel)…', onclick: () => doExport('csv') },
     { label: 'ElevenLabs .pls lexicon…', sub: 'Upload on ElevenLabs or share with other tools', onclick: () => doExport('pls') },
@@ -473,7 +476,7 @@ async function library(_, rerender) {
     section('Library', null,
       srow('Location', 'Holds your projects, takes and backups. A short path such as D:\\DBVO leaves the most room under Windows\' 260-character path limit.',
         h('div.row', h('span.mono', st.libraryRoot),
-          h('button.btn.sm', { onclick: () => rpc('library.open') }, 'Open'),
+          h('button.btn.sm', { title: 'Open the library folder in Explorer', onclick: () => rpc('library.open') }, 'Open'),
           h('button.btn.sm', { onclick: async () => {
             const folder = await rpc('pick.folder', { title: 'New library location (an empty folder, or an existing DBVO Studio library)' });
             if (!folder) return;
@@ -481,5 +484,5 @@ async function library(_, rerender) {
             try { await rpc('library.change', { path: folder }); } catch (e) { fail(e); }
           } }, 'Change…'))),
       srow('Backups to keep', 'Made automatically before imports, generation, FOMOD builds and deletes.', h('div.row', keep,
-        h('button.btn.sm', { onclick: async () => { const p = await rpc('backup.now', { reason: 'manual' }); toast('Backup: ' + p); } }, 'Back up now')))));
+        h('button.btn.sm', { title: 'Zip all projects and settings into the backups folder now', onclick: async () => { const p = await rpc('backup.now', { reason: 'manual' }); toast('Backup: ' + p); } }, 'Back up now')))));
 }
