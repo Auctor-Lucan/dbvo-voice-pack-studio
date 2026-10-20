@@ -522,8 +522,15 @@ public sealed class FomodService
         // Copy (hardlink) everything. First list every file, so progress counts files, not options.
         // Lists are taken before copying, and nothing inside the release folder is ever picked up
         // (a release folder inside the FOMOD root would otherwise be copied into itself).
-        var releaseFull = Path.GetFullPath(p.ReleaseFolder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        bool InRelease(string f) => Path.GetFullPath(f).StartsWith(releaseFull, StringComparison.OrdinalIgnoreCase);
+        // Only the build's own output is skipped: the _staging folder and archives being written (the release
+        // folder may well be the FOMOD root itself).
+        var stagingRoot = Path.GetFullPath(Path.Combine(p.ReleaseFolder, "_staging")).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var ownArchives = new[] { ".zip", ".7z" }.Select(x => Path.GetFullPath(Path.Combine(p.ReleaseFolder, archiveBase + x))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        bool InRelease(string f)
+        {
+            var full = Path.GetFullPath(f);
+            return full.StartsWith(stagingRoot, StringComparison.OrdinalIgnoreCase) || full.EndsWith(".part", StringComparison.OrdinalIgnoreCase) || ownArchives.Contains(full);
+        }
         var pairs = new List<(string from, string to)>();
         foreach (var (from, to, folder) in jobs)
         {

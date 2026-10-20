@@ -194,6 +194,32 @@ second line</description>
         Assert.Contains(sim.Files, f => f.Destination == "DragonbornVoiceOver" && f.Exists);
     }
 
+    [Fact]
+    public async Task Build_works_when_the_release_folder_is_the_fomod_root()
+    {
+        var root = Path.Combine(_dir, "root2");
+        Directory.CreateDirectory(Path.Combine(root, "Vamp - Inigo", "Sound", "DBVO", "vampira"));
+        File.WriteAllText(Path.Combine(root, "Vamp - Inigo", "Sound", "DBVO", "vampira", "Hello.fuz"), "x");
+        var voice = new VoicePack { Name = "Vampira", PackId = "vampira" };
+        var p = FomodService.NewProject(voice, "DVA");
+        p.RootFolder = root;
+        p.ReleaseFolder = root; // archive and _staging inside the root, as users often set it up
+        p.Info.Version = "1.0";
+        p.Steps[0].Groups[0].Options[0].Files.Add(new FomodFile { Kind = "folder", Source = "", Destination = "" }); // the whole root: must not swallow _staging
+        FomodService.GroupFor(p, "Followers").Options.Add(new FomodOption { Name = "Inigo", Mode = DetectMode.Detect, Plugins = { "Inigo.esp" },
+            Files = { new FomodFile { Kind = "folder", Source = @"Vamp - Inigo\Sound", Destination = "Sound" } } });
+        var svc = new FomodService(new Library(Path.Combine(_dir, "lib2")), new AppSettings());
+        var res = await svc.BuildAsync(p, NamingMode.Legacy, true);
+        Assert.True(File.Exists(res.Archive));
+        Assert.True(File.Exists(Path.Combine(res.Staging, "Vamp - Inigo", "Sound", "DBVO", "vampira", "Hello.fuz")));
+        using var zip = System.IO.Compression.ZipFile.OpenRead(res.Archive!);
+        Assert.Contains(zip.Entries, e => e.FullName == "fomod/ModuleConfig.xml");
+        Assert.DoesNotContain(zip.Entries, e => e.FullName.Contains("_staging"));
+        // building again over an existing archive and staging works
+        var again = await svc.BuildAsync(p, NamingMode.Legacy, true);
+        Assert.True(File.Exists(again.Archive));
+    }
+
     private static string? FindTestData(string name)
     {
         var d = new DirectoryInfo(AppContext.BaseDirectory);
