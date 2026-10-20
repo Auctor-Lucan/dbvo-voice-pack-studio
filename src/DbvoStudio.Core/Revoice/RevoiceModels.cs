@@ -35,6 +35,8 @@ public sealed class NewVoiceTypePlan
     public List<string> Lists { get; set; } = new();
     /// <summary>Lines of the original voice type the NPC can say: "all" (safe superset) or "npc" (drop lines tied to other NPCs).</summary>
     public string LineSet { get; set; } = "npc";
+    /// <summary>Extra SkyPatcher NPC entries typed by the user for plugins that are not loaded ("BadMoon.esp|6603B").</summary>
+    public List<string> ExtraNpcs { get; set; } = new();
 }
 
 /// <summary>One voice file to make: a response of a line, for one voice type.</summary>
@@ -61,6 +63,11 @@ public sealed class RevoiceLine : Phase2Line
     public bool Excluded { get; set; }
     /// <summary>Belongs to a new voice type plan (files go to the new voice type's folders).</summary>
     public string? PlanId { get; set; }
+    /// <summary>Approved link to an orphaned file that is this line's current audio (merged or compacted plugins): source id + path inside it.</summary>
+    public string? OriginalSourceId { get; set; }
+    public string? OriginalInner { get; set; }
+    /// <summary>How the link was made: "same quest and topic" or "Whisper 0.93".</summary>
+    public string? OriginalMatch { get; set; }
     /// <summary>No longer found on the last scan (kept because it has takes).</summary>
     public bool Gone { get; set; }
 
@@ -75,11 +82,27 @@ public sealed class RevoiceScanReport
     public int WithOriginal { get; set; }
     public int UnknownSpeaker { get; set; }
     public int VoiceFiles { get; set; }
+    /// <summary>Voice files in the mod's own sources that match no line (merged, compacted or renamed plugins).</summary>
+    public int Orphans { get; set; }
     public List<string> MissingMasters { get; set; } = new();
     public List<string> MissingStrings { get; set; } = new();
     public List<string> Errors { get; set; } = new();
     public List<string> MasterCosts { get; set; } = new();
     public DateTime ScannedUtc { get; set; }
+}
+
+/// <summary>An orphaned voice file (its line was not found, e.g. after a merge or compaction) and a proposed line for it.</summary>
+public sealed class OrphanMatch
+{
+    public string SourceId { get; set; } = "";
+    public string Inner { get; set; } = "";
+    public string Display { get; set; } = "";
+    public string VoiceType { get; set; } = "";
+    public string? LineId { get; set; }
+    public string? LineText { get; set; }
+    public double Score { get; set; }
+    public string Method { get; set; } = "";
+    public string? Transcript { get; set; }
 }
 
 public sealed class RevoiceProject
@@ -106,5 +129,7 @@ public sealed class RevoiceProject
     public bool EmotionTags { get; set; } = true;
     public List<RevoiceLine> Lines { get; set; } = new();
     public RevoiceScanReport? LastScan { get; set; }
+    /// <summary>Proposed links for orphaned files, waiting for approval.</summary>
+    public List<OrphanMatch> OrphanProposals { get; set; } = new();
     public DateTime? LastExportUtc { get; set; }
 }

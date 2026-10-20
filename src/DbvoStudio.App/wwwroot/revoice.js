@@ -124,11 +124,11 @@ export async function revoiceView(id) {
     const wrap = h('div.view-body');
     const sec = (title, extra, ...rows) => h('div.section', h('div.section-head', h('h2', title), h('div.spacer'), extra), h('div.section-body', rows));
     const srow = (label, help, control) => h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', control));
-    const drop = h('div.dropzone', h('div', h('b', 'Drop plugins, .bsa archives, .zip files or folders here')),
+    const drop = h('div.dropzone', h('div', h('b', 'Drop plugins, .bsa archives, .zip / .7z files or folders here')),
       h('div.faint', 'A plugin brings its own archives (Plugin.bsa, Plugin - Voices.bsa) and a Sound\\Voice folder next to it. Folders can be a Data folder, a mod folder (MO2\\mods\\…) or an unpacked download.'),
       h('div.row', { style: { justifyContent: 'center', marginTop: '10px' } },
         h('button.btn.sm', { title: 'Add plugins', onclick: async () => add(await rpc('pick.files', { title: 'Plugins to revoice (and their masters)', filter: 'Plugins|*.esp;*.esm;*.esl' })) }, 'Add plugins…'),
-        h('button.btn.sm', { title: 'Add voice archives', onclick: async () => add(await rpc('pick.files', { title: 'Voice archives', filter: 'Archives|*.bsa;*.zip' })) }, 'Add .bsa / .zip…'),
+        h('button.btn.sm', { title: 'Add voice archives', onclick: async () => add(await rpc('pick.files', { title: 'Voice archives', filter: 'Archives|*.bsa;*.zip;*.7z' })) }, 'Add .bsa / .zip / .7z…'),
         h('button.btn.sm', { title: 'Add a folder with Sound\\Voice inside', onclick: async () => { const f = await rpc('pick.folder', { title: 'Folder with Sound\\Voice' }); if (f) add([f]); } }, 'Add folder…')));
     drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
     drop.addEventListener('dragleave', () => drop.classList.remove('over'));
@@ -139,6 +139,8 @@ export async function revoiceView(id) {
       h('div.stat-row', h('span', h('b', ls.lines.toLocaleString()), ' voice files to make'), h('span', h('b', ls.withOriginal.toLocaleString()), ' have a current file'),
         h('span', h('b', ls.infos.toLocaleString()), ' lines · ', h('b', ls.responses.toLocaleString()), ' responses'), ls.unknownSpeaker ? h('span', { style: { color: 'var(--warn)' } }, `${ls.unknownSpeaker} response(s) with no known speaker or file`) : null,
         h('span.faint', 'scanned ' + new Date(ls.scannedUtc).toLocaleString())),
+      ls.orphans ? h('div.banner.info', { style: { margin: 0 } }, h('span', h('b', `${ls.orphans} voice file(s) in the mod's sources match no line`), ' — usually a merged, compacted (ESL) or renamed plugin changed their FormIDs. Link them to their lines so they play as the current file and can feed the Voice Changer.'),
+        h('div.spacer'), h('button.btn.sm', { title: 'Match orphaned files to silent lines by name, then by Whisper transcription', onclick: orphansModal }, 'Match orphaned files…')) : null,
       ls.masterCosts.length ? h('div.banner.warn', { style: { margin: 0 } }, h('div', h('b', 'Missing masters'), h('ul', ls.masterCosts.map((x) => h('li', x))), h('div.faint', 'Drop them in to fix it, or set the base game folder for vanilla masters.'))) : null,
       ls.missingStrings.length ? h('div.banner.warn', { style: { margin: 0 } }, 'No strings for localized plugin(s): ' + ls.missingStrings.join(', ') + '. Their text is empty. Add the plugin\'s Strings folder or the archive that holds its strings.') : null,
       ls.errors.length ? h('div.banner.bad', { style: { margin: 0 } }, h('ul', ls.errors.map((x) => h('li', x)))) : null)
@@ -187,6 +189,36 @@ export async function revoiceView(id) {
   }
   async function setPlugin(pl, o) { try { proj = await rpc('revoice.plugin', { id, path: pl.path, ...o }); reindex(); renderAll(); } catch (e) { fail(e); } }
   async function setSource(src, o) { try { proj = await rpc('revoice.source', { id, sourceId: src.id, ...o }); reindex(); renderAll(); } catch (e) { fail(e); } }
+
+  // ---------------------------------------------------------------- orphaned files
+  async function orphansModal() {
+    let data;
+    try { data = await rpc('revoice.orphans', { id }); } catch (e) { fail(e); return; }
+    const silentByVt = new Map();
+    for (const l of data.silent) { const k = l.vt.toLowerCase(); if (!silentByVt.has(k)) silentByVt.set(k, []); silentByVt.get(k).push(l); }
+    const choice = new Map(); // key -> lineId
+    const keyOf = (m) => m.sourceId + '|' + m.inner;
+    for (const m of data.proposals) if (m.lineId) choice.set(keyOf(m), m.lineId);
+    const rows = data.proposals.map((m) => {
+      const options = (silentByVt.get(m.voiceType.toLowerCase()) || data.silent).slice(0, 400);
+      const sel = h('select', { style: { maxWidth: '420px' }, title: 'The line this file belongs to' }, h('option', { value: '' }, '— not linked —'),
+        options.map((l) => h('option', { value: l.id, selected: l.id === m.lineId }, `${l.text.slice(0, 80)}  ·  ${l.speakerName}`)));
+      sel.addEventListener('change', () => { if (sel.value) choice.set(keyOf(m), sel.value); else choice.delete(keyOf(m)); });
+      return h('tr',
+        h('td', h('button.icon-btn', { title: 'Play this file', onclick: async () => { try { const u = await rpc('revoice.orphanAudio', { id, sourceId: m.sourceId, inner: m.inner }); audio.src = u; audio.play().catch(fail); } catch (e) { fail(e); } } }, '▶')),
+        h('td', h('div.mono.ellipsis', { title: m.display, style: { maxWidth: '300px' } }, m.inner.split(/[\\/]/).pop()), h('div.faint', m.voiceType), m.transcript ? h('div.faint', { title: 'What Whisper heard' }, '“' + m.transcript + '”') : null),
+        h('td', sel, h('div.faint', m.method ? m.method : 'no match yet')));
+    });
+    const ok = await modal(`Orphaned voice files (${data.proposals.length})`, [
+      h('div.faint', 'Files are first matched by the quest and topic part of their name. For the rest, Whisper (the WAV to LIP settings) listens to each file and the transcript is matched to the subtitles of silent lines. Check the matches, then Link.'),
+      h('div.row', h('button.btn.sm', { title: 'Transcribe the files that have no match yet and match them by text', disabled: !!app.job, onclick: async () => { try { await rpc('revoice.orphansWhisper', { id }); document.getElementById('modal').classList.add('hidden'); toast('Transcribing… the list opens again when it is done.'); } catch (e) { fail(e); } } }, '🎙 Match the rest with Whisper'),
+        h('span.faint', `${data.proposals.filter((m) => m.lineId).length} matched`)),
+      h('div.box', { style: { maxHeight: '420px', overflow: 'auto' } }, h('table.tbl', h('tbody', rows))),
+    ], [{ label: 'Cancel', value: false }, { label: 'Link the matched files', primary: true, value: true }], { wide: true });
+    if (!ok) return;
+    const approved = data.proposals.filter((m) => choice.get(keyOf(m))).map((m) => ({ sourceId: m.sourceId, inner: m.inner, lineId: choice.get(keyOf(m)), method: m.lineId === choice.get(keyOf(m)) ? m.method : 'by hand' }));
+    try { const r = await rpc('revoice.orphansApply', { id, approved }); proj = r.project; reindex(); renderAll(); toast(`${r.linked} file(s) linked.`); } catch (e) { fail(e); }
+  }
 
   // ---------------------------------------------------------------- speakers
   function renderSpeakers() {
@@ -493,12 +525,15 @@ export async function revoiceView(id) {
     const npcOn = new Set(plan.npcs);
     const listOn = new Set(plan.lists);
     let lineSet = plan.lineSet;
+    let extraBox = null;
     const cov = info.coverage;
     const ok = await modal(`New voice type for ${info.copies[0] ? info.copies[0].name : ''}`, [
       h('div.kv', h('div', 'Original voice type'), h('div.mono', info.baseVoiceType), h('div', 'Shared with'), h('div', { title: info.sharing.join(', ') }, info.sharing.slice(0, 12).join(', ') + (info.sharing.length > 12 ? ` +${info.sharing.length - 12}` : ''))),
       h('div.col', h('div.field-label', 'New voice type EditorID'), ed),
       h('div.col', h('div.field-label', 'NPC records (SkyPatcher)'), h('div.faint', 'Every copy of the character in your plugins, so replacers and mods that copy the character keep the voice. Add more in the generated SkyPatcher file for mods you did not load.'),
         h('div.box', { style: { maxHeight: '150px', overflow: 'auto' } }, info.copies.map((c) => h('label.row', switchEl(npcOn.has(c.key), (v) => { if (v) npcOn.add(c.key); else npcOn.delete(c.key); }, ''), h('b', c.name), h('span.mono.faint', `${c.plugin} | ${c.key.split('|')[1]}`), h('span.faint', c.editorId), h('div.spacer'), h('span.mono', c.voiceType))))),
+      (() => { extraBox = h('textarea', { rows: 3, placeholder: 'BadMoon.esp|6603B\nUnslaad.esm|AC23F', title: 'One Plugin|FormID per line' }, (plan.extraNpcs || []).join('\n'));
+        return h('div.col', h('div.field-label', 'More NPC records from mods you did not load'), h('div.faint', 'One Plugin|FormID per line (as in xEdit, without the load order prefix). Written to the SkyPatcher file as they are.'), extraBox); })(),
       h('div.col', h('div.field-label', 'Form lists (FormList Manipulator)'), h('div.faint', 'Lists that hold the original voice type, with how many of the NPC\'s lines check each. Tick only the ones that fit the character — e.g. follower or marriage lists for a follower, not lists for a different personality.'),
         h('div.box', { style: { maxHeight: '220px', overflow: 'auto' } }, h('table.tbl', h('tbody', info.lists.map((l) => h('tr',
           h('td', switchEl(listOn.has(l.key), (v) => { if (v) listOn.add(l.key); else listOn.delete(l.key); }, '')), h('td.mono', l.editorId), h('td.faint', l.plugin),
@@ -513,7 +548,7 @@ export async function revoiceView(id) {
     ], [{ label: 'Close', value: false }, { label: 'Save', primary: true, value: true }], { wide: true });
     if (!ok) return;
     try {
-      proj = await rpc('revoice.planSave', { id, planId, editorId: ed.value.trim(), npcs: [...npcOn], lists: [...listOn], lineSet });
+      proj = await rpc('revoice.planSave', { id, planId, editorId: ed.value.trim(), npcs: [...npcOn], lists: [...listOn], lineSet, extraNpcs: extraBox ? extraBox.value.split('\n').map((x) => x.trim()).filter(Boolean) : [] });
       reindex(); renderAll();
       toast('Saved. Rescan to update the plan\'s lines.');
     } catch (e) { fail(e); }
@@ -543,6 +578,7 @@ export async function revoiceView(id) {
     jobSeen = false;
     if (!document.body.contains(view)) return;
     const d = e.detail || {};
+    if (d.kind === 'revoice-orphans' && d.id === id) { if (d.message) toast(d.message, !d.ok); if (d.ok) orphansModal(); }
     if ((d.kind === 'revoice-scan' && d.id === id) || (d.kind === 'generate' && d.revoiceId === id) || (d.kind === 'revoice-export' && d.id === id)) {
       try { proj = await rpc('revoice.get', { id }); reindex(); } catch { /* keep */ }
       if (d.kind === 'revoice-scan' && d.ok) { if (proj.lines.length && tab === 'setup') tab = 'speakers'; toast(`Scan done: ${d.report.lines.toLocaleString()} voice files to make, ${d.report.withOriginal.toLocaleString()} with a current file.`); }

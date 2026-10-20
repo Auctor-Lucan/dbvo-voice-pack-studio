@@ -125,6 +125,23 @@ public sealed class WavToLip
         return (success, failures);
     }
 
+    /// <summary>
+    /// A transcriber using the WAV to LIP engine settings (built-in Whisper or faster-whisper), for other tools
+    /// such as the NPC Revoice orphan matching. Dispose the returned engine when done.
+    /// </summary>
+    public async Task<(Func<string, CancellationToken, Task<string>> Transcribe, IAsyncDisposable Engine)> CreateTranscriberAsync(CancellationToken ct)
+    {
+        Directory.CreateDirectory(TempRoot);
+        if (_s.Engine == "faster-whisper")
+        {
+            var fw = new FasterWhisperProcess(_s, Log);
+            await fw.StartAsync(ct);
+            return (fw.TranscribeAsync, fw);
+        }
+        var bw = await BuiltInWhisper.CreateAsync(_s, _modelsFolder, _tools, Log, Status, ct);
+        return (bw.TranscribeAsync, bw);
+    }
+
     /// <summary>Legacy names are the line itself: underscores back to spaces.</summary>
     public static string TextFromFilename(string wav)
     {

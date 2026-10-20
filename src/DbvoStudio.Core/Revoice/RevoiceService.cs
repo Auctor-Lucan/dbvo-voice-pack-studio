@@ -131,7 +131,7 @@ public sealed class RevoiceService
             progress?.Report("Indexing dialogue");
             var dialogue = DialogueIndex.Build(files, Strings);
             progress?.Report("Indexing voice files");
-            var vf = VoiceFileIndex.Build(p.Sources);
+            var vf = VoiceFileIndex.Build(p.Sources, _settings.SevenZipPath);
             return new RevoiceSession { Dialogue = dialogue, Files = vf, Signature = SessionSignature(p) };
         }
         finally
@@ -213,7 +213,9 @@ public sealed class RevoiceService
                 line.Quest = t.Quest is { } q && d.Quests.TryGetValue(q, out var qi) ? qi.EditorId : "";
             }
             var file = s.Files.Find(pf, planId != null ? d.VoiceTypeFolder(ParseKey(p.NewVoiceTypes.First(x => x.Id == planId).BaseVoiceType)) : vtFolder, info.Key.Id, r.Number);
-            line.Original = file?.Display;
+            if (file == null && line.OriginalSourceId != null && p.Sources.FirstOrDefault(x => x.Id == line.OriginalSourceId) is { } os)
+                line.Original = $"{Path.GetFileName(os.Path)}: {line.OriginalInner} (linked: {line.OriginalMatch})";
+            else { line.Original = file?.Display; if (file != null) { line.OriginalSourceId = null; line.OriginalInner = null; line.OriginalMatch = null; } }
             line.SourceWav = null;
             if (line.Takes.Count == 0 && line.Status is not Phase2Status.Failed) line.Status = Phase2Status.Pending;
             fresh[id] = line;
@@ -270,6 +272,7 @@ public sealed class RevoiceService
         p.Lines = fresh.Values.OrderBy(l => l.Plugin).ThenBy(l => l.Quest).ThenBy(l => l.Topic).ThenBy(l => l.FileStem).ToList();
         foreach (var key in p.Lines.Select(l => l.SpeakerKey).Distinct()) if (!p.Speakers.ContainsKey(key)) p.Speakers[key] = new SpeakerAssignment();
         rep.Lines = p.Lines.Count;
+        rep.Orphans = FindOrphans(p, s).Count;
         rep.MasterCosts = MasterCosts(p, d);
         p.LastScan = rep;
         return rep;
@@ -317,6 +320,122 @@ public sealed class RevoiceService
         }
     }
 
+    // ---------------------------------------------------------------- orphaned files (merged, compacted or renamed plugins)
+
+    /// <summary>Voice files in the mod's own sources (not the base game) that match no line in the loaded plugins and are not linked yet.</summary>
+    public static List<VoiceFile> FindOrphans(RevoiceProject p, RevoiceSession s)
+    {
+        var d = s.Dialogue;
+        var linked = p.Lines.Where(l => l.OriginalInner != null).Select(l => (l.OriginalSourceId, l.OriginalInner!.ToLowerInvariant())).ToHashSet();
+        return s.Files.Files.Where(f => !f.Source.BaseGame)
+            .Where(f => !(d.Infos.TryGetValue(new FormKey(f.PluginFolder.ToLowerInvariant(), f.FormId), out var info) && info.Responses.Any(r => r.Number == f.Response)))
+            .Where(f => !linked.Contains((f.Source.Id, f.Inner.ToLowerInvariant())))
+            .ToList();
+    }
+
+    private static string Prefix(string stem) { var b = stem.Split('_'); return string.Join("_", b.Take(b.Length - 2)).ToLowerInvariant(); }
+
+    /// <summary>Silent lines (no current file) an orphan could belong to: same voice type when possible.</summary>
+    private static List<RevoiceLine> Candidates(RevoiceProject p, VoiceFile f)
+    {
+        var silent = p.Lines.Where(l => l.Original == null && l.PlanId == null && !l.Gone).ToList();
+        var sameVt = silent.Where(l => l.VoiceType.Equals(f.VoiceType, StringComparison.OrdinalIgnoreCase)).ToList();
+        return sameVt.Count > 0 ? sameVt : silent;
+    }
+
+    /// <summary>Quick pass without audio: same quest and topic part of the name and the same response number, with one candidate.</summary>
+    public static List<OrphanMatch> MatchByName(RevoiceProject p, IEnumerable<VoiceFile> orphans)
+    {
+        var list = new List<OrphanMatch>();
+        foreach (var f in orphans)
+        {
+            var pre = Prefix(f.Stem);
+            var c = Candidates(p, f).Where(l => l.Response == f.Response && l.FileStem != null && Prefix(l.FileStem) == pre).ToList();
+            list.Add(new OrphanMatch
+            {
+                SourceId = f.Source.Id, Inner = f.Inner, Display = f.Display, VoiceType = f.VoiceType,
+                LineId = c.Count == 1 ? c[0].LineId : null, LineText = c.Count == 1 ? c[0].FinalLine : null,
+                Score = c.Count == 1 ? 0.95 : 0, Method = c.Count == 1 ? "same quest and topic" : c.Count > 1 ? $"{c.Count} lines with the same quest and topic" : "",
+            });
+        }
+        return list;
+    }
+
+    public static string NormalizeWords(string text)
+    {
+        var sb = new StringBuilder();
+        foreach (var ch in SpokenTextStrip(text).ToLowerInvariant()) sb.Append(char.IsLetterOrDigit(ch) || ch == '\'' ? ch : ' ');
+        return string.Join(' ', sb.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static string SpokenTextStrip(string s) => System.Text.RegularExpressions.Regex.Replace(s, @"\[[^\]]*\]|\([^)]*\)|<[^>]*>", " ");
+
+    /// <summary>Word-level similarity 0..1 (1 - edit distance / longer length).</summary>
+    public static double Similarity(string a, string b)
+    {
+        var x = NormalizeWords(a).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var y = NormalizeWords(b).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (x.Length == 0 || y.Length == 0) return 0;
+        var prev = new int[y.Length + 1];
+        var cur = new int[y.Length + 1];
+        for (int j = 0; j <= y.Length; j++) prev[j] = j;
+        for (int i = 1; i <= x.Length; i++)
+        {
+            cur[0] = i;
+            for (int j = 1; j <= y.Length; j++)
+                cur[j] = Math.Min(Math.Min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + (x[i - 1] == y[j - 1] ? 0 : 1));
+            (prev, cur) = (cur, prev);
+        }
+        return 1.0 - (double)prev[y.Length] / Math.Max(x.Length, y.Length);
+    }
+
+    /// <summary>Match transcripts of orphaned files to silent lines' subtitles; each line is used once, best scores first.</summary>
+    public static List<OrphanMatch> MatchByTranscript(RevoiceProject p, IReadOnlyList<(VoiceFile File, string Transcript)> items, double minScore = 0.55)
+    {
+        var scored = new List<(int Item, RevoiceLine Line, double Score)>();
+        for (int i = 0; i < items.Count; i++)
+        {
+            var (f, t) = items[i];
+            foreach (var l in Candidates(p, f))
+            {
+                double sc = Similarity(t, l.FinalLine);
+                if (l.Response == f.Response) sc += 0.02;
+                if (l.FileStem != null && Prefix(l.FileStem) == Prefix(f.Stem)) sc += 0.05;
+                if (sc >= minScore) scored.Add((i, l, Math.Min(1, sc)));
+            }
+        }
+        var usedLines = new HashSet<string>();
+        var result = items.Select(x => new OrphanMatch { SourceId = x.File.Source.Id, Inner = x.File.Inner, Display = x.File.Display, VoiceType = x.File.VoiceType, Transcript = x.Transcript }).ToList();
+        foreach (var (i, l, sc) in scored.OrderByDescending(x => x.Score))
+        {
+            if (result[i].LineId != null || usedLines.Contains(l.LineId)) continue;
+            result[i].LineId = l.LineId;
+            result[i].LineText = l.FinalLine;
+            result[i].Score = Math.Round(sc, 2);
+            result[i].Method = $"Whisper {sc:0.00}";
+            usedLines.Add(l.LineId);
+        }
+        return result;
+    }
+
+    /// <summary>Link approved orphans to their lines (their audio becomes the line's current file).</summary>
+    public static int ApplyOrphanMatches(RevoiceProject p, IEnumerable<OrphanMatch> approved)
+    {
+        int n = 0;
+        foreach (var m in approved)
+        {
+            var l = p.Lines.FirstOrDefault(x => x.LineId == m.LineId);
+            var src = p.Sources.FirstOrDefault(x => x.Id == m.SourceId);
+            if (l == null || src == null) continue;
+            l.OriginalSourceId = m.SourceId;
+            l.OriginalInner = m.Inner;
+            l.OriginalMatch = m.Method;
+            l.Original = $"{Path.GetFileName(src.Path)}: {m.Inner} (linked: {m.Method})";
+            n++;
+        }
+        return n;
+    }
+
     // ---------------------------------------------------------------- original audio
 
     /// <summary>The game's current file for a line, decoded to WAV bytes (for playback, or as the Voice Changer source).</summary>
@@ -326,8 +445,16 @@ public sealed class RevoiceService
         if (line.PlanId != null && p.NewVoiceTypes.FirstOrDefault(x => x.Id == line.PlanId) is { } plan) vt = s.Dialogue.VoiceTypeFolder(ParseKey(plan.BaseVoiceType));
         var info = ParseKey(line.Info);
         var f = s.Files.Find(line.PluginFolder, vt, info.Id, line.Response);
+        if (f == null && line.OriginalSourceId != null && line.OriginalInner != null && p.Sources.FirstOrDefault(x => x.Id == line.OriginalSourceId) is { } os)
+            f = VoiceFileIndex.Make(os, line.OriginalInner);
         if (f == null) return null;
-        var bytes = s.Files.Read(f);
+        return await DecodeAsync(s.Files, f, tools, ct);
+    }
+
+    /// <summary>Any voice file (.fuz / .xwm / .wav, loose or in an archive) as WAV bytes.</summary>
+    public static async Task<byte[]> DecodeAsync(VoiceFileIndex files, VoiceFile f, ExternalTools tools, CancellationToken ct)
+    {
+        var bytes = files.Read(f);
         var work = Path.Combine(Path.GetTempPath(), "dbvo");
         Directory.CreateDirectory(work);
         using var w = new WorkFolder(work);
@@ -447,6 +574,8 @@ public sealed class RevoiceService
                 var name = s?.Dialogue.Npcs.TryGetValue(k, out var n) == true ? "  ; " + n.Display : "";
                 sky.AppendLine($"filterByNPCs={spelled}|{k.Id:X}:voiceType={vtRef}{name}");
             }
+            foreach (var extra in x.ExtraNpcs.Where(e => e.Contains('|')))
+                sky.AppendLine($"filterByNPCs={extra.Trim()}:voiceType={vtRef}  ; added by hand");
             flm.AppendLine($"; {x.EditorId}");
             foreach (var list in x.Lists)
             {

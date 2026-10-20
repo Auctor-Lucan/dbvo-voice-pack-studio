@@ -157,12 +157,33 @@ public class RevoiceRealDataTests
             p.Plugins.Add(new RevoicePlugin { Path = vig, FileName = "Vigilant.esm", Target = true });
             p.Sources.Add(new RevoiceSource { Kind = "folder", Path = root });
             p.Sources.Add(new RevoiceSource { Kind = "bsa", Path = Path.Combine(RealDataTests.Data, "Skyrim - Interface.bsa"), Priority = -100 });
+            // Pretend 40 files come from a compacted plugin: new FormIDs in their names.
+            var moved = Directory.EnumerateFiles(root, "*.fuz", SearchOption.AllDirectories).Take(40).ToList();
+            foreach (var f in moved)
+            {
+                var stem = Path.GetFileNameWithoutExtension(f);
+                var bits = stem.Split('_');
+                bits[^2] = (Convert.ToUInt32(bits[^2], 16) + 0x300000).ToString("X8");
+                File.Move(f, Path.Combine(Path.GetDirectoryName(f)!, string.Join("_", bits) + ".fuz"));
+            }
             var sw = System.Diagnostics.Stopwatch.StartNew();
             using var session = svc.Open(p);
             var rep = svc.Scan(p, session);
             _out.WriteLine($"{sw.Elapsed.TotalSeconds:F1}s: infos {rep.Infos} responses {rep.Responses} lines {rep.Lines} with original {rep.WithOriginal} unknown {rep.UnknownSpeaker} voice files {rep.VoiceFiles}");
             _out.WriteLine("speakers: " + string.Join(", ", p.Lines.GroupBy(l => l.SpeakerName).OrderByDescending(g => g.Count()).Take(15).Select(g => $"{g.Key} {g.Count()}")));
-            Assert.True(rep.WithOriginal >= 1339);
+            Assert.True(rep.WithOriginal >= 1339 - 40);
+            Assert.Equal(40, rep.Orphans);
+            var orphans = RevoiceService.FindOrphans(p, session);
+            var byName = RevoiceService.MatchByName(p, orphans);
+            int found = byName.Count(m => m.LineId != null);
+            _out.WriteLine($"orphans {orphans.Count}, matched by quest/topic name {found}");
+            Assert.True(found >= 5);
+            // A transcript that equals the subtitle matches the right line.
+            var sample = orphans.Take(10).Select(o => (o, p.Lines.First(l => l.FileStem != null && l.VoiceType.Equals(o.VoiceType, StringComparison.OrdinalIgnoreCase) && l.Original == null && l.Response == o.Response && l.FileStem.Split('_')[^2] == (o.FormId - 0x300000).ToString("X8")).FinalLine)).ToList();
+            var byText = RevoiceService.MatchByTranscript(p, sample);
+            int right = byText.Zip(sample).Count(z => p.Lines.First(l => l.LineId == z.First.LineId).FinalLine == z.Second.Item2);
+            _out.WriteLine($"transcript matches right {right}/10");
+            Assert.True(right >= 9);
         }
         finally { try { Directory.Delete(root, true); } catch { } }
     }

@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using DbvoStudio.App.Tools;
 using DbvoStudio.Core.Projects;
 using DbvoStudio.Core.Revoice;
 
@@ -205,6 +206,7 @@ public sealed partial class Backend
                     plan.EditorId = ed;
                     if (p.TryGetProperty("npcs", out _)) plan.Npcs = Strings(p, "npcs");
                     if (p.TryGetProperty("lists", out _)) plan.Lists = Strings(p, "lists");
+                    if (p.TryGetProperty("extraNpcs", out _)) plan.ExtraNpcs = Strings(p, "extraNpcs").Select(x => x.Trim()).Where(x => x.Contains('|')).ToList();
                     plan.LineSet = S(p, "lineSet", plan.LineSet);
                     _lib.Save(proj);
                     return RvDto(proj);
@@ -250,6 +252,41 @@ public sealed partial class Backend
                 var s = await Task.Run(() => RvSession(proj));
                 return await Locked(() => RvService().WriteVoiceTypePack(proj, s));
             }
+            case "revoice.orphans":
+            {
+                var proj = LoadRv(S(p, "id"));
+                var s = await Task.Run(() => RvSession(proj));
+                return await Locked(() =>
+                {
+                    var orphans = RevoiceService.FindOrphans(proj, s);
+                    proj.OrphanProposals = RevoiceService.MatchByName(proj, orphans);
+                    _lib.Save(proj);
+                    return RvOrphansDto(proj);
+                });
+            }
+            case "revoice.orphansWhisper": return StartRvWhisper(S(p, "id"));
+            case "revoice.orphanAudio":
+            {
+                var proj = LoadRv(S(p, "id"));
+                var src = proj.Sources.FirstOrDefault(x => x.Id == S(p, "sourceId")) ?? throw new InvalidOperationException("Source not found.");
+                var s = await Task.Run(() => RvSession(proj));
+                var wav = await RevoiceService.DecodeAsync(s.Files, VoiceFileIndex.Make(src, S(p, "inner")), Tools(), CancellationToken.None);
+                return "data:audio/wav;base64," + Convert.ToBase64String(wav);
+            }
+            case "revoice.orphansApply":
+                return await Locked(() =>
+                {
+                    var proj = LoadRv(S(p, "id"));
+                    var approved = new List<OrphanMatch>();
+                    if (p.TryGetProperty("approved", out var ap) && ap.ValueKind == JsonValueKind.Array)
+                        foreach (var a in ap.EnumerateArray())
+                            approved.Add(new OrphanMatch { SourceId = S(a, "sourceId"), Inner = S(a, "inner"), LineId = S(a, "lineId"), Method = S(a, "method", "by hand") });
+                    int n = RevoiceService.ApplyOrphanMatches(proj, approved);
+                    var done = approved.Select(x => (x.SourceId, x.Inner)).ToHashSet();
+                    proj.OrphanProposals.RemoveAll(x => done.Contains((x.SourceId, x.Inner)));
+                    _lib.Save(proj);
+                    return new { linked = n, project = RvDto(proj) };
+                });
             default: return NotHandled;
         }
     }
@@ -288,6 +325,7 @@ public sealed partial class Backend
                     break;
                 case ".bsa": Source("bsa", path); break;
                 case ".zip": Source("zip", path); break;
+                case ".7z": Source("7z", path); break;
             }
         }
         void AddPlugin(string f)
@@ -468,6 +506,78 @@ public sealed partial class Backend
                 Emit("jobDone", new { kind = "revoice-scan", id, ok = false, message = ex.Message });
             }
             finally { _jobCts = null; }
+        });
+        return true;
+    }
+
+    private object RvOrphansDto(RevoiceProject proj) => new
+    {
+        proposals = proj.OrphanProposals,
+        silent = proj.Lines.Where(l => l.Original == null && l.PlanId == null && !l.Gone).Select(l => new { id = l.LineId, text = l.FinalLine, vt = l.VoiceType, stem = l.FileStem, l.SpeakerName }).ToList(),
+    };
+
+    /// <summary>Transcribe orphaned files that found no line by name, with the WAV to LIP Whisper settings, and match them to silent lines.</summary>
+    private object StartRvWhisper(string id)
+    {
+        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        _jobCts = new CancellationTokenSource();
+        var ct = _jobCts.Token;
+        _ = Task.Run(async () =>
+        {
+            var temp = new List<string>();
+            try
+            {
+                var proj = LoadRv(id);
+                var s = RvSession(proj);
+                var orphans = RevoiceService.FindOrphans(proj, s);
+                var named = proj.OrphanProposals.Where(x => x.LineId != null).Select(x => (x.SourceId, x.Inner)).ToHashSet();
+                var todo = orphans.Where(o => !named.Contains((o.Source.Id, o.Inner))).ToList();
+                var tool = new WavToLip(_settings.WavToLip, Tools(), WhisperModelsFolder(), e => { if (e.Kind == "log") App.Log("Whisper: " + e.Text); });
+                var (transcribe, engine) = await tool.CreateTranscriberAsync(ct);
+                var items = new List<(VoiceFile, string)>();
+                await using (engine)
+                {
+                    var work = Path.Combine(Path.GetTempPath(), "dbvo", "rv-orphans");
+                    Directory.CreateDirectory(work);
+                    for (int i = 0; i < todo.Count; i++)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        Emit("progress", new { kind = "wavlip", done = i, total = todo.Count, failed = 0, current = todo[i].Inner, message = "Transcribing orphaned files" });
+                        try
+                        {
+                            var wav = await RevoiceService.DecodeAsync(s.Files, todo[i], Tools(), ct);
+                            var path = Path.Combine(work, $"o{i:00000}.wav");
+                            await File.WriteAllBytesAsync(path, wav, ct);
+                            temp.Add(path);
+                            items.Add((todo[i], (await transcribe(path, ct)).Trim()));
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception ex) { App.Log($"Orphan {todo[i].Inner}: {ex.Message}"); }
+                    }
+                }
+                await _gate.WaitAsync();
+                try
+                {
+                    var matched = RevoiceService.MatchByTranscript(proj, items);
+                    var keys = matched.Select(m => (m.SourceId, m.Inner)).ToHashSet();
+                    proj.OrphanProposals.RemoveAll(x => keys.Contains((x.SourceId, x.Inner)));
+                    proj.OrphanProposals.AddRange(matched);
+                    _lib.Save(proj);
+                }
+                finally { _gate.Release(); }
+                Emit("jobDone", new { kind = "revoice-orphans", id, ok = true, message = $"{items.Count} file(s) transcribed." });
+            }
+            catch (OperationCanceledException) { Emit("jobDone", new { kind = "revoice-orphans", id, ok = false, message = "Cancelled." }); }
+            catch (Exception ex)
+            {
+                App.Log("Orphan transcription failed: " + ex);
+                Emit("jobDone", new { kind = "revoice-orphans", id, ok = false, message = ex.Message });
+            }
+            finally
+            {
+                foreach (var t in temp) { try { File.Delete(t); } catch { } }
+                _jobCts = null;
+            }
         });
         return true;
     }

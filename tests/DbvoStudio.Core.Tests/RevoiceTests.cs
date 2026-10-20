@@ -33,4 +33,13 @@ public class RevoiceTests
         }
         finally { File.Delete(path); }
     }
+
+    [Fact]
+    public void Similarity_ignores_case_punctuation_and_stage_directions()
+    {
+        Assert.Equal(1.0, RevoiceService.Similarity("Stendarr's mercy upon you, friend.", "stendarr's mercy upon you friend"));
+        Assert.Equal(1.0, RevoiceService.Similarity("(Laughs) You fool!", "You fool"));
+        Assert.True(RevoiceService.Similarity("We cannot rest while Daedra walk among us.", "We can't rest while daedra walk among us") > 0.7);
+        Assert.True(RevoiceService.Similarity("Molag Bal will not have this soul!", "This hall was a temple once.") < 0.3);
+    }
 }

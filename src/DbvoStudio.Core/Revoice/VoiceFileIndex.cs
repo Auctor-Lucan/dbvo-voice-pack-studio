@@ -7,7 +7,7 @@ namespace DbvoStudio.Core.Revoice;
 public sealed class RevoiceSource
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
-    /// <summary>"folder" (a Data folder, a mod folder or any folder with Sound\Voice inside), "bsa" or "zip".</summary>
+    /// <summary>"folder" (a Data folder, a mod folder or any folder with Sound\Voice inside), "bsa", "zip" or "7z" (needs 7z.exe).</summary>
     public string Kind { get; set; } = "folder";
     public string Path { get; set; } = "";
     public int Priority { get; set; }
@@ -45,9 +45,12 @@ public sealed class VoiceFileIndex : IDisposable
 
     public IEnumerable<VoiceFile> Files => _winners.Values;
 
-    public static VoiceFileIndex Build(IEnumerable<RevoiceSource> sources)
+    /// <summary>7z.exe, for .7z sources.</summary>
+    public string? SevenZip { get; private set; }
+
+    public static VoiceFileIndex Build(IEnumerable<RevoiceSource> sources, string? sevenZip = null)
     {
-        var idx = new VoiceFileIndex();
+        var idx = new VoiceFileIndex { SevenZip = sevenZip };
         // Lowest priority first, archives before loose files, so later ones overwrite.
         foreach (var s in sources.OrderBy(s => s.Priority).ThenBy(s => s.Kind == "folder" ? 1 : 0))
         {
@@ -72,6 +75,11 @@ public sealed class VoiceFileIndex : IDisposable
             {
                 using var z = ZipFile.OpenRead(s.Path);
                 foreach (var e in z.Entries) Add(s, e.FullName);
+                break;
+            }
+            case "7z":
+            {
+                foreach (var e in SevenZipList(s.Path)) Add(s, e);
                 break;
             }
             default:
@@ -154,9 +162,72 @@ public sealed class VoiceFileIndex : IDisposable
                 st.CopyTo(ms);
                 return ms.ToArray();
             }
+            case "7z":
+                return SevenZipRead(f.Source.Path, f.Inner);
             default:
                 return File.ReadAllBytes(System.IO.Path.Combine(f.Source.Path, f.Inner));
         }
+    }
+
+    // ---------------------------------------------------------------- 7-Zip
+
+    private string Need7z() => !string.IsNullOrWhiteSpace(SevenZip) && File.Exists(SevenZip)
+        ? SevenZip! : throw new InvalidOperationException("7z.exe is needed for .7z sources. Set it in Global Settings → General, or unpack the archive and add the folder.");
+
+    private static (int Code, string Out) Run(string exe, params string[] args)
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo(exe) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true, StandardOutputEncoding = System.Text.Encoding.UTF8 };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        var stdout = p.StandardOutput.ReadToEndAsync();
+        var stderr = p.StandardError.ReadToEndAsync();
+        if (!p.WaitForExit(600_000)) { try { p.Kill(true); } catch { } throw new TimeoutException("7z.exe took too long."); }
+        return (p.ExitCode, stdout.Result + stderr.Result);
+    }
+
+    private List<string> SevenZipList(string archive)
+    {
+        var (code, output) = Run(Need7z(), "l", "-ba", "-slt", "-sccUTF-8", archive);
+        if (code != 0) throw new InvalidOperationException("7z.exe could not list the archive: " + output.Trim().Split('\n').LastOrDefault());
+        var list = new List<string>();
+        string? path = null;
+        bool folder = false;
+        foreach (var raw in output.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (line.StartsWith("Path = ", StringComparison.Ordinal)) { if (path != null && !folder) list.Add(path); path = line[7..]; folder = false; }
+            else if (line.StartsWith("Folder = +", StringComparison.Ordinal) || line.StartsWith("Attributes = D", StringComparison.Ordinal)) folder = true;
+        }
+        if (path != null && !folder) list.Add(path);
+        return list;
+    }
+
+    private readonly Dictionary<string, string> _sevenZipCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private byte[] SevenZipRead(string archive, string inner)
+    {
+        // Extract the voice part of the archive once, then read files from the cache folder.
+        if (!_sevenZipCache.TryGetValue(archive, out var dir))
+        {
+            dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dbvo", "7z-" + Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(archive + File.GetLastWriteTimeUtc(archive).Ticks)))[..12]);
+            if (!Directory.Exists(dir))
+            {
+                var tmp = dir + ".part";
+                if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
+                var (code, output) = Run(Need7z(), "x", "-y", "-o" + tmp, archive, "-ir!*.fuz", "-ir!*.xwm", "-ir!*.wav", "-ir!*.lip");
+                if (code != 0) throw new InvalidOperationException("7z.exe could not unpack the archive: " + output.Trim().Split('\n').LastOrDefault());
+                Directory.Move(tmp, dir);
+            }
+            _sevenZipCache[archive] = dir;
+        }
+        return File.ReadAllBytes(System.IO.Path.Combine(dir, inner.Replace('/', System.IO.Path.DirectorySeparatorChar).Replace('\\', System.IO.Path.DirectorySeparatorChar)));
+    }
+
+    /// <summary>A file reference rebuilt from a project's stored link (for approved orphan matches).</summary>
+    public static VoiceFile Make(RevoiceSource s, string inner, string pluginFolder = "", string voiceType = "")
+    {
+        var name = System.IO.Path.GetFileNameWithoutExtension(inner.Replace('/', '\\').Split('\\')[^1]);
+        return new VoiceFile { PluginFolder = pluginFolder, VoiceType = voiceType, Stem = name, Extension = System.IO.Path.GetExtension(inner).ToLowerInvariant(), Source = s, Inner = inner };
     }
 
     public void Dispose()
