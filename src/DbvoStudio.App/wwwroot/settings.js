@@ -1,4 +1,5 @@
 // Global Settings: tools, voice packs, pronunciation, omit references, categories, library. Saved as you change them.
+import { VOICE_COLORS, voiceChip } from './phase2.js';
 import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, switchEl, segmented, popupMenu } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
@@ -60,7 +61,7 @@ export async function settingsView(tab, selectedId) {
         sub.append(h('div', { style: { padding: '2px 0 8px 12px', display: 'flex', flexDirection: 'column', gap: '2px' } },
           h('button.btn.primary.sm', { style: { justifyContent: 'center', margin: '4px 0 6px' }, onclick: () => show('voices', 'new') }, '+ New voice pack'),
           app.state.voicePacks.map((v) => h('button.nav-item' + (tab === 'voices' && voiceSel === v.id ? '.active' : ''), { style: { padding: '5px 10px' }, onclick: () => show('voices', v.id) },
-            h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: v.color || 'var(--violet)', flexShrink: 0 } }),
+            h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: v.color || '#58a6ff', flexShrink: 0 } }),
             h('div', { style: { minWidth: 0 } }, h('div.ellipsis', v.name), h('div.faint', { style: { fontSize: '11px' } }, (v.packId || 'no pack ID') + ' · ' + (v.naming === 'Legacy' ? 'Legacy' : 'DBVO 2.0')))))));
       }
     }
@@ -204,7 +205,7 @@ async function general(_, rerender) {
 // ------------------------------------------------------------------ voice packs
 
 const NEW_VOICE = () => ({
-  id: Math.random().toString(36).slice(2, 10), name: '', packId: '', author: '', naming: 'Legacy', engine: 'elevenlabs', color: '#a371f7',
+  id: Math.random().toString(36).slice(2, 10), name: '', packId: '', author: '', naming: 'Legacy', engine: 'elevenlabs', color: '#58a6ff',
   eleven: { voiceId: '', voiceName: '', modelId: 'eleven_v4', stability: 0.5, similarity: 0.75, style: 0, speakerBoost: false, speed: 1, seed: null, outputFormat: 'mp3_44100_128', languageCode: '', textNormalization: 'auto', concurrency: 5, pronunciationDictionaryIds: [] },
   voxCpm: { voice: '', cfgValue: 2.1, inferenceTimesteps: 12, normalize: true, retryBadcase: true, referenceMode: false, controlCfgValue: 2.7, language: 'en', concurrency: 1 },
   omniVoice: { voice: '', model: 'k2-fsa/OmniVoice', numStep: 32, speed: 1, guidanceScale: 3, concurrency: 1 },
@@ -286,13 +287,20 @@ async function voices(selectedId, rerender, onSelect) {
       ].join('\n');
     };
     renderPreview();
-    const colorIn = h('input', { type: 'color', value: v.color || '#a371f7', style: { width: '48px', height: '28px', padding: 0, border: 0, background: 'none' } });
-    colorIn.addEventListener('input', () => { v.color = colorIn.value; persistSoon(); });
+    const colorIn = h('div.swatches');
+    const renderSwatches = () => clear(colorIn).append(VOICE_COLORS.map(([hex, name]) => {
+      const c = voiceChip(name, hex);
+      c.title = `${name}: used for this voice pack's label everywhere`;
+      if ((v.color || '#58a6ff').toLowerCase() === hex) c.classList.add('on');
+      c.addEventListener('click', () => { v.color = hex; persistSoon(); renderSwatches(); });
+      return c;
+    }));
+    renderSwatches();
 
     clear(editor).append(
       section('Voice pack', h('div.row', h('div.spacer'), savedEl, h('button.btn.primary.sm', { onclick: async () => { if (await persistNow()) toast('Saved.'); } }, 'Save')),
         srow('Name', null, txt(v, 'name', { placeholder: 'e.g. Vampira' })),
-        srow('Colour', 'Shown next to the name everywhere, so you always see which voice you are working with.', colorIn),
+        srow('Colour', 'The voice pack label takes this colour everywhere, so you always see which voice you are working with.', colorIn),
         srow('DBVO voice pack ID', 'The folder name under Sound\\DBVO\\ and the voice_pack_id in the DBVO JSON.', txt(v, 'packId', { placeholder: 'e.g. vampira', after: renderPreview })),
         srow('Author', null, txt(v, 'author')),
         srow('File naming', 'Legacy names are readable, so you can see which line each file is. DBVO 2.0 names are hashes of the line, identical to DBVO Voice Pack Maker 2.7.0.',

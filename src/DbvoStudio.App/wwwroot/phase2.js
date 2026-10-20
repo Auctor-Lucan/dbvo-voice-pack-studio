@@ -12,6 +12,12 @@ const ENGINES = [['elevenlabs', 'ElevenLabs'], ['voxcpm', 'VoxCPM (local)'], ['o
 
 const pct = (p) => { const n = p.total - p.omitted; return n ? Math.round((100 * p.generated) / n) : 0; };
 
+/** Ten voice pack colours that sit well on the dark blue-grey theme. */
+export const VOICE_COLORS = [
+  ['#58a6ff', 'Blue'], ['#56d4dd', 'Sky'], ['#39c5cf', 'Teal'], ['#3fb950', 'Green'], ['#a5d64c', 'Lime'],
+  ['#d29922', 'Amber'], ['#f0883e', 'Orange'], ['#f85149', 'Red'], ['#ff7b9c', 'Rose'], ['#8b949e', 'Slate'],
+];
+
 export function voiceChip(name, color) {
   const c = h('span.voice-chip', { title: 'Voice pack' }, name || '—');
   if (color) c.style.setProperty('--vc', color);
@@ -52,19 +58,23 @@ export async function patchesView(kind = 'tts') {
   const card = (p) => {
     const n = p.total - p.omitted;
     const vc = p.kind === 'vc';
-    const el = h('div.pcard', { draggable: !vc, onclick: () => go('patch', { id: p.id }), title: 'Open this patch' },
-      h('div.row', h('span.title.ellipsis.grow', p.name), vc ? h('span.badge.b-player', { title: 'Speech-to-speech from another voice pack\'s files' }, 'Voice Changer') : null, voiceChip(p.voicePack, p.voiceColor)),
-      vc ? null : h('div.row', { title: 'Phase 1: flagged lines (BROKEN LINE / TOO LONG WILL CTD / stage directions) not yet decided' },
-        h('span.faint', 'Phase 1'),
-        p.unreviewed ? h('span.badge.b-broken', `${p.unreviewed} flagged not reviewed`) : h('span.badge.b-valid', 'all flagged lines reviewed')),
-      h('div.row', { title: 'Phase 2: lines with a take (generated, converted or imported from existing files)' },
-        h('span.faint', 'Phase 2'),
-        h('div.grow', h('div.bar' + (n && p.generated >= n ? '.ok' : ''), h('div.bar-fill', { style: { width: pct(p) + '%' } }))),
-        h('span.mono', `${p.generated} / ${n}`)),
-      h('div.stat-row',
-        vc ? h('span', { title: 'ElevenLabs bills speech-to-speech by audio length' }, h('b', String(p.secondsLeft || 0)), ' line(s) left to convert', p.noSource ? h('span.faint', ` · ${p.noSource} without a source file`) : null)
-          : h('span', { title: 'Characters of spoken text still to generate; ElevenLabs bills about one credit per character' }, h('b', (p.charsLeft || 0).toLocaleString()), ' characters left ≈ credits')),
-      p.warnings && p.warnings.length ? h('div.warns', p.warnings.map((w) => h('span.badge.b-toolong', '⚠ ' + w))) : null);
+    const warn = p.warnings && p.warnings.length;
+    // Two compact lines: name + labels, then progress and what is left.
+    const el = h('div.prow', { draggable: !vc, onclick: () => go('patch', { id: p.id }), title: 'Open this patch' },
+      h('div.row',
+        h('span.title.ellipsis.grow', p.name),
+        warn ? h('span.badge.b-toolong', { title: p.warnings.join('\n') }, '⚠ ' + (p.warnings.length === 1 ? p.warnings[0] : p.warnings.length + ' warnings')) : null,
+        vc ? h('span.badge.b-player', { title: 'Speech-to-speech from another voice pack\'s files' }, 'Voice Changer') : null,
+        voiceChip(p.voicePack, p.voiceColor)),
+      h('div.prow-stats',
+        vc ? null : (p.unreviewed
+          ? h('span.badge.b-broken', { title: 'Phase 1: flagged lines (BROKEN LINE / TOO LONG WILL CTD / stage directions) not yet decided' }, `P1 · ${p.unreviewed} to review`)
+          : h('span.badge.b-valid', { title: 'Phase 1: all flagged lines reviewed' }, 'P1 ✓')),
+        h('div.grow', { title: 'Phase 2: lines with a take (generated, converted or imported from existing files)' },
+          h('div.bar' + (n && p.generated >= n ? '.ok' : ''), h('div.bar-fill', { style: { width: pct(p) + '%' } }))),
+        h('span.mono', { title: 'Lines with a take / lines to voice' }, `${p.generated} / ${n}`),
+        vc ? h('span.left', { title: 'ElevenLabs bills speech-to-speech by audio length' }, h('b', String(p.secondsLeft || 0)), ' to convert', p.noSource ? ` · ${p.noSource} no source` : '')
+          : h('span.left', { title: 'Characters of spoken text still to generate; ElevenLabs bills about one credit per character' }, h('b', (p.charsLeft || 0).toLocaleString()), ' chars left')));
     if (!vc) {
       el.addEventListener('dragstart', (e) => { dragId = p.id; el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
       el.addEventListener('dragend', () => { dragId = null; el.classList.remove('dragging'); });
@@ -90,7 +100,7 @@ export async function patchesView(kind = 'tts') {
         const sec = h('div.cat',
           h('div.cat-head', { title: isOpen ? 'Click to fold' : 'Click to unfold', onclick: () => { collapsed[cat] = isOpen; store.set('cats-collapsed:' + key, collapsed); render(); } },
             h('span.caret', isOpen ? '▾' : '▸'), h('h3', cat), h('span.faint', list.length || (none ? '' : 'empty · drop a patch here'))),
-          isOpen && list.length ? h('div.cards1', list.map(card)) : null);
+          isOpen && list.length ? h('div.rows1', list.map(card)) : null);
         sec.addEventListener('dragover', (e) => { if (dragId) { e.preventDefault(); sec.classList.add('drop-over'); } });
         sec.addEventListener('dragleave', (e) => { if (!sec.contains(e.relatedTarget)) sec.classList.remove('drop-over'); });
         sec.addEventListener('drop', async (e) => {
@@ -873,7 +883,10 @@ export async function patchView(id) {
 
   // live updates from generation
   on('line2', (d) => { if (d.patchId === id && document.body.contains(view)) replaceLine(d.line); });
+  let jobSeen = false;
+  document.addEventListener('job-progress', () => { if (!jobSeen && document.body.contains(view)) { jobSeen = true; grid.paint(true); renderActions(); } });
   document.addEventListener('job-done', async (e) => {
+    jobSeen = false;
     if (!document.body.contains(view)) return;
     if (e.detail && e.detail.kind === 'import' && e.detail.patchId === id) {
       patch = await rpc('patch.get', { id });
@@ -882,6 +895,9 @@ export async function patchView(id) {
       renderCounts();
       renderInspector();
     }
+    // Rows drawn while the job ran have their buttons disabled: redraw them.
+    grid.paint(true);
+    if (!insp.contains(document.activeElement)) renderInspector();
     renderActions();
     renderBanners();
   });

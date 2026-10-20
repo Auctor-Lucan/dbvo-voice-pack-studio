@@ -211,7 +211,10 @@ export async function fomodView(id) {
     return i;
   };
   // Description field with a small toolbar that inserts the icons at the caret.
-  const ICONS = [['⚠️', 'Warning'], ['✅', 'Required / done'], ['⭐', 'Recommended'], ['ℹ️', 'Info']];
+  const ICONS = [['⚠️', 'Warning'], ['✅', 'Required / done'], ['⭐', 'Recommended'], ['ℹ️', 'Info'],
+    ['❌', 'Not compatible'], ['⛔', 'Do not use'], ['❗', 'Important'], ['❓', 'Question / optional'],
+    ['✏️', 'Edited / changed'], ['⚙️', 'Settings / setup'], ['⏳', 'Work in progress'], ['➡️', 'Next / see'],
+    ['✨', 'New'], ['⚡', 'Performance'], ['❤️', 'Thanks'], ['☠️', 'Danger']];
   const descArea = (obj, key, rows) => {
     const area = txt(obj, key, { area: true, rows });
     const insert = (ch) => {

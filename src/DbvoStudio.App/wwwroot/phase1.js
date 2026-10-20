@@ -386,7 +386,7 @@ export async function modView(id) {
 
   function helpFor(l) {
     if (l.isPlayerName) {
-      return h('div.help', { style: { borderColor: '#4c2f7a', background: '#1f1533', color: '#dccbf5' } },
+      return h('div.help', { style: { borderColor: '#5c4615', background: '#2b2111', color: '#f2dfb0' } },
         h('p', h('b', 'Player name line. '), 'The subtitle shows the player\'s chosen name where <Alias=Player> is, so it can\'t be voiced in this patch. DBVO modders voice these in separate player-name patches: one topic file per name, with the alias replaced by that name.'),
         h('p', 'Export the line below. It is saved as a topic .txt in your ', h('b', 'Downloads'), ' folder; add it to your master player-name topic file. More player-name lines to patch are collected on the ', h('b', 'DBVO Repository'), ' mod page on Nexus Mods.'),
         l.needsOverride ? h('p', 'The script also reformatted this line, so the formatted version goes into the DBVO Fix plugin.') : null);
