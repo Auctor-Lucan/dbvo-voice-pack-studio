@@ -170,7 +170,9 @@ public class RevoiceRealDataTests
             using var session = svc.Open(p);
             var rep = svc.Scan(p, session);
             _out.WriteLine($"{sw.Elapsed.TotalSeconds:F1}s: infos {rep.Infos} responses {rep.Responses} lines {rep.Lines} with original {rep.WithOriginal} unknown {rep.UnknownSpeaker} voice files {rep.VoiceFiles}");
-            _out.WriteLine("speakers: " + string.Join(", ", p.Lines.GroupBy(l => l.SpeakerName).OrderByDescending(g => g.Count()).Take(15).Select(g => $"{g.Key} {g.Count()}")));
+            _out.WriteLine("speakers: " + string.Join(", ", p.Lines.GroupBy(l => l.SpeakerName).OrderByDescending(g => g.Count()).Take(30).Select(g => $"{g.Key} {g.Count()}")));
+            _out.WriteLine($"lines by NPC {p.Lines.Count(l => l.SpeakerKey.StartsWith("npc:"))}, by voice type {p.Lines.Count(l => l.SpeakerKey.StartsWith("vt:"))}; speakers {p.Lines.Select(l => l.SpeakerKey).Distinct().Count()}");
+            Assert.True(p.Lines.Count(l => l.SpeakerKey.StartsWith("npc:")) > p.Lines.Count / 2);
             Assert.True(rep.WithOriginal >= 1339 - 40);
             Assert.Equal(40, rep.Orphans);
             var orphans = RevoiceService.FindOrphans(p, session);

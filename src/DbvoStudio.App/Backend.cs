@@ -779,14 +779,14 @@ public sealed partial class Backend
     private static object Line2Dto(Phase2Line l, VoicePack? v) => new
     {
         l.LineId, l.FinalLine, l.OriginalLine, l.Spoken, l.SpokenEdited, status = l.Status.ToString(), l.OmittedBy, l.OverrideOmit,
-        omitted = l.IsOmitted, l.LastError, l.TagSuggestion, l.SelectedTakeId, l.Marked,
+        omitted = l.IsOmitted, l.LastError, l.TagSuggestion, l.SelectedTakeId, l.Marked, excluded = l.Excluded, undo = l.UndoSpoken != null,
         hasSource = l.SourceWav != null, sourceWav = l.SourceWav,
         stem = v == null ? "" : LineNaming.Stem(l.FinalLine, v.Naming),
         legacyName = LineNaming.Legacy(l.FinalLine),
         differs = l.SpokenDiffersFromFinal, editedInPhase1 = l.EditedInPhase1,
         stale = l.SelectedTake != null && l.SelectedTake.SpokenText != l.Spoken,
         sources = l.Sources.Select(s => new { s.ModId, s.Plugin, formId = s.FormId.ToString("X8"), field = s.Field.ToString() }),
-        takes = l.Takes.Select(t => new { t.Id, t.Slot, t.CreatedUtc, t.SpokenText, t.Settings, wav = t.WavPath.Replace('\\', '/'), t.DurationSeconds }),
+        takes = l.Takes.Select(t => new { t.Id, t.Slot, t.CreatedUtc, t.SpokenText, t.Settings, wav = t.WavPath.Replace('\\', '/'), t.DurationSeconds, kept = t.Kept }),
     };
 
     private object UpdatePhase2Line(JsonElement p)
@@ -797,14 +797,28 @@ public sealed partial class Backend
         switch (S(p, "action"))
         {
             case "spoken":
+                line.UndoSpoken = null;
                 line.Spoken = S(p, "value");
                 line.SpokenEdited = line.Spoken != SpokenText.DefaultFor(line.FinalLine);
                 line.TagSuggestion = null;
                 if (line.SelectedTake != null && line.Status == Phase2Status.Generated && line.SelectedTake.SpokenText != line.Spoken) line.Status = Phase2Status.Stale;
                 break;
             case "resetSpoken":
+                line.UndoSpoken = line.Spoken;
                 line.Spoken = SpokenText.DefaultFor(line.FinalLine);
                 line.SpokenEdited = false;
+                break;
+            case "undoReset":
+                if (line.UndoSpoken != null) { line.Spoken = line.UndoSpoken; line.SpokenEdited = line.Spoken != SpokenText.DefaultFor(line.FinalLine); }
+                line.UndoSpoken = null;
+                break;
+            case "exclude": line.Excluded = true; break;
+            case "include": line.Excluded = false; break;
+            case "keep":
+                {
+                    var kt = line.Takes.FirstOrDefault(x => x.Id == (S(p, "value") is { Length: > 0 } v ? v : line.SelectedTakeId));
+                    if (kt != null) kt.Kept = p.TryGetProperty("kept", out var kv) ? kv.GetBoolean() : !kt.Kept;
+                }
                 break;
             case "selectTake":
                 line.SelectedTakeId = S(p, "value");
@@ -883,7 +897,7 @@ public sealed partial class Backend
                 kind = "vc", count = lines.Count + tts.Count, srcCount = lines.Count, seconds, voice = st.VoiceName, voiceId = st.VoiceId, model = st.ModelId, st.OutputFormat, st.Concurrency, st.Seed,
                 st.Stability, st.Similarity, st.Style, st.SpeakerBoost, st.RemoveBackgroundNoise,
                 voice.Loudnorm, voice.GainDb, voice.TrimTailMs, voice.FadeOutMs, naming = voice.Naming.ToString(),
-                missingSource = patch.Lines.Count(l => !l.IsOmitted && l.SourceWav == null),
+                missingSource = patch.Lines.Count(l => !l.IsOmitted && !l.Excluded && l.SourceWav == null),
                 ttsCount = tts.Count, ttsCharacters = tts.Sum(l => l.Spoken.Length), ttsEngine = voice.Engine,
                 ttsVoice = voice.Engine == "voxcpm" ? voice.VoxCpm.Voice : voice.Engine == "omnivoice" ? voice.OmniVoice.Voice : voice.Eleven.VoiceName,
             };

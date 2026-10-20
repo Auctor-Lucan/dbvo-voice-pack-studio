@@ -123,6 +123,16 @@ public sealed partial class Backend
                     _lib.Save(patch);
                     return PatchDto(patch);
                 });
+            case "line2.bulkExclude":
+                return await Locked(() =>
+                {
+                    var patch = LoadPatch(S(p, "id"));
+                    var ids = Strings(p, "lineIds").ToHashSet();
+                    bool value = B(p, "value");
+                    foreach (var l in patch.Lines.Where(l => ids.Contains(l.LineId))) l.Excluded = value;
+                    _lib.Save(patch);
+                    return PatchDto(patch);
+                });
             case "patch.matchSources":
                 return await Locked(() =>
                 {
@@ -342,7 +352,7 @@ public sealed partial class Backend
             var pw = PathChecks.Check(x.Lines.Where(l => !l.IsOmitted).Select(l => l.FinalLine), voice.Naming, x.WavLipFolder, fuz, Path.Combine(_lib.PatchFolder(x.Id), "takes"));
             if (pw.Count > 0) warnings.Add("Path too long: " + string.Join(", ", pw.Select(w => w.Where).Distinct()));
         }
-        var pending = x.Lines.Where(l => !l.IsOmitted && l.SelectedTakeId == null && (x.Kind != "vc" || l.SourceWav != null || x.TtsForMissing)).ToList();
+        var pending = x.Lines.Where(l => !l.IsOmitted && !l.Excluded && l.SelectedTakeId == null && (x.Kind != "vc" || l.SourceWav != null || x.TtsForMissing)).ToList();
         return new
         {
             x.Id, x.Name, x.VoicePackId, x.ModIds, x.ReferenceIds, x.UpdatedUtc, x.Kind,
@@ -357,7 +367,7 @@ public sealed partial class Backend
             unreviewed = its.Sum(m => m.Plugins.Sum(pl => Phase1Service.UnreviewedFlags(pl).Count)),
             charsLeft = pending.Where(l => x.Kind != "vc" || l.SourceWav == null).Sum(l => l.Spoken.Length),
             secondsLeft = x.Kind == "vc" ? pending.Count(l => l.SourceWav != null) : 0,
-            noSource = x.Kind == "vc" ? x.Lines.Count(l => !l.IsOmitted && l.SelectedTakeId == null && l.SourceWav == null) : 0,
+            noSource = x.Kind == "vc" ? x.Lines.Count(l => !l.IsOmitted && !l.Excluded && l.SelectedTakeId == null && l.SourceWav == null) : 0,
             warnings,
         };
     }

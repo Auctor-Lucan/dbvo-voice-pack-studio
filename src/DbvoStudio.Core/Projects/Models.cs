@@ -356,6 +356,8 @@ public sealed class Take
     public string WavPath { get; set; } = "";
     public string LipPath { get; set; } = "";
     public double DurationSeconds { get; set; }
+    /// <summary>Kept as a variant (DBVO 2.0: every kept take is exported; two or more go to &lt;name&gt;\0, 1, …).</summary>
+    public bool Kept { get; set; }
 }
 
 public sealed class LineSource
@@ -394,6 +396,10 @@ public class Phase2Line
     public bool Marked { get; set; }
     /// <summary>Voice Changer: the source WAV this line is converted from (absolute path), if found.</summary>
     public string? SourceWav { get; set; }
+    /// <summary>Left out of generation and export, and not counted as missing.</summary>
+    public bool Excluded { get; set; }
+    /// <summary>The spoken text before "restore in-game line", so the restore can be undone.</summary>
+    public string? UndoSpoken { get; set; }
     /// <summary>File name (without extension) for takes when it is not derived from the line (NPC Revoice: the game's voice file name).</summary>
     public string? FileStem { get; set; }
 

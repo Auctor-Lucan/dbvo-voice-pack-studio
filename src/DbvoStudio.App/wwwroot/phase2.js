@@ -1,5 +1,5 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, switchEl, segmented, popupMenu, columnsMenu, tip, icon } from './lib.js';
+import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Text changed since take' };
@@ -226,30 +226,44 @@ export async function patchView(id) {
   const grid = new VGrid(left, {
     storageKey: vc ? 'vc' : 'phase2',
     rowKey: (l) => l.lineId,
-    rowClass: (l) => (l.omitted || !canGen(l) ? 'muted' : ''),
+    rowClass: (l) => [l.omitted || !canGen(l) ? 'muted' : '', l.excluded ? 'excluded' : ''].filter(Boolean).join(' '),
     onRowClick: (l) => { focusedId = l.lineId; renderInspector(); },
     onRowDblClick: (l) => play(l),
     columns: [
       { id: 'sel', title: '', width: 32, resizable: false, render: (l) => grid.checkbox(l) },
+      { id: 'excl', title: '', width: 30, resizable: false, render: (l) => h('button.act-btn.excl-btn' + (l.excluded ? '.on.bad' : ''), { title: l.excluded ? 'Excluded - click to clear (won\'t generate/export)' : 'Exclude this line (won\'t generate/export, not counted as missing)', onclick: (e) => { e.stopPropagation(); upd(l, l.excluded ? 'include' : 'exclude'); } }, icon('ban', { size: 14 })) },
       { id: 'orig', title: 'Original mod line', width: 240, render: (l) => h('span.dim', { title: l.originalLine }, l.originalLine) },
       { id: 'file', title: 'Filename', flex: 1, width: 240, render: (l) => h('span.faint.mono', { title: `In-game line: ${l.finalLine}\nFile: ${l.stem}.wav / .lip / .fuz` }, l.editedInPhase1 ? h('span.mark.info', { title: 'Edited in Phase 1' }, 'P1 ') : null, l.stem + '.wav') },
       vc ? { id: 'src', title: 'Source', width: 80, render: (l) => l.hasSource ? h('span.row', h('button.icon-btn', { title: 'Play the source: ' + l.sourceWav, onclick: () => playSource(l) }, '▶'), h('span.badge.b-valid', { title: l.sourceWav }, l.sourceWav.toLowerCase().endsWith('.fuz') ? '.fuz' : '✓')) : h('span.badge.b-broken', { title: `No ${l.stem}.wav or .fuz (Legacy or DBVO 2.0 name) in the source folders. New lines from a mod update have no source until the source pack has them.` }, patch.ttsForMissing ? 'TTS' : 'missing') } : null,
       { id: 'spoken', title: vc ? 'Text for the LIP (and TTS without a source)' : 'Spoken text (tags anywhere)', flex: 1.3, width: 320, render: (l) => spokenCell(l) },
       { id: 'take', title: 'Take', width: 64, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
-        h('span.take-lbl', { title: l.takes.length ? `${l.takes.length} take(s); #${(l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot} is used` : 'No take yet' },
+        h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s); #${(l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot} is used. Click to play, switch, keep or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } },
           l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—')) },
-      { id: 'act', title: '', width: 98, resizable: false, render: (l) => h('span.row', { style: { gap: '2px' } },
-        h('button.act-btn', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running (see the top bar)' : !canGen(l) ? 'No source WAV or .fuz with this line\'s name. Turn on "Generate lines without a source with text-to-speech" in the Voice Changer banner to voice it.' : vc && !l.hasSource ? 'Generate with text-to-speech (no source file)' : vc ? 'Convert again (new take)' : 'Generate a new take (no confirmation for one line)',
-          disabled: l.omitted || !!app.job || !canGen(l), onclick: () => generate('selected', [l.lineId]) }, icon('regen')),
-        h('button.act-btn', { title: l.takes.length ? `Takes (${l.takes.length}): play, switch, delete` : 'No takes yet', disabled: !l.takes.length, onclick: () => takesModal(l) }, icon('takes')),
-        h('button.act-btn', { title: l.selectedTakeId ? 'Play (or double-click the row)' : vc ? 'No take yet: convert the line first' : 'No take yet: generate the line first', disabled: !l.selectedTakeId, onclick: () => play(l) }, icon('play'))) },
-      { id: 'mark', title: '', width: 34, resizable: false, render: (l) => h('button.act-btn' + (l.marked ? '.on' : ''), { title: l.marked ? 'Marked: click to unmark' : 'Mark this line (kept until you unmark it; "Marked lines" generates them)', onclick: () => upd(l, 'mark', !l.marked) }, icon('star', { filled: l.marked })) },
+      { id: 'act', title: '', width: 144, resizable: false, render: (l) => rowIcons(l) },
     ].filter(Boolean),
   });
   grid.el.addEventListener('selection', () => renderActions());
 
   function trackCaret(el, l) {
     el.addEventListener('focus', () => { lastEdit = { el, line: l }; });
+  }
+
+  function rowIcons(l) {
+    const sel = l.takes.find((t) => t.id === l.selectedTakeId);
+    const kept = l.takes.filter((t) => t.kept).length;
+    const regenTitle = l.excluded ? 'Excluded: clear the 🚫 to generate it' : l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running (see the top bar)' : !canGen(l) ? 'No source WAV or .fuz with this line\'s name. Turn on "Generate lines without a source with text-to-speech" in the Voice Changer banner to voice it.' : vc && !l.hasSource ? 'Generate with text-to-speech (no source file)' : 'Regenerate the draft variant (a new take; kept takes stay)';
+    const keepTitle = !sel ? 'No take yet' : voice && voice.naming === 'Legacy'
+      ? (sel.kept ? 'Kept - click to un-keep. Legacy naming exports one take per line (the one in use).' : 'Keep this take. Legacy naming exports one take per line, so variants need DBVO 2.0 naming.')
+      : (sel.kept ? `Kept (${kept} kept) - click to un-keep. Kept takes are exported as DBVO 2.0 variants (2+ → name\\0, 1, …).` : `Keep this take as a variant (${kept} kept). DBVO 2.0 exports every kept take; with none kept, the take in use.`);
+    return h('span.row.icon-bar', { style: { gap: '2px' } },
+      h('button.act-btn', { title: regenTitle, disabled: l.excluded || l.omitted || !!app.job || !canGen(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.lineId]); } }, icon('regen')),
+      h('button.act-btn' + (sel && sel.kept ? '.on' : ''), { title: keepTitle, disabled: !sel, onclick: (e) => { e.stopPropagation(); keep(l, sel); } }, icon('star', { filled: !!(sel && sel.kept) })),
+      h('button.act-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit (stays until you clear it; "Flagged lines" generates them)', onclick: (e) => { e.stopPropagation(); upd(l, 'mark', !l.marked); } }, icon('flag')),
+      h('button.act-btn', { title: sel ? 'Play (or double-click the row)' : vc ? 'No take yet: convert the line first' : 'No take yet: generate the line first', disabled: !sel, onclick: (e) => { e.stopPropagation(); play(l); } }, icon('play')));
+  }
+
+  async function keep(l, t, value) {
+    try { replaceLine(await rpc('line2.update', { id, lineId: l.lineId, action: 'keep', value: t.id, kept: value ?? !t.kept })); } catch (e) { fail(e); }
   }
 
   function spokenCell(l) {
@@ -269,6 +283,7 @@ export async function patchView(id) {
       if (e.key === 'Escape') { inp.value = l.spoken; inp.blur(); }
     });
     trackCaret(inp, l);
+    if (l.undo && !l.spokenEdited) return h('span.spoken-wrap', h('button.act-btn', { title: 'Undo the restore (bring your edit back)', onclick: () => upd(l, 'undoReset') }, icon('undo', { size: 14 })), inp);
     if (!l.spokenEdited) return inp;
     return h('span.spoken-wrap', h('button.act-btn', { title: 'Restore the in-game line: ' + l.finalLine, onclick: () => upd(l, 'resetSpoken') }, icon('restore', { size: 14 })), inp);
   }
@@ -298,6 +313,7 @@ export async function patchView(id) {
         h('div.grow', { style: { minWidth: 0 } }, h('div', '#' + t.slot + (t.id === line.selectedTakeId ? ' · used for export and .fuz' : '')),
           h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.settings.engine || ''} · ${t.settings.modelId || ''} · ${new Date(t.createdUtc).toLocaleString()}`),
           t.spokenText !== line.spoken ? h('div.meta.ellipsis', { title: t.spokenText }, 'Text then: ' + t.spokenText) : null),
+        h('button.act-btn' + (t.kept ? '.on' : ''), { title: t.kept ? 'Kept as a variant - click to un-keep' : 'Keep as a variant (DBVO 2.0 exports every kept take)', onclick: async () => { await keep(line, t); render(); } }, icon('star', { filled: t.kept })),
         t.id !== line.selectedTakeId ? h('button.btn.sm', { title: 'Use this take for export and .fuz', onclick: async () => { await upd(line, 'selectTake', t.id); render(); } }, 'Use') : null,
         h('button.icon-btn', { title: 'Delete this take and its files', onclick: async () => { await upd(line, 'deleteTake', t.id); render(); } }, '🗑'))));
     };
@@ -450,25 +466,45 @@ export async function patchView(id) {
 
   // ---- ElevenLabs credits (cached for a minute across pages)
   function creditsButton() {
-    const btn = h('button.btn.sm.credits-btn', { title: 'ElevenLabs credits left this period' }, icon('coins', { size: 14 }), h('b', '…'), h('span.faint', 'credits'));
+    const ring = h('span.row', ringIcon(1, { size: 15 }));
+    const btn = h('button.btn.sm.credits-btn', { title: '' }, ring, h('b', '…'), h('span.faint', 'credits'));
+    let data = null, err = null, pop = null, hideT = 0;
     const fill = (c) => {
+      data = c;
       const left = Math.max(0, c.characterLimit - c.characterCount);
       btn.children[1].textContent = left.toLocaleString();
-      btn.title = `${left.toLocaleString()} of ${c.characterLimit.toLocaleString()} credits left` + (c.nextReset ? ` · resets ${new Date(c.nextReset * 1000).toLocaleDateString()}` : '');
+      clear(ring).append(ringIcon(c.characterLimit ? left / c.characterLimit : 0, { size: 15 }));
     };
-    loadCredits().then(fill).catch(() => { btn.children[1].textContent = '—'; btn.title = 'Could not read the credits (check the API key in Global Settings)'; });
-    btn.addEventListener('click', async () => {
-      let c;
-      try { c = await loadCredits(true); fill(c); } catch (e) { fail(e); return; }
+    const body = () => {
+      if (err) return [h('div', 'Could not read the credits'), h('div.faint', 'Check the API key in Global Settings.')];
+      if (!data) return [h('div.faint', 'Loading…')];
+      const c = data;
       const left = Math.max(0, c.characterLimit - c.characterCount);
       const pct = c.characterLimit ? Math.round((100 * left) / c.characterLimit) : 0;
       const pend = patch.lines.filter(pendingLine).reduce((a, l) => a + l.spoken.length, 0);
-      popupMenu(btn, [
-        { label: `${left.toLocaleString()} credits left (${pct}%)`, sub: `${c.characterCount.toLocaleString()} of ${c.characterLimit.toLocaleString()} used · plan: ${c.tier}${c.nextReset ? ' · resets ' + new Date(c.nextReset * 1000).toLocaleDateString() : ''}`, onclick: () => {} },
-        { label: `This patch still needs ≈ ${pend.toLocaleString()}`, sub: pend > left ? 'More than you have left this period' : 'Fits in what you have left', onclick: () => {} },
-        { label: 'Refresh', sub: 'Read the credits from ElevenLabs again', onclick: () => { creditsCache = null; renderToolbar(); } },
-      ]);
-    });
+      return [
+        h('div.row', ringIcon(c.characterLimit ? left / c.characterLimit : 0, { size: 34 }), h('div', h('div', h('b', left.toLocaleString()), ` credits left (${pct}%)`),
+          h('div.faint', `${c.characterCount.toLocaleString()} of ${c.characterLimit.toLocaleString()} used · ${c.tier}`))),
+        c.nextReset ? h('div.faint', 'Resets ' + new Date(c.nextReset * 1000).toLocaleString()) : null,
+        h('div', `This patch still needs ≈ ${pend.toLocaleString()}`, h('div.faint', pend > left ? 'More than you have left this period' : 'Fits in what you have left')),
+        h('div.row', h('div.spacer'), h('button.btn.sm.ghost', { onclick: async () => { creditsCache = null; try { fill(await loadCredits(true)); err = null; } catch (e) { err = e; } if (pop) clear(pop).append(...body()); } }, '⟳ Refresh')),
+      ];
+    };
+    const close = () => { clearTimeout(hideT); hideT = setTimeout(() => { if (pop) { pop.remove(); pop = null; } }, 180); };
+    const open = () => {
+      clearTimeout(hideT);
+      if (pop) return;
+      const r = btn.getBoundingClientRect();
+      pop = h('div.credits-pop', { style: { top: `${r.bottom + 6}px`, right: `${Math.max(8, window.innerWidth - r.right)}px` } }, ...body());
+      pop.addEventListener('mouseenter', () => clearTimeout(hideT));
+      pop.addEventListener('mouseleave', close);
+      document.body.append(pop);
+    };
+    btn.addEventListener('mouseenter', open);
+    btn.addEventListener('mouseleave', close);
+    btn.addEventListener('focus', open);
+    btn.addEventListener('blur', close);
+    loadCredits().then((c) => { fill(c); if (pop) clear(pop).append(...body()); }).catch((e) => { err = e; btn.children[1].textContent = '—'; });
     return btn;
   }
 
@@ -582,7 +618,7 @@ export async function patchView(id) {
   }
 
   // ---- filters
-  const pendingLine = (l) => !l.omitted && (l.status === 'Pending' || l.status === 'Failed') && canGen(l);
+  const pendingLine = (l) => !l.omitted && !l.excluded && (l.status === 'Pending' || l.status === 'Failed') && canGen(l);
   function counts() {
     const L = patch.lines;
     return {
@@ -593,6 +629,8 @@ export async function patchView(id) {
       stale: L.filter((l) => l.stale || l.status === 'Stale').length,
       omitted: L.filter((l) => l.omitted).length,
       marked: L.filter((l) => l.marked).length,
+      excluded: L.filter((l) => l.excluded).length,
+      active: L.filter((l) => !l.omitted && !l.excluded).length,
       differs: L.filter((l) => l.differs).length,
       p1: L.filter((l) => l.editedInPhase1).length,
       suggestions: L.filter((l) => l.tagSuggestion).length,
@@ -610,6 +648,7 @@ export async function patchView(id) {
         case 'stale': if (!(l.stale || l.status === 'Stale')) return false; break;
         case 'omitted': if (!l.omitted) return false; break;
         case 'marked': if (!l.marked) return false; break;
+        case 'excluded': if (!l.excluded) return false; break;
         case 'differs': if (!l.differs) return false; break;
         case 'p1': if (!l.editedInPhase1) return false; break;
         case 'suggestions': if (!l.tagSuggestion) return false; break;
@@ -626,7 +665,7 @@ export async function patchView(id) {
     const q = had || h('input', { type: 'text', placeholder: 'Search…', value: search });
     if (!had) q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 150));
     clear(filters).append(chip('all', 'All'), chip('pending', vc ? 'To convert' : 'To generate'), chip('generated', vc ? 'Converted' : 'Generated'), chip('stale', 'Changed since take'),
-      chip('failed', 'Failed'), chip('marked', '★ Marked'),
+      chip('failed', 'Failed'), chip('marked', 'Flagged', 'Flagged to revisit'), c.excluded ? chip('excluded', 'Excluded', 'Won\'t generate or export') : null,
       chip('omitted', 'Omitted', 'Left out because a ticked reference topic file (e.g. the base game pack) already has the line'),
       vc ? chip('nosource', 'No source file') : chip('differs', 'Spoken ≠ in-game'), chip('p1', 'Edited in Phase 1'),
       c.suggestions ? chip('suggestions', '✨ Suggestions') : null, h('div.spacer'), q,
@@ -642,7 +681,7 @@ export async function patchView(id) {
         h('div.help',
           vc ? h('p', 'Voice Changer: each line is converted from the source WAV or .fuz with the same name (Legacy or DBVO 2.0). A new .lip is always made from the text, so it matches any edits. Lines without a source are muted unless text-to-speech for them is turned on.')
             : h('p', h('b', 'Filename'), ' comes from the in-game line set in Phase 1. ', h('b', 'Spoken text'), ' is what the voice says: edit it in the list or here, and put [tags] anywhere. The back arrow at the start of an edited box restores the in-game line.'),
-          h('p', 'Tick rows for one-off selections; ★ marks stay until you remove them, so you can collect lines to redo and generate them together.'),
+          h('p', 'Tick rows for one-off selections; flags stay until you clear them, so you can collect lines to redo and generate them together.'),
           vc ? null : h('p', 'Tag buttons insert at the cursor of the box you are typing in. With rows ticked instead, they go at the start of each ticked line.'),
           h('p', 'Keys: ↑/↓ move, Space ticks, Ctrl+A ticks all shown.')));
       return;
@@ -652,7 +691,8 @@ export async function patchView(id) {
     trackCaret(spoken, l);
     insp.append(
       h('div.row', statusDot(l), h('span.dim', l.omitted ? 'Omitted — already in ' + l.omittedBy : STATUS_TEXT[l.status] || l.status), h('div.spacer'),
-        h('button.mark-btn' + (l.marked ? '.on' : ''), { title: 'Mark', onclick: () => upd(l, 'mark', !l.marked) }, '★')),
+        h('button.act-btn' + (l.excluded ? '.on.bad' : ''), { title: l.excluded ? 'Excluded - click to clear' : 'Exclude from generate and export', onclick: () => upd(l, l.excluded ? 'include' : 'exclude') }, icon('ban')),
+        h('button.act-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit', onclick: () => upd(l, 'mark', !l.marked) }, icon('flag'))),
       l.lastError ? h('div.banner.bad', { style: { margin: 0 } }, l.lastError) : null,
       h('div', h('div.field-label', 'Original line (from the mod)'), h('div.box', l.originalLine)),
       h('div', h('div.field-label', 'In-game line'), h('div.box', l.finalLine)),
@@ -701,17 +741,27 @@ export async function patchView(id) {
       { label: 'Keep only the used take · all lines', sub: 'Deletes every take that is not in use', onclick: () => purge(null) },
     ]));
     clear(actions).append(
-      h('span.stat', h('b', c.generated), ` / ${c.all - c.omitted} ${vc ? 'converted' : 'generated'}`, c.omitted ? ` · ${c.omitted} omitted` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} changed since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
+      h('span.stat', h('b', c.generated), ` / ${c.active} ${vc ? 'converted' : 'generated'}`, c.omitted ? ` · ${c.omitted} omitted` : '', c.excluded ? ` · ${c.excluded} excluded` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} changed since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
       h('div.spacer'),
       sel.length ? h('button.btn.sm.ghost', { title: 'Untick all rows', onclick: () => grid.selectAll(false) }, 'Clear ticks') : null,
-      sel.length ? h('button.btn.sm.ghost', { title: 'Mark the ticked lines', onclick: () => bulkMark(sel, true) }, '★ Mark ticked') : null,
-      c.marked ? h('button.btn.sm.ghost', { title: 'Remove every mark', onclick: () => bulkMark(patch.lines.filter((l) => l.marked).map((l) => l.lineId), false) }, 'Clear marks') : null,
+      sel.length ? h('button.btn.sm.ghost', { title: 'Exclude the ticked lines from generate and export (they stop counting as missing)', onclick: () => bulkExclude(sel, true) }, '🚫 Exclude ticked') : null,
+      sel.length && sel.some((x) => (index.get(x) || {}).excluded) ? h('button.btn.sm.ghost', { title: 'Include the ticked lines again', onclick: () => bulkExclude(sel, false) }, 'Include ticked') : null,
+      sel.length ? h('button.btn.sm.ghost', { title: 'Flag the ticked lines to revisit', onclick: () => bulkMark(sel, true) }, 'Flag ticked') : null,
+      c.marked ? h('button.btn.sm.ghost', { title: 'Clear every flag', onclick: () => bulkMark(patch.lines.filter((l) => l.marked).map((l) => l.lineId), false) }, 'Clear flags') : null,
       takesBtn,
       exp,
-      h('button.btn', { disabled: busy || !(c.all - c.omitted), title: 'A new take for every line (the new take becomes the one used)', onclick: () => generate('all') }, `All lines (${c.all - c.omitted})`),
+      h('button.btn', { disabled: busy || !c.active, title: 'A new take for every line that is not omitted or excluded (the new take becomes the one used)', onclick: () => generate('all') }, `All lines (${c.active})`),
       h('button.btn', { disabled: busy || !sel.length, title: 'A new take for each ticked line', onclick: () => generate('selected', sel) }, `Ticked lines (${sel.length})`),
-      h('button.btn', { disabled: busy || !c.marked, title: 'A new take for each ★ marked line', onclick: () => generate('marked') }, `Marked lines (${c.marked})`),
+      h('button.btn', { disabled: busy || !c.marked, title: 'A new take for each flagged line', onclick: () => generate('marked') }, `Flagged lines (${c.marked})`),
       h('button.btn.primary', { disabled: busy || !c.pending, title: 'Lines without a take yet, and failed ones', onclick: () => generate('missing') }, `${verb} missing (${c.pending})`));
+  }
+
+  async function bulkExclude(ids, value) {
+    try {
+      patch = await rpc('line2.bulkExclude', { id, lineIds: ids, value });
+      reindex(); grid.setRows(visible()); renderCounts(); renderActions(); renderInspector();
+      toast(`${ids.length} line(s) ${value ? 'excluded' : 'included'}.`);
+    } catch (e) { fail(e); }
   }
 
   async function bulkMark(ids, value) {

@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using DbvoStudio.Core.Projects;
+using DbvoStudio.Core.Naming;
 
 namespace DbvoStudio.Core.Revoice;
 
@@ -17,6 +18,12 @@ public sealed class RevoicePlugin
 /// <summary>Which voice a speaker gets.</summary>
 public sealed class SpeakerAssignment
 {
+    /// <summary>elevenlabs | voxcpm | omnivoice. With VoiceId set, the speaker uses this voice with the project's voice settings.</summary>
+    public string? Engine { get; set; }
+    /// <summary>ElevenLabs voice id, or the local server's reference voice name.</summary>
+    public string? VoiceId { get; set; }
+    public string? VoiceName { get; set; }
+    /// <summary>Older projects: a whole voice pack (used when no VoiceId is set).</summary>
     public string? VoicePackId { get; set; }
     /// <summary>Leave this speaker's lines out of generation and export.</summary>
     public bool Skip { get; set; }
@@ -60,7 +67,6 @@ public sealed class RevoiceLine : Phase2Line
     public string Plugin { get; set; } = "";
     /// <summary>Where the game's current file for this line is (display text), if there is one.</summary>
     public string? Original { get; set; }
-    public bool Excluded { get; set; }
     /// <summary>Belongs to a new voice type plan (files go to the new voice type's folders).</summary>
     public string? PlanId { get; set; }
     /// <summary>Approved link to an orphaned file that is this line's current audio (merged or compacted plugins): source id + path inside it.</summary>
@@ -118,6 +124,8 @@ public sealed class RevoiceProject
     /// <summary>Loose files are written here as Sound\Voice\..., plus the new voice type plugin and its SkyPatcher / FLM files.</summary>
     public string OutputFolder { get; set; } = "";
     public Dictionary<string, SpeakerAssignment> Speakers { get; set; } = new();
+    /// <summary>Engine settings shared by every speaker (model, stability, speed, tags, pronunciations…); each speaker only picks the engine and voice.</summary>
+    public VoicePack Voice { get; set; } = new() { Name = "NPC Revoice", Naming = NamingMode.Legacy };
     public List<NewVoiceTypePlan> NewVoiceTypes { get; set; } = new();
     /// <summary>Name of the ESL plugin holding new voice types.</summary>
     public string VoiceTypePlugin { get; set; } = "";

@@ -222,6 +222,68 @@ public sealed class RevoiceService
             return line;
         }
 
+        // Voice type -> NPCs that use it (directly or through templates), built once.
+        Dictionary<FormKey, List<NpcInfo>>? users = null;
+        List<NpcInfo> UsersOf(FormKey vt)
+        {
+            if (users == null)
+            {
+                users = new();
+                foreach (var n in d.Npcs.Values)
+                    foreach (var v in d.VoiceTypesOf(n.Key))
+                        (users.TryGetValue(v, out var l) ? l : users[v] = new()).Add(n);
+            }
+            return users.TryGetValue(vt, out var r) ? r : new();
+        }
+        static string Norm(NpcInfo n) => n.Name.Trim().ToLowerInvariant();
+        // One key per character: copies of an NPC (same name and voice type, e.g. a quest copy) share it.
+        FormKey Canon(NpcInfo n, FormKey vt)
+        {
+            if (n.Name.Length == 0) return n.Key;
+            return UsersOf(vt).Where(x => Norm(x) == Norm(n)).Select(x => x.Key).OrderBy(k => d.LoadOrder.FindIndex(p => p.Equals(k.Plugin, StringComparison.OrdinalIgnoreCase))).ThenBy(k => k.Id).FirstOrDefault(n.Key);
+        }
+        HashSet<FormKey> QuestActors(FormKey? quest)
+        {
+            var r = new HashSet<FormKey>();
+            if (quest is not { } q || !d.Quests.TryGetValue(q, out var qi)) return r;
+            foreach (var a in qi.Aliases.Values)
+            {
+                if (a.UniqueActor is { } u) r.Add(u);
+                if (a.ForcedRef is { } f && d.PlacedActors.TryGetValue(f, out var b)) r.Add(b);
+            }
+            return r;
+        }
+        // Who says a line of one voice type: the conditions' NPC, else the only named character with that voice type,
+        // else the only one from this mod or this quest. Falls back to the voice type with the likely NPCs listed.
+        (string Key, string Name, string? Guess) ResolveSpeaker(InfoRecord info, FormKey? vt, string vtFolder, List<FormKey> npcs)
+        {
+            if (vt is not { } v) return ("vt:" + vtFolder.ToLowerInvariant(), vtFolder, null);
+            if (npcs.Count == 1)
+            {
+                var one = d.Npcs.TryGetValue(npcs[0], out var ni) ? Canon(ni, v) : npcs[0];
+                return ("npc:" + one, d.Describe(npcs[0]), null);
+            }
+            var cand = npcs.Count > 1 ? npcs.Where(d.Npcs.ContainsKey).Select(k => d.Npcs[k]).ToList() : UsersOf(v);
+            string? via = npcs.Count > 1 ? "named in the conditions" : "only NPC with this voice type";
+            List<IGrouping<string, NpcInfo>> Named(IEnumerable<NpcInfo> xs) => xs.Where(x => x.Name.Length > 0).GroupBy(Norm).ToList();
+            var named = Named(cand);
+            if (named.Count > 1)
+            {
+                var qa = d.Topics.TryGetValue(info.Topic, out var t) ? QuestActors(t.Quest) : new();
+                var inQuest = Named(cand.Where(x => qa.Contains(x.Key) || (x.Template is { } tp && qa.Contains(tp))));
+                if (inQuest.Count == 1) { named = inQuest; via = "only NPC in this quest with this voice type"; }
+            }
+            if (named.Count == 1)
+            {
+                var n = named[0].First();
+                return ("npc:" + Canon(n, v), n.Display, via);
+            }
+            var names = named.Select(g => g.First().Display).OrderBy(x => x).ToList();
+            var label = names.Count == 0 ? vtFolder
+                : $"{vtFolder} ({names.Count} NPCs: {string.Join(", ", names.Take(3))}{(names.Count > 3 ? ", …" : "")})";
+            return ("vt:" + vtFolder.ToLowerInvariant(), label, null);
+        }
+
         foreach (var info in d.Infos.Values)
         {
             if (!targets.Contains(info.Key.Plugin) || info.Responses.Count == 0) continue;
@@ -244,10 +306,13 @@ public sealed class RevoiceService
                 {
                     var vtk = vtKey.Length > 0 ? ParseKey(vtKey) : (FormKey?)null;
                     var npcs = vtk == null ? new List<FormKey>() : sp.Npcs.Where(n => d.VoiceTypesOf(n).Contains(vtk.Value)).ToList();
-                    string key, name;
-                    if (npcs.Count == 1) { key = "npc:" + npcs[0]; name = d.Describe(npcs[0]); }
-                    else { key = "vt:" + vtFolder.ToLowerInvariant(); name = vtFolder + (npcs.Count > 1 ? $" ({npcs.Count} NPCs)" : ""); }
+                    var (key, name, guess) = ResolveSpeaker(info, vtk, vtFolder, npcs);
                     var line = Make(info, r, vtFolder, vtKey, stem, sp, key, name, null);
+                    if (guess != null)
+                    {
+                        line.Via = (line.Via.Length > 0 ? line.Via + " · " : "") + guess;
+                        if (line.Certainty == nameof(SpeakerCertainty.Unknown)) line.Certainty = nameof(SpeakerCertainty.Probable);
+                    }
                     if (line.Original != null) rep.WithOriginal++;
                 }
             }

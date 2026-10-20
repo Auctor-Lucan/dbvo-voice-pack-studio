@@ -261,6 +261,7 @@ public sealed class Phase2Service
     {
         var only = onlyLineIds?.ToHashSet();
         return patch.Lines.Where(l => !l.IsOmitted)
+            .Where(l => !l.Excluded)
             .Where(l => patch.Kind != "vc" || l.SourceWav != null || patch.TtsForMissing)
             .Where(l => only == null || only.Contains(l.LineId))
             .Where(l => regenerate || only != null || l.Status is Phase2Status.Pending or Phase2Status.Failed or Phase2Status.Stale)
@@ -589,15 +590,31 @@ public sealed class Phase2Service
     }
 
     /// <summary>Copy (hardlink) each selected take into the WAV + LIP folder. Existing files are skipped unless overwrite is on.</summary>
+    /// <summary>
+    /// The takes to export for a line and their file names. Legacy names: the selected take. DBVO 2.0 names: every
+    /// kept take (variants, as in DBVO Voice Pack Maker 2.7.0); with two or more they go to &lt;name&gt;\0, &lt;name&gt;\1 …;
+    /// without kept takes, the selected one.
+    /// </summary>
+    public static List<(Take Take, string Stem)> ExportTakes(Phase2Line line, NamingMode naming)
+    {
+        var stem = line.FileStem ?? LineNaming.Stem(line.FinalLine, naming);
+        var kept = line.Takes.Where(t => t.Kept).ToList();
+        if (naming == NamingMode.Legacy || kept.Count == 0)
+        {
+            var t = line.SelectedTake ?? kept.LastOrDefault();
+            return t == null ? new() : new() { (t, stem) };
+        }
+        if (kept.Count == 1) return new() { (kept[0], stem) };
+        return kept.Select((t, i) => (t, Path.Combine(stem, i.ToString()))).ToList();
+    }
+
     public ExportReport ExportWavLip(DbvoPatch patch, VoicePack voice)
     {
         var rep = new ExportReport();
         var folder = WavLipFolder(patch, voice);
         if (string.IsNullOrWhiteSpace(folder)) throw new InvalidOperationException("Set the WAV + LIP folder first.");
-        foreach (var line in patch.Lines.Where(l => !l.IsOmitted && l.SelectedTake != null))
+        foreach (var (line, t, stem) in patch.Lines.Where(l => !l.IsOmitted && !l.Excluded).SelectMany(l => ExportTakes(l, voice.Naming).Select(x => (l, x.Take, x.Stem))))
         {
-            var t = line.SelectedTake!;
-            var stem = LineNaming.Stem(line.FinalLine, voice.Naming);
             try
             {
                 bool any = false;
@@ -605,6 +622,7 @@ public sealed class Phase2Service
                 {
                     var target = Path.Combine(folder, stem + ext);
                     if (File.Exists(target) && !patch.OverwriteWavLip) continue;
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                     FileLinks.LinkOrCopy(Path.Combine(_lib.PatchFolder(patch.Id), srcRel), target, true);
                     any = true;
                 }
@@ -631,16 +649,16 @@ public sealed class Phase2Service
         var template = FuzTemplate(patch, voice);
         if (customFolder == null && string.IsNullOrWhiteSpace(root)) throw new InvalidOperationException("Set the final folder first.");
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
-        var lines = patch.Lines.Where(l => !l.IsOmitted && l.SelectedTake != null).ToList();
+        var lines = patch.Lines.Where(l => !l.IsOmitted && !l.Excluded).SelectMany(l => ExportTakes(l, voice.Naming).Select(x => (Line: l, x.Take, x.Stem))).ToList();
         int done = 0;
         var gate = new SemaphoreSlim(Math.Max(2, Environment.ProcessorCount / 2));
 
-        await Task.WhenAll(lines.Select(async line =>
+        await Task.WhenAll(lines.Select(async item =>
         {
+            var (line, take, stem) = item;
             await gate.WaitAsync(ct);
             try
             {
-                var stem = LineNaming.Stem(line.FinalLine, voice.Naming);
                 var folders = customFolder != null
                     ? new List<string> { customFolder }
                     : line.Sources.Select(s => mods.FirstOrDefault(m => m.Id == s.ModId)?.Name ?? "Mod").Distinct()
@@ -653,7 +671,7 @@ public sealed class Phase2Service
                     return;
                 }
                 using var work = new WorkFolder(workRoot);
-                var t = line.SelectedTake!;
+                var t = take;
                 var wav = work.File("a.wav");
                 File.Copy(Path.Combine(_lib.PatchFolder(patch.Id), t.WavPath), wav, true);
                 var xwm = work.File("a.xwm");

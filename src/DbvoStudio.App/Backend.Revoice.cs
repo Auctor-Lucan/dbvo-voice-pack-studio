@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using DbvoStudio.App.Tools;
 using DbvoStudio.Core.Projects;
+using DbvoStudio.Core.Naming;
 using DbvoStudio.Core.Revoice;
 
 namespace DbvoStudio.App;
@@ -98,6 +99,12 @@ public sealed partial class Backend
                     }
                     if (NB(p, "useBaseGame") is { } bg && bg != proj.UseBaseGame) { proj.UseBaseGame = bg; RvService().ApplyBaseGame(proj); }
                     if (B(p, "refreshBaseGame")) RvService().ApplyBaseGame(proj);
+                    if (p.TryGetProperty("voice", out var vs) && vs.ValueKind == JsonValueKind.Object)
+                    {
+                        var v = vs.Deserialize<VoicePack>(JsonOptions)!;
+                        v.Name = "NPC Revoice"; v.Naming = NamingMode.Legacy;
+                        proj.Voice = v;
+                    }
                     _lib.Save(proj);
                     return RvDto(proj);
                 });
@@ -140,6 +147,13 @@ public sealed partial class Backend
                     {
                         if (!proj.Speakers.TryGetValue(key, out var a)) proj.Speakers[key] = a = new SpeakerAssignment();
                         if (p.TryGetProperty("voicePackId", out var vp)) a.VoicePackId = vp.ValueKind == JsonValueKind.String && vp.GetString()!.Length > 0 ? vp.GetString() : null;
+                        if (p.TryGetProperty("engine", out var en)) a.Engine = en.ValueKind == JsonValueKind.String && en.GetString()!.Length > 0 ? en.GetString() : null;
+                        if (p.TryGetProperty("voiceId", out var vi))
+                        {
+                            a.VoiceId = vi.ValueKind == JsonValueKind.String && vi.GetString()!.Length > 0 ? vi.GetString() : null;
+                            a.VoiceName = a.VoiceId == null ? null : S(p, "voiceName", a.VoiceId);
+                            if (a.VoiceId != null) a.VoicePackId = null;
+                        }
                         if (NB(p, "skip") is { } sk) a.Skip = sk;
                     }
                     _lib.Save(proj);
@@ -346,13 +360,14 @@ public sealed partial class Backend
         return proj.Lines.GroupBy(l => l.SpeakerKey).Select(g =>
         {
             proj.Speakers.TryGetValue(g.Key, out var a);
-            var vp = a?.VoicePackId != null && voices.TryGetValue(a.VoicePackId, out var v) ? v : null;
+            var vp = a?.VoiceId == null && a?.VoicePackId != null && voices.TryGetValue(a.VoicePackId, out var v) ? v : null;
             return new
             {
                 key = g.Key, name = g.First().SpeakerName, voiceType = g.First().VoiceType, lines = g.Count(),
                 generated = g.Count(l => l.SelectedTakeId != null), original = g.Count(l => l.Original != null),
                 characters = g.Where(l => !l.Excluded).Sum(l => l.Spoken.Length),
                 voicePackId = vp?.Id, voicePack = vp?.Name, voiceColor = vp?.Color, skip = a?.Skip ?? false,
+                engine = a?.Engine ?? "elevenlabs", voiceId = a?.VoiceId, voiceName = a?.VoiceName ?? vp?.Name,
                 plan = g.First().PlanId,
             };
         }).OrderByDescending(x => x.lines).ToList();
@@ -364,7 +379,7 @@ public sealed partial class Backend
         return new
         {
             proj.Id, proj.Name, proj.OutputFolder, proj.UseBaseGame, proj.Language, proj.EmotionTags, proj.ReferenceByEditorId,
-            proj.VoiceChanger, proj.VoiceChangerWarningAccepted, voiceTypePlugin = RvService().PluginName(proj),
+            proj.VoiceChanger, proj.VoiceChangerWarningAccepted, voice = proj.Voice, voiceTypePlugin = RvService().PluginName(proj),
             plugins = proj.Plugins.Select(x => new { x.Path, x.FileName, x.Target, x.BaseGame, exists = File.Exists(x.Path) }),
             sources = proj.Sources.OrderByDescending(x => x.Priority).Select(x => new { x.Id, x.Kind, x.Path, x.Priority, x.BaseGame, exists = x.Kind == "folder" ? Directory.Exists(x.Path) : File.Exists(x.Path) }),
             baseGameFolder = RevoiceService.DataFolder(_settings.BaseGameFolder),
@@ -381,7 +396,7 @@ public sealed partial class Backend
         id = l.LineId, l.Info, resp = l.Response, pf = l.PluginFolder, vt = l.VoiceType, stem = l.FileStem, text = l.FinalLine, spoken = l.Spoken,
         l.SpokenEdited, tag = l.TagSuggestion, speaker = l.SpeakerKey, speakerName = l.SpeakerName, l.Npcs, cert = l.Certainty, l.Via,
         emo = ResponseInfo.EmotionNames.ElementAtOrDefault(l.Emotion) ?? "Neutral", emoV = l.EmotionValue, l.Notes, l.Quest, l.Topic, l.Plugin,
-        l.Original, excl = l.Excluded, plan = l.PlanId, status = l.Status.ToString(), err = l.LastError, sel = l.SelectedTakeId, l.Marked, l.Gone,
+        l.Original, excl = l.Excluded, undo = l.UndoSpoken != null, plan = l.PlanId, status = l.Status.ToString(), err = l.LastError, sel = l.SelectedTakeId, l.Marked, l.Gone,
         takes = l.Takes.Select(t => new { t.Id, t.Slot, t.CreatedUtc, t.SpokenText, engine = t.Settings.Engine, model = t.Settings.ModelId, wav = t.WavPath.Replace('\\', '/'), t.DurationSeconds }),
     };
 
@@ -409,11 +424,13 @@ public sealed partial class Backend
         switch (action)
         {
             case "spoken":
+                l.UndoSpoken = null;
                 l.Spoken = S(p, "value");
                 l.SpokenEdited = l.Spoken != l.FinalLine;
                 if (l.SelectedTake != null && l.Status == Phase2Status.Generated && l.SelectedTake.SpokenText != l.Spoken) l.Status = Phase2Status.Stale;
                 break;
-            case "resetSpoken": l.Spoken = l.FinalLine; l.SpokenEdited = false; break;
+            case "resetSpoken": l.UndoSpoken = l.Spoken; l.Spoken = l.FinalLine; l.SpokenEdited = false; break;
+            case "undoReset": if (l.UndoSpoken != null) { l.Spoken = l.UndoSpoken; l.SpokenEdited = l.Spoken != l.FinalLine; } l.UndoSpoken = null; break;
             case "acceptTags": if (l.TagSuggestion != null) { l.Spoken = l.TagSuggestion; l.SpokenEdited = true; l.TagSuggestion = null; } break;
             case "rejectTags": l.TagSuggestion = null; break;
             case "exclude": l.Excluded = true; break;
@@ -469,11 +486,10 @@ public sealed partial class Backend
         var proj = LoadRv(S(p, "id"));
         var lines = RvSelect(proj, p);
         var voices = _lib.LoadVoicePacks().ToDictionary(v => v.Id);
-        var unassigned = lines.Where(l => !(proj.Speakers.TryGetValue(l.SpeakerKey, out var a) && a.VoicePackId != null && voices.ContainsKey(a.VoicePackId)))
-            .Select(l => l.SpeakerName).Distinct().ToList();
-        var groups = lines.Where(l => proj.Speakers.TryGetValue(l.SpeakerKey, out var a) && a.VoicePackId != null && voices.ContainsKey(a.VoicePackId))
-            .GroupBy(l => proj.Speakers[l.SpeakerKey].VoicePackId!)
-            .Select(g => new { voicePack = voices[g.Key].Name, color = voices[g.Key].Color, engine = proj.VoiceChanger ? "elevenlabs speech-to-speech" : voices[g.Key].Engine, lines = g.Count(), characters = g.Sum(l => l.Spoken.Length) })
+        var resolved = lines.Select(l => (Line: l, Voice: RvVoiceFor(proj, l, voices))).ToList();
+        var unassigned = resolved.Where(x => x.Voice == null).Select(x => x.Line.SpeakerName).Distinct().ToList();
+        var groups = resolved.Where(x => x.Voice != null).GroupBy(x => x.Voice!.Id)
+            .Select(g => { var v = g.First().Voice!; return new { voicePack = v.Name, color = v.Color, engine = proj.VoiceChanger ? "elevenlabs speech-to-speech" : v.Engine, lines = g.Count(), characters = g.Sum(x => x.Line.Spoken.Length) }; })
             .ToList();
         return new { count = groups.Sum(g => g.lines), characters = groups.Sum(g => g.characters), groups, unassigned, voiceChanger = proj.VoiceChanger };
     }
@@ -582,16 +598,44 @@ public sealed partial class Backend
         return true;
     }
 
+    /// <summary>The voice a line is spoken with: the speaker's engine + voice on top of the project's voice settings (or an older project's voice pack).</summary>
+    private static VoicePack? RvVoiceFor(RevoiceProject proj, RevoiceLine l, Dictionary<string, VoicePack> voicePacks)
+    {
+        if (!proj.Speakers.TryGetValue(l.SpeakerKey, out var a)) return null;
+        if (a.VoiceId != null)
+        {
+            var engine = a.Engine ?? "elevenlabs";
+            if (proj.VoiceChanger && engine != "elevenlabs") return null;
+            var v = JsonSerializer.Deserialize<VoicePack>(JsonSerializer.Serialize(proj.Voice, Library.Json), Library.Json)!;
+            v.Id = "rv-" + engine + "-" + a.VoiceId;
+            v.Name = a.VoiceName ?? a.VoiceId;
+            v.Engine = engine;
+            v.SettingsLocked = false;
+            switch (engine)
+            {
+                case "voxcpm": v.VoxCpm.Voice = a.VoiceId; break;
+                case "omnivoice": v.OmniVoice.Voice = a.VoiceId; break;
+                default:
+                    v.Eleven.VoiceId = a.VoiceId; v.Eleven.VoiceName = v.Name;
+                    v.Sts.VoiceId = a.VoiceId; v.Sts.VoiceName = v.Name;
+                    break;
+            }
+            return v;
+        }
+        return a.VoicePackId != null && voicePacks.TryGetValue(a.VoicePackId, out var vp) ? vp : null;
+    }
+
     private object StartRvGenerate(JsonElement p)
     {
         if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
         var id = S(p, "id");
         var proj = LoadRv(id);
         var all = RvSelect(proj, p);
-        var voices = _lib.LoadVoicePacks().ToDictionary(v => v.Id);
-        var groups = all.Where(l => proj.Speakers.TryGetValue(l.SpeakerKey, out var a) && a.VoicePackId != null && voices.ContainsKey(a.VoicePackId))
-            .GroupBy(l => proj.Speakers[l.SpeakerKey].VoicePackId!).ToList();
-        if (groups.Count == 0) throw new InvalidOperationException("Assign a voice pack to the speakers first (Speakers panel).");
+        var voicePacks = _lib.LoadVoicePacks().ToDictionary(v => v.Id);
+        var voices = new Dictionary<string, VoicePack>();
+        var groups = all.Select(l => (Line: l, Voice: RvVoiceFor(proj, l, voicePacks))).Where(x => x.Voice != null)
+            .GroupBy(x => { voices[x.Voice!.Id] = x.Voice!; return x.Voice!.Id; }, x => x.Line).ToList();
+        if (groups.Count == 0) throw new InvalidOperationException("Pick a voice for the speakers first (Speakers tab).");
         _jobCts = new CancellationTokenSource();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>

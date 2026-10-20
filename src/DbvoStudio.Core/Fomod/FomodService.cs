@@ -139,7 +139,7 @@ public sealed class FomodService
     public FomodOption OptionFor(FomodProject p, DbvoPatch patch, VoicePack voice, Mod mod)
     {
         var plugins = mod.Plugins.Where(x => !x.IsTopicFile).Select(x => x.FileName).ToList();
-        int lines = patch.Lines.Count(l => !l.IsOmitted && l.Sources.Any(s => s.ModId == mod.Id));
+        int lines = patch.Lines.Count(l => !l.IsOmitted && !l.Excluded && l.Sources.Any(s => s.ModId == mod.Id));
         return new FomodOption
         {
             Name = mod.Name,
