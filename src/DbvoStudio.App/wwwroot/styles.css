@@ -205,12 +205,12 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .vgrid { flex: 1; overflow: auto; position: relative; min-height: 0; font-size: 12.5px; }
 .vgrid .mono { font-size: 11.5px; }
 .vgrid .badge { font-size: 10.5px; line-height: 17px; }
-.vgrid-head { position: sticky; top: 0; z-index: 2; display: flex; background: var(--panel); border-bottom: 1px solid var(--line); height: 30px; align-items: center; min-width: max-content; }
+.vgrid-head { position: sticky; top: 0; z-index: 2; display: flex; background: var(--panel); border-bottom: 1px solid var(--line); height: 30px; align-items: center; min-width: var(--roww, 100%); }
 .vgrid-head .cell { font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .7px; font-weight: 600; font-family: inherit; position: relative; height: 100%; display: flex; align-items: center; }
 .resizer { position: absolute; right: 0; top: 4px; bottom: 4px; width: 7px; cursor: col-resize; border-right: 2px solid transparent; }
 .resizer:hover, .resizer.drag { border-right-color: var(--accent); }
-.vgrid-body { position: relative; min-width: max-content; }
-.vrow { position: absolute; left: 0; min-width: 100%; height: var(--row); display: flex; align-items: center; border-bottom: 1px solid var(--line-soft); }
+.vgrid-body { position: relative; min-width: var(--roww, 100%); }
+.vrow { position: absolute; left: 0; right: 0; height: var(--row); display: flex; align-items: center; border-bottom: 1px solid var(--line-soft); }
 .vrow:hover { background: #161b22; }
 .vrow.sel { background: #0d1d33; }
 .vrow.focus { box-shadow: inset 2px 0 0 var(--accent); background: #131c2b; }

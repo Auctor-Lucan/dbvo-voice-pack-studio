@@ -347,6 +347,7 @@ public sealed partial class Backend
             unreviewed = its.Sum(m => m.Plugins.Sum(pl => Phase1Service.UnreviewedFlags(pl).Count)),
             charsLeft = x.Kind == "vc" ? 0 : pending.Sum(l => l.Spoken.Length),
             secondsLeft = x.Kind == "vc" ? pending.Count : 0,
+            noSource = x.Kind == "vc" ? x.Lines.Count(l => !l.IsOmitted && l.SelectedTakeId == null && l.SourceWav == null) : 0,
             warnings,
         };
     }

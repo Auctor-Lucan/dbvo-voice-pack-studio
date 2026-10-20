@@ -62,7 +62,7 @@ export async function patchesView(kind = 'tts') {
         h('div.grow', h('div.bar' + (n && p.generated >= n ? '.ok' : ''), h('div.bar-fill', { style: { width: pct(p) + '%' } }))),
         h('span.mono', `${p.generated} / ${n}`)),
       h('div.stat-row',
-        vc ? h('span', h('b', p.secondsLeft), ' line(s) left to convert (billed by audio length)')
+        vc ? h('span', { title: 'ElevenLabs bills speech-to-speech by audio length' }, h('b', String(p.secondsLeft || 0)), ' line(s) left to convert', p.noSource ? h('span.faint', ` · ${p.noSource} without a source file`) : null)
           : h('span', { title: 'Characters of spoken text still to generate; ElevenLabs bills about one credit per character' }, h('b', (p.charsLeft || 0).toLocaleString()), ' characters left ≈ credits')),
       p.warnings && p.warnings.length ? h('div.warns', p.warnings.map((w) => h('span.badge.b-toolong', '⚠ ' + w))) : null);
     if (!vc) {
@@ -74,7 +74,7 @@ export async function patchesView(kind = 'tts') {
 
   function pane(key, defaultVoice) {
     const collapsed = store.get('cats-collapsed:' + key, {});
-    const voiceFilter = h('select', { title: 'Show the patches of one voice pack' }, h('option', { value: '' }, 'All voice packs'), s.voicePacks.map((v) => h('option', { value: v.id }, v.name)));
+    const voiceFilter = h('select', { title: 'Show the patches of one voice pack. Default shows the empty categories only.' }, h('option', { value: '-' }, 'Default'), h('option', { value: '' }, 'All voice packs'), s.voicePacks.map((v) => h('option', { value: v.id }, v.name)));
     voiceFilter.value = store.get('patches-voice:' + key, defaultVoice);
     const q = h('input', { type: 'text', placeholder: 'Filter patches…', title: 'Filter by patch or voice pack name', style: { width: '220px' } });
     const listEl = h('div');
@@ -83,12 +83,13 @@ export async function patchesView(kind = 'tts') {
       const f = q.value.toLowerCase();
       const cats = [...s.settings.categories, ...new Set(patches.map((p) => p.category).filter((c) => !s.settings.categories.includes(c)))];
       for (const cat of cats) {
-        const list = patches.filter((p) => p.category === cat && (!voiceFilter.value || p.voicePackId === voiceFilter.value) && (!f || p.name.toLowerCase().includes(f) || p.voicePack.toLowerCase().includes(f)));
+        const none = voiceFilter.value === '-';
+        const list = none ? [] : patches.filter((p) => p.category === cat && (!voiceFilter.value || p.voicePackId === voiceFilter.value) && (!f || p.name.toLowerCase().includes(f) || p.voicePack.toLowerCase().includes(f)));
         if (vcPage && !list.length) continue;
         const isOpen = !collapsed[cat];
         const sec = h('div.cat',
           h('div.cat-head', { title: isOpen ? 'Click to fold' : 'Click to unfold', onclick: () => { collapsed[cat] = isOpen; store.set('cats-collapsed:' + key, collapsed); render(); } },
-            h('span.caret', isOpen ? '▾' : '▸'), h('h3', cat), h('span.faint', list.length || 'empty · drop a patch here')),
+            h('span.caret', isOpen ? '▾' : '▸'), h('h3', cat), h('span.faint', list.length || (none ? '' : 'empty · drop a patch here'))),
           isOpen && list.length ? h('div.cards1', list.map(card)) : null);
         sec.addEventListener('dragover', (e) => { if (dragId) { e.preventDefault(); sec.classList.add('drop-over'); } });
         sec.addEventListener('dragleave', (e) => { if (!sec.contains(e.relatedTarget)) sec.classList.remove('drop-over'); });
@@ -113,7 +114,7 @@ export async function patchesView(kind = 'tts') {
   }
 
   const first = s.settings.lastVoicePackId || s.voicePacks[0].id;
-  const second = (s.voicePacks.find((v) => v.id !== first) || s.voicePacks[0]).id;
+  const second = '-';
   body.append(vcPage ? pane('vc', '') : h('div.panes', pane('left', first), pane('right', second)));
   return view;
 }
@@ -241,7 +242,7 @@ export async function patchView(id) {
         h('button.icon-btn', { title: 'Undo', onclick: () => upd(l, 'rejectTags') }, '✕'));
     }
     const inp = h('input', { type: 'text', value: l.spoken, disabled: l.omitted });
-    if (l.differs) inp.style.color = 'var(--link)';
+    if (l.differs) { inp.style.color = 'var(--link)'; inp.title = 'Blue: the spoken text differs from the in-game line (your edit). ↺ restores it.'; }
     inp.addEventListener('change', () => { if (inp.value !== l.spoken) upd(l, 'spoken', inp.value); });
     inp.addEventListener('focus', () => { if (focusedId !== l.lineId) { focusedId = l.lineId; grid.focus(l.lineId); renderInspector(); } });
     inp.addEventListener('keydown', (e) => {

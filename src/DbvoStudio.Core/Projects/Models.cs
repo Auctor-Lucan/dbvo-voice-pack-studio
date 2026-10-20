@@ -396,7 +396,8 @@ public sealed class Phase2Line
 
     [JsonIgnore] public Take? SelectedTake => Takes.FirstOrDefault(t => t.Id == SelectedTakeId);
     [JsonIgnore] public bool IsOmitted => OmittedBy != null && !OverrideOmit;
-    [JsonIgnore] public bool SpokenDiffersFromFinal => !string.Equals(SpokenText.StripTags(Spoken), LineNaming.SpokenPart(FinalLine), StringComparison.Ordinal);
+    /// <summary>The words differ from the in-game line (tags, spacing and leading markers ignored): shown in blue.</summary>
+    [JsonIgnore] public bool SpokenDiffersFromFinal => !string.Equals(SpokenText.StripTags(Spoken), SpokenText.StripTags(SpokenText.DefaultFor(FinalLine)), StringComparison.Ordinal);
     [JsonIgnore] public bool EditedInPhase1 => !string.Equals(FinalLine, OriginalLine, StringComparison.Ordinal);
 }
 

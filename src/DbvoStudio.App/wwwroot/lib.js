@@ -214,7 +214,14 @@ export class VGrid {
     this.paint(true);
   }
 
+  /** Every row gets the same width (the columns' total, or the view if wider), so long text can't push columns out of line. */
+  setRowWidth() {
+    const total = this.shown().reduce((a, c) => a + (c.flex ? (c.width || 120) : (c.width || 100)), 0);
+    this.el.style.setProperty('--roww', total + 'px');
+  }
+
   renderHead() {
+    this.setRowWidth();
     clear(this.head);
     for (const c of this.shown()) {
       const cell = h('div.cell', c.title || '');
@@ -240,6 +247,7 @@ export class VGrid {
       c.flex = 0;
       this.sizeCell(cell, c);
       this.body.querySelectorAll('.vrow').forEach((r) => this.sizeCell(r.children[this.shown().indexOf(c)], c));
+      this.setRowWidth();
     };
     const up = () => {
       grip.classList.remove('drag');
