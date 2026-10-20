@@ -39,7 +39,6 @@ export async function patchesView(kind = 'tts') {
       : 'One voice pack × one or more mods. Drag a patch onto another header to change its category. Two lists side by side, so you can compare voice packs.'),
     h('div.spacer'),
     vcPage ? null : h('button.btn', { onclick: addCategory, title: 'Add a category header (also used for mods and FOMOD pages)' }, '+ Category'),
-    vcPage ? null : h('button.btn', { onclick: () => newPatch('vc'), title: 'Revoice another voice pack\'s files with speech-to-speech' }, '+ Voice Changer patch'),
     h('button.btn.primary', { onclick: () => newPatch(kind), title: vcPage ? 'Revoice another voice pack\'s files with speech-to-speech' : 'A voice pack × one or more Phase 1 mods' }, vcPage ? '+ New Voice Changer patch' : '+ New DBVO Patch')));
   const body = h('div.view-body');
   view.append(body);
@@ -60,22 +59,22 @@ export async function patchesView(kind = 'tts') {
     const vc = p.kind === 'vc';
     const warn = p.warnings && p.warnings.length;
     // Two compact lines: name + labels, then progress and what is left.
-    const el = h('div.prow', { draggable: !vc, onclick: () => go('patch', { id: p.id }), title: 'Open this patch' },
+    const el = h('div.prow', { draggable: true, onclick: () => go('patch', { id: p.id }), title: 'Open this patch' },
       h('div.row',
         h('span.title.ellipsis.grow', p.name),
         warn ? h('span.badge.b-toolong', { title: p.warnings.join('\n') }, '⚠ ' + (p.warnings.length === 1 ? p.warnings[0] : p.warnings.length + ' warnings')) : null,
-        vc ? h('span.badge.b-player', { title: 'Speech-to-speech from another voice pack\'s files' }, 'Voice Changer') : null,
+        vc ? h('span.badge.b-player', { title: 'Voice Changer on: lines are converted from another voice pack\'s files (speech-to-speech)' }, 'Voice Changer') : null,
         voiceChip(p.voicePack, p.voiceColor)),
       h('div.prow-stats',
-        vc ? null : (p.unreviewed
+        (p.unreviewed
           ? h('span.badge.b-broken', { title: 'Phase 1: flagged lines (BROKEN LINE / TOO LONG WILL CTD / stage directions) not yet decided' }, `P1 · ${p.unreviewed} to review`)
           : h('span.badge.b-valid', { title: 'Phase 1: all flagged lines reviewed' }, 'P1 ✓')),
         h('div.grow', { title: 'Phase 2: lines with a take (generated, converted or imported from existing files)' },
           h('div.bar' + (n && p.generated >= n ? '.ok' : ''), h('div.bar-fill', { style: { width: pct(p) + '%' } }))),
         h('span.mono', { title: 'Lines with a take / lines to voice' }, `${p.generated} / ${n}`),
-        vc ? h('span.left', { title: 'ElevenLabs bills speech-to-speech by audio length' }, h('b', String(p.secondsLeft || 0)), ' to convert', p.noSource ? ` · ${p.noSource} no source` : '')
+        vc ? h('span.left', { title: 'Voice Changer: ElevenLabs bills speech-to-speech by audio length.' + (p.noSource ? ` ${p.noSource} line(s) have no source file; they can be generated with text-to-speech (see the patch).` : '') }, h('b', String(p.secondsLeft || 0)), ' to convert', p.noSource ? ` · ${p.noSource} no source` : '')
           : h('span.left', { title: 'Characters of spoken text still to generate; ElevenLabs bills about one credit per character' }, h('b', (p.charsLeft || 0).toLocaleString()), ' chars left')));
-    if (!vc) {
+    {
       el.addEventListener('dragstart', (e) => { dragId = p.id; el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
       el.addEventListener('dragend', () => { dragId = null; el.classList.remove('dragging'); });
     }
@@ -193,6 +192,8 @@ export async function patchView(id) {
   let lastEdit = null; // { el, line } — the last spoken-text box the user was in
   const audio = new Audio();
   const engine = () => (vc ? 'sts' : voice.engine || 'elevenlabs');
+  // With the Voice Changer on, a line needs a source file, unless text-to-speech for such lines is turned on.
+  const canGen = (l) => !vc || l.hasSource || !!patch.ttsForMissing;
 
   const view = h('div.view');
   const head = h('div.view-head');
@@ -217,7 +218,7 @@ export async function patchView(id) {
   const grid = new VGrid(left, {
     storageKey: vc ? 'vc' : 'phase2',
     rowKey: (l) => l.lineId,
-    rowClass: (l) => (l.omitted || (vc && !l.hasSource) ? 'muted' : ''),
+    rowClass: (l) => (l.omitted || !canGen(l) ? 'muted' : ''),
     onRowClick: (l) => { focusedId = l.lineId; renderInspector(); },
     onRowDblClick: (l) => play(l),
     columns: [
@@ -225,8 +226,8 @@ export async function patchView(id) {
       { id: 'mark', title: 'Marked', width: 62, resizable: false, render: (l) => h('button.mark-btn' + (l.marked ? '.on' : ''), { title: l.marked ? 'Marked: click to unmark' : 'Mark this line (kept until you unmark it; "Generate · Marked" uses it)', onclick: () => upd(l, 'mark', !l.marked) }, '★') },
       { id: 'orig', title: 'Original mod line', width: 240, render: (l) => h('span.dim', { title: l.originalLine }, l.originalLine) },
       { id: 'file', title: 'Filename', flex: 1, width: 240, render: (l) => h('span.faint.mono', { title: `In-game line: ${l.finalLine}\nFile: ${l.stem}.wav / .lip / .fuz` }, l.editedInPhase1 ? h('span.mark.info', { title: 'Edited in Phase 1' }, 'P1 ') : null, l.stem + '.wav') },
-      vc ? { id: 'src', title: 'Source', width: 80, render: (l) => l.hasSource ? h('span.row', h('button.icon-btn', { title: 'Play the source: ' + l.sourceWav, onclick: () => playSource(l) }, '▶'), h('span.badge.b-valid', { title: l.sourceWav }, l.sourceWav.toLowerCase().endsWith('.fuz') ? '.fuz' : '✓')) : h('span.badge.b-broken', { title: `No ${l.stem}.wav or .fuz (Legacy or DBVO 2.0 name) in the source folders. New lines from a mod update have no source until the source pack has them.` }, 'missing') } : null,
-      { id: 'spoken', title: vc ? 'Text for the LIP' : 'Spoken text (tags anywhere)', flex: 1.3, width: 320, render: (l) => spokenCell(l) },
+      vc ? { id: 'src', title: 'Source', width: 80, render: (l) => l.hasSource ? h('span.row', h('button.icon-btn', { title: 'Play the source: ' + l.sourceWav, onclick: () => playSource(l) }, '▶'), h('span.badge.b-valid', { title: l.sourceWav }, l.sourceWav.toLowerCase().endsWith('.fuz') ? '.fuz' : '✓')) : h('span.badge.b-broken', { title: `No ${l.stem}.wav or .fuz (Legacy or DBVO 2.0 name) in the source folders. New lines from a mod update have no source until the source pack has them.` }, patch.ttsForMissing ? 'TTS' : 'missing') } : null,
+      { id: 'spoken', title: vc ? 'Text for the LIP (and TTS without a source)' : 'Spoken text (tags anywhere)', flex: 1.3, width: 320, render: (l) => spokenCell(l) },
       { id: 'restore', title: '', width: 34, resizable: false, render: (l) => l.spokenEdited ? h('button.icon-btn', { title: 'Restore the in-game line: ' + l.finalLine, onclick: () => upd(l, 'resetSpoken') }, '↺') : null },
       { id: 'take', title: 'Take', width: 92, render: (l) => h('span.row', statusDot(l), l.takes.length
         ? h('button.btn.sm.ghost', { title: `${l.takes.length} take(s). Click to play, switch, or delete takes.`, onclick: () => takesModal(l) },
@@ -234,8 +235,8 @@ export async function patchView(id) {
         : h('span.faint', { title: 'No take yet' }, '—')) },
       { id: 'act', title: '', width: 84, resizable: false, render: (l) => h('span.row',
         h('button.icon-btn.big', { title: l.selectedTakeId ? 'Play (or double-click the row)' : vc ? 'No take yet: convert the line first (↻)' : 'No take yet: generate the line first (↻)', disabled: !l.selectedTakeId, onclick: () => play(l) }, '▶'),
-        h('button.icon-btn.big', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running (see the top bar)' : vc && !l.hasSource ? 'No source WAV or .fuz with this line\'s name in the source folders' : vc ? 'Convert again (new take)' : 'Generate a new take (no confirmation for one line)',
-          disabled: l.omitted || !!app.job || (vc && !l.hasSource), onclick: () => generate('selected', [l.lineId]) }, '↻')) },
+        h('button.icon-btn.big', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running (see the top bar)' : !canGen(l) ? 'No source WAV or .fuz with this line\'s name. Turn on "Generate lines without a source with text-to-speech" in the Voice Changer banner to voice it.' : vc && !l.hasSource ? 'Generate with text-to-speech (no source file)' : vc ? 'Convert again (new take)' : 'Generate a new take (no confirmation for one line)',
+          disabled: l.omitted || !!app.job || !canGen(l), onclick: () => generate('selected', [l.lineId]) }, '↻')) },
     ].filter(Boolean),
   });
   grid.el.addEventListener('selection', () => renderActions());
@@ -476,7 +477,7 @@ export async function patchView(id) {
     clear(tagbar);
     if (vc) {
       tagbar.append(h('span.lbl', 'Voice Changer'),
-        h('span.dim', 'The source recording decides the delivery. The text column is only used for the .lip, so edit it if the source says something different.'),
+        h('span.dim', 'The source recording decides the delivery. For converted lines the text column is only used for the .lip, so edit it if the source says something different. Lines without a source use it as text-to-speech when that is turned on.'),
         h('div.spacer'), columnsMenu(grid));
       return;
     }
@@ -532,7 +533,7 @@ export async function patchView(id) {
   }
 
   // ---- filters
-  const pendingLine = (l) => !l.omitted && (l.status === 'Pending' || l.status === 'Failed') && (!vc || l.hasSource);
+  const pendingLine = (l) => !l.omitted && (l.status === 'Pending' || l.status === 'Failed') && canGen(l);
   function counts() {
     const L = patch.lines;
     return {
@@ -578,7 +579,7 @@ export async function patchView(id) {
     clear(filters).append(chip('all', 'All'), chip('pending', vc ? 'To convert' : 'To generate'), chip('generated', vc ? 'Converted' : 'Generated'), chip('stale', 'Changed since take'),
       chip('failed', 'Failed'), chip('marked', '★ Marked'),
       chip('omitted', 'Omitted', 'Left out because a ticked reference topic file (e.g. the base game pack) already has the line'),
-      vc ? chip('nosource', 'No source WAV') : chip('differs', 'Spoken ≠ in-game'), chip('p1', 'Edited in Phase 1'),
+      vc ? chip('nosource', 'No source file') : chip('differs', 'Spoken ≠ in-game'), chip('p1', 'Edited in Phase 1'),
       c.suggestions ? chip('suggestions', '✨ Suggestions') : null, h('div.spacer'), q,
       h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp2', showInsp); split.classList.toggle('no-insp', !showInsp); renderCounts(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel'));
   }
@@ -590,7 +591,7 @@ export async function patchView(id) {
     if (!l) {
       insp.append(h('h3', 'Line'), h('div.dim', 'Click a row to see it in full. Double-click plays the selected take.'),
         h('div.help',
-          vc ? h('p', 'Each line is converted from the source WAV with the same name (Legacy or DBVO 2.0). A new .lip is always made from the text, so it matches any edits.')
+          vc ? h('p', 'Voice Changer: each line is converted from the source WAV or .fuz with the same name (Legacy or DBVO 2.0). A new .lip is always made from the text, so it matches any edits. Lines without a source are muted unless text-to-speech for them is turned on.')
             : h('p', h('b', 'Filename'), ' comes from the in-game line set in Phase 1. ', h('b', 'Spoken text'), ' is what the voice says: edit it in the list or here, and put [tags] anywhere. ↺ restores the in-game line.'),
           h('p', 'Tick rows for one-off selections; ★ marks stay until you remove them, so you can collect lines to redo and generate them together.'),
           vc ? null : h('p', 'Tag buttons insert at the cursor of the box you are typing in. With rows ticked instead, they go at the start of each ticked line.'),
@@ -613,7 +614,7 @@ export async function patchView(id) {
           vc || engine() !== 'elevenlabs' ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.omitted, onclick: () => autotag([l.lineId]) }, '✨ Auto-tag'),
           l.spokenEdited ? h('button.btn.sm.ghost', { title: 'Put the in-game line back as the spoken text', onclick: () => upd(l, 'resetSpoken') }, '↺ Restore in-game line') : null,
           h('div.spacer'),
-          h('button.btn.sm.primary', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running' : vc && !l.hasSource ? 'No source file for this line' : 'Make a new take of this line', disabled: l.omitted || !!app.job || (vc && !l.hasSource), onclick: () => generate('selected', [l.lineId]) }, l.takes.length ? 'New take' : vc ? 'Convert' : 'Generate'))),
+          h('button.btn.sm.primary', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running' : !canGen(l) ? 'No source file for this line (text-to-speech for such lines is off)' : 'Make a new take of this line', disabled: l.omitted || !!app.job || !canGen(l), onclick: () => generate('selected', [l.lineId]) }, l.takes.length ? 'New take' : vc ? 'Convert' : 'Generate'))),
       l.tagSuggestion ? h('div.box', h('div.field-label', 'AI suggestion'), h('div', diffAdded(l.spoken, l.tagSuggestion)),
         h('div.row', { style: { marginTop: '6px' } }, h('button.btn.sm.primary', { title: 'Keep the suggested tags', onclick: () => upd(l, 'acceptTags') }, 'Accept'), h('button.btn.sm', { title: 'Go back to the text before tagging', onclick: () => upd(l, 'rejectTags') }, 'Undo'))) : null,
       l.omittedBy ? switchEl(l.overrideOmit, (v) => upd(l, 'overrideOmit', v), `Generate anyway (it is in "${l.omittedBy}")`) : null,
@@ -640,10 +641,10 @@ export async function patchView(id) {
     const verb = vc ? 'Convert' : 'Generate';
     const exp = h('button.btn', { disabled: busy, title: 'Write WAV + LIP files and build .fuz files' }, 'Export ▾');
     exp.addEventListener('click', () => popupMenu(exp, [
-      { label: 'WAV + LIP to the WAV + LIP folder', sub: vc ? 'The converted takes' : 'Also writes the DBVO Fix plugins and topic file to their folders', onclick: exportWavLip },
-      { label: 'Build .fuz into the final folder', sub: vc ? 'The converted takes as .fuz' : 'Also writes the DBVO Fix plugins and topic file', onclick: () => buildFuz(false) },
+      { label: 'WAV + LIP to the WAV + LIP folder', sub: 'Also writes the DBVO Fix plugins and topic file to their folders', onclick: exportWavLip },
+      { label: 'Build .fuz into the final folder', sub: 'Also writes the DBVO Fix plugins and topic file', onclick: () => buildFuz(false) },
       { label: 'Build .fuz to another folder…', sub: 'Only the .fuz files', onclick: () => buildFuz(true) },
-      vc ? null : { label: 'Only DBVO Fix plugins + topic file', onclick: writeFix },
+      { label: 'Only DBVO Fix plugins + topic file', onclick: writeFix },
     ].filter(Boolean)));
     const takesBtn = h('button.btn', { disabled: busy, title: 'Clean up takes you no longer need' }, 'Takes ▾');
     takesBtn.addEventListener('click', () => popupMenu(takesBtn, [
@@ -690,7 +691,9 @@ export async function patchView(id) {
       let rows;
       let missingVoice = !est.voiceId;
       if (est.kind === 'vc') {
-        rows = [['Lines', est.count], ['Source audio (billed by length)', `${est.seconds.toFixed(0)} s ≈ ${(est.seconds / 60).toFixed(1)} min`],
+        rows = [['Converted (speech-to-speech)', est.srcCount],
+          ...(est.ttsCount ? [['Text-to-speech (no source file)', `${est.ttsCount} line(s) · ${est.ttsCharacters.toLocaleString()} characters ≈ credits · ${est.ttsEngine}${est.ttsVoice ? ' · ' + est.ttsVoice : ''}`]] : []),
+          ['Source audio (billed by length)', `${est.seconds.toFixed(0)} s ≈ ${(est.seconds / 60).toFixed(1)} min`],
           ['Target voice', est.voice || est.voiceId || '— none —'], ['Model', est.model], ['Stability', est.stability], ['Similarity', est.similarity], ['Style', est.style],
           ['Speaker boost', est.speakerBoost ? 'ON' : 'off'], ['Remove background noise', est.removeBackgroundNoise ? 'ON' : 'off'], ['Seed', est.seed ?? 'random'],
           ['Output format', est.outputFormat], ['Concurrent requests', est.concurrency], ['Loudness normalization', est.loudnorm ? 'ON' : 'off'], ['Gain', est.gainDb + ' dB'],
@@ -761,9 +764,17 @@ export async function patchView(id) {
       const eng = engine();
       const missing = [(eng === 'elevenlabs' || eng === 'sts') && !t.apiKey && 'ElevenLabs API key', !t.ffmpeg && 'ffmpeg.exe', !t.faceFx && 'FaceFXWrapper.exe', !t.fonix && 'FonixData.cdf', !t.xwma && 'xWMAEncode.exe (for .fuz)'].filter(Boolean);
       if (missing.length) banners.append(h('div.banner.bad', h('span', 'Missing: ' + missing.join(', ')), h('div.spacer'), h('button.btn.sm', { title: 'Set the tool paths', onclick: () => go('settings', { tab: 'general' }) }, 'Open Global Settings')));
-      const unset = [!patch.wavLipFolder && 'WAV + LIP folder', !patch.finalRoot && 'final folder', !vc && !patch.fixFolder && 'DBVO Fix folder', vc && !patch.sourceFolders.length && 'source WAV folder'].filter(Boolean);
+      const unset = [!patch.wavLipFolder && 'WAV + LIP folder', !patch.finalRoot && 'final folder', !patch.fixFolder && 'DBVO Fix folder', vc && !patch.sourceFolders.length && 'source WAV folder'].filter(Boolean);
       if (unset.length) banners.append(h('div.banner.warn', h('span', 'Not set for this patch: ' + unset.join(', ') + '.'), h('div.spacer'), h('button.btn.sm', { title: 'Choose where files go for this patch', onclick: openOptions }, 'Set folders')));
       for (const w of c.pathWarnings) banners.append(h('div.banner.warn', h('b', 'Path length: '), h('span', `${w.where} reaches ${w.length} of ${w.limit} characters with the longest line — tools like Yakitori fail past 260.`), h('div.spacer'), h('button.btn.sm', { onclick: openOptions }, 'Shorten folders')));
+      if (vc) {
+        const noSrc = patch.lines.filter((l) => !l.omitted && !l.hasSource).length;
+        banners.append(h('div.banner.info', h('div.col', { style: { gap: '4px' } },
+          h('span', h('b', 'Voice Changer is on. '), 'Lines are converted from another voice pack\'s recordings of this mod (the source folders in Folders & options), so delivery and timing come from the source. Only worth it when the mod is already DBVO-patched with another voice.'),
+          noSrc ? h('span', h('b', `${noSrc} line(s) have no source file`), ' — usually lines added by a mod update after the source pack was made, or lines it never voiced. Generate them with text-to-speech (the voice pack\'s ', h('b', voice.engine === 'elevenlabs' ? 'ElevenLabs' : voice.engine), ' settings; turn the Voice Changer off to adjust those), or leave them unvoiced.') : h('span.dim', 'Every line has a source file.')),
+          h('div.spacer'),
+          noSrc ? switchEl(!!patch.ttsForMissing, async (on) => { try { patch = await rpc('patch.saveMeta', { id, ttsForMissing: on }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Generate lines without a source with text-to-speech', { title: 'Off: lines without a source stay unvoiced. On: Generate missing also voices them with text-to-speech.' }) : null));
+      }
       if (c.fuzOnly) banners.append(h('div.banner.info', h('span', `${c.fuzOnly} line(s) have no WAV + LIP here but a .fuz in the final folder. Import them as takes so they count as done and can be played.`),
         h('div.spacer'), h('button.btn.sm', { title: 'Unpack the .fuz files into WAV + LIP takes so they show as generated', disabled: !!app.job, onclick: async () => { try { await rpc('patch.importFuz', { id }); } catch (e) { fail(e); } } }, 'Import from .fuz')));
       if (c.unreviewed.length) banners.append(h('div.banner.warn', h('span', 'Flagged lines not reviewed in Phase 1: ' + c.unreviewed.map((u) => `${u.plugin} (${u.count})`).join(', ')),
@@ -779,11 +790,11 @@ export async function patchView(id) {
       try { const r = await rpc('patch.switchVoice', { id, voicePackId: voiceSel.value }); go('patch', { id: r.id }); } catch (e) { fail(e); }
     });
     clear(head).append(
-      h('button.btn.ghost.sm', { onclick: () => go(vc ? 'vc' : 'patches') }, vc ? '← Voice Changer' : '← DBVO Patches'),
+      h('button.btn.ghost.sm', { onclick: () => go('patches') }, '← DBVO Patches'),
       h('h1', patch.name),
       voiceChip(voice.name, voice.color),
       h('span.badge.b-skip', patch.category),
-      vc ? h('span.badge.b-player', 'Voice Changer') : null,
+      switchEl(vc, (on) => toggleVc(on), 'Voice Changer', { title: 'Convert another voice pack\'s WAV / .fuz files of this mod into this voice (ElevenLabs speech-to-speech) instead of text-to-speech. Only useful when the mod is already DBVO-patched with another voice.' }),
       h('div.spacer'),
       h('span.faint', 'Voice pack'),
       voiceSel,
@@ -791,7 +802,7 @@ export async function patchView(id) {
       h('span.faint', voice.naming === 'Legacy' ? 'Legacy names' : 'DBVO 2.0 hash names'),
       h('button.btn.sm', { title: 'Output folders, DBVO Fix folder, reference topic files and overwrite options', onclick: openOptions }, 'Folders & options…'),
       h('button.btn.sm.ghost', { title: 'Re-read Phase 1 now (also happens every time you open this patch)', onclick: sync }, '⟳ Refresh from Phase 1'),
-      h('button.btn.sm.ghost.danger', { title: 'Delete this patch and its takes', onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes its takes too. Files already exported stay where they are. A backup of the project is made first.', 'Delete', true)) { await rpc('patch.delete', { id }); go(vc ? 'vc' : 'patches'); } } }, 'Delete'));
+      h('button.btn.sm.ghost.danger', { title: 'Delete this patch and its takes', onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes its takes too. Files already exported stay where they are. A backup of the project is made first.', 'Delete', true)) { await rpc('patch.delete', { id }); go('patches'); } } }, 'Delete'));
   }
 
   async function sync() {
@@ -805,6 +816,37 @@ export async function patchView(id) {
       const rep = r.report;
       toast(`${rep.total} lines · ${rep.added} new · ${rep.removed} removed · ${rep.omitted} omitted${rep.stale ? ` · ${rep.stale} changed since take` : ''}`);
     } catch (e) { fail(e); }
+  }
+
+  async function toggleVc(on) {
+    if (app.job) { toast('Wait for the running job, or cancel it.', true); renderHead(); return; }
+    try {
+      if (!on) {
+        if (!(await confirmBox('Turn off the Voice Changer?', 'Lines are generated with text-to-speech again. Converted takes stay as they are, and the source folders are remembered for later.', 'Turn off'))) { renderHead(); return; }
+        await rpc('patch.saveMeta', { id, kind: 'tts' });
+        go('patch', { id });
+        return;
+      }
+      const sources = [...(patch.sourceFolders || [])];
+      const srcList = h('div.col');
+      const renderSrc = () => clear(srcList).append(sources.length ? sources.map((f, i) => h('div.row', h('span.mono.grow.ellipsis', f), h('button.icon-btn', { title: 'Remove this folder', onclick: () => { sources.splice(i, 1); renderSrc(); } }, '×'))) : h('div.faint', 'No folder yet.'));
+      renderSrc();
+      const ok = await modal('Turn on the Voice Changer?', [
+        h('div.help',
+          h('p', 'The Voice Changer converts recordings that ', h('b', 'another voice pack'), ' already has for this mod into this voice (ElevenLabs speech-to-speech). Delivery, emotion and timing come from the source; only the voice changes. A new .lip is made from the text.'),
+          h('p', h('b', 'Use it only when this mod is already DBVO-patched with another voice. '), 'Lines that pack never recorded have nothing to convert, so they would stay missing. Typical gaps are lines added by a mod update after the source pack was made. You can generate those with text-to-speech, or leave them unvoiced.'),
+          h('p', 'Billed by audio length instead of characters. Existing takes stay; the DBVO Fix plugin and topic file are written as usual.')),
+        h('div.col', h('div.field-label', 'Source folders: the other voice pack\'s WAV or .fuz files for this mod'), srcList,
+          h('button.btn.sm', { style: { alignSelf: 'flex-start' }, title: 'Searched with sub-folders; files are matched by Legacy and DBVO 2.0 names', onclick: async () => { const f = await rpc('pick.folder', { title: 'Folder with the other voice pack\'s WAV or .fuz files' }); if (f) { sources.push(f); renderSrc(); } } }, '+ Add folder')),
+      ], [{ label: 'Cancel', value: false }, { label: 'Turn on', primary: true, value: true }]);
+      if (!ok) { renderHead(); return; }
+      if (!sources.length) { toast('Add at least one source folder.', true); renderHead(); return; }
+      await rpc('patch.saveMeta', { id, kind: 'vc', sourceFolders: sources });
+      const r = await rpc('patch.matchSources', { id });
+      const miss = r.total - r.found;
+      toast(`${r.found} of ${r.total} lines have a source file.` + (miss ? ` ${miss} without one can be generated with text-to-speech (see the banner).` : ''), miss > 0);
+      go('patch', { id });
+    } catch (e) { fail(e); renderHead(); }
   }
 
   async function openOptions() {
@@ -828,12 +870,12 @@ export async function patchView(id) {
     renderSrc();
     const ok = await modal(h('span.row', 'Folders & options — ', voiceChip(voice.name + ' voice pack', voice.color)), [
       h('div.col', h('div.field-label', 'Name'), name),
-      vc ? h('div.col', h('div.field-label', 'Source WAV folders (another voice pack)'), srcList,
+      vc ? h('div.col', h('div.field-label', 'Voice Changer source folders (another voice pack\'s WAV / .fuz files for this mod)'), srcList,
         h('button.btn.sm', { style: { alignSelf: 'flex-start' }, onclick: async () => { const f = await rpc('pick.folder', { title: 'Folder with the source WAV files' }); if (f) { sources.push(f); renderSrc(); } } }, '+ Add folder'),
         h('div.faint', 'Searched with sub-folders; matched by Legacy and DBVO 2.0 names.')) : null,
       h('div.col', h('div.field-label', 'WAV + LIP folder'), wl.el, h('div.faint', 'Export copies the chosen takes here as .wav + .lip.')),
-      vc ? null : h('div.col', h('div.field-label', 'DBVO Fix plugin + topic file folder'), fx.el, h('div.faint', 'Your working copy of the DBVO Fix plugins and the topic file, kept apart from the WAV + LIP files. Written by Export and Build .fuz.')),
-      h('div.col', h('div.field-label', 'Final folder'), fr.el, h('div.faint', 'The release (FOMOD) folder. .fuz files go into the sub-folder below' + (vc ? '.' : '; the DBVO Fix plugins go next to each mod\'s Sound folder, ready for Phase 3.'))),
+      h('div.col', h('div.field-label', 'DBVO Fix plugin + topic file folder'), fx.el, h('div.faint', 'Your working copy of the DBVO Fix plugins and the topic file, kept apart from the WAV + LIP files. Written by Export and Build .fuz.')),
+      h('div.col', h('div.field-label', 'Final folder'), fr.el, h('div.faint', 'The release (FOMOD) folder. .fuz files go into the sub-folder below; the DBVO Fix plugins go next to each mod\'s Sound folder, ready for Phase 3.')),
       h('div.col', h('div.field-label', '.fuz sub-folder inside the final folder'), tpl, h('div.faint', 'Placeholders: {packId} {voicePack} {mod} {patch}, e.g. Vamp - {mod}\\Sound\\DBVO\\{packId}.')),
       h('div.col', h('div.field-label', 'Overwrite'),
         switchEl(owWav, (v) => { owWav = v; }, 'Overwrite WAV + LIP files already in the folder'),

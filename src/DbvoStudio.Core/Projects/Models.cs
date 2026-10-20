@@ -418,8 +418,11 @@ public sealed class DbvoPatch
     public string FixFolder { get; set; } = "";
     public bool OverwriteWavLip { get; set; }
     public bool OverwriteFuz { get; set; }
-    /// <summary>"tts" = a normal DBVO Patch; "vc" = a Voice Changer patch (speech-to-speech from another voice pack's WAVs).</summary>
+    /// <summary>"tts" = text-to-speech; "vc" = the Voice Changer toggle is on (speech-to-speech from another voice pack's WAV / .fuz files).</summary>
     public string Kind { get; set; } = "tts";
+    /// <summary>With the Voice Changer on: lines without a source file are generated with the voice pack's text-to-speech engine.</summary>
+    public bool TtsForMissing { get; set; }
+    [JsonIgnore] public bool VoiceChanger => Kind == "vc";
     /// <summary>Voice Changer: folders holding the source voice pack's WAV files (searched with sub-folders).</summary>
     public List<string> SourceFolders { get; set; } = new();
     /// <summary>When .fuz files were last built, and how many.</summary>

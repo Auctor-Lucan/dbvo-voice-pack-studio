@@ -26,7 +26,7 @@ export function go(view, params = {}) {
   render();
 }
 
-const SECTION = { mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches', fomods: 'fomods', fomod: 'fomods', settings: 'settings', voices: 'settings', wavlip: 'tools', vc: 'tools' };
+const SECTION = { mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches', fomods: 'fomods', fomod: 'fomods', settings: 'settings', voices: 'settings', wavlip: 'tools', vc: 'patches' };
 
 export async function render() {
   const section = SECTION[app.route.view] || 'mods';
@@ -39,7 +39,7 @@ export async function render() {
     switch (app.route.view) {
       case 'mod': view = await modView(app.route.id); break;
       case 'patches': view = await patchesView('tts'); break;
-      case 'vc': view = await patchesView('vc'); break;
+      case 'vc': view = await patchesView(); break; // the Voice Changer is now a toggle inside each patch
       case 'patch': view = await patchView(app.route.id); break;
       case 'fomods': view = await fomodsView(); break;
       case 'fomod': view = await fomodView(app.route.id); break;
@@ -62,7 +62,6 @@ document.querySelector('[data-section="settings"]').addEventListener('click', ()
 const toolsBtn = document.getElementById('tools-btn');
 toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [
   { label: 'WAV to LIP', sub: 'Whisper listens to WAV files and makes matching .lip files', onclick: () => go('wavlip') },
-  { label: 'Voice Changer', sub: 'Revoice another voice pack\'s WAV files (speech-to-speech), like Phase 2', onclick: () => go('vc') },
 ]));
 
 // ---- background jobs (generation, .fuz, FOMOD, WAV to LIP)

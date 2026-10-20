@@ -261,7 +261,7 @@ public sealed class Phase2Service
     {
         var only = onlyLineIds?.ToHashSet();
         return patch.Lines.Where(l => !l.IsOmitted)
-            .Where(l => patch.Kind != "vc" || l.SourceWav != null)
+            .Where(l => patch.Kind != "vc" || l.SourceWav != null || patch.TtsForMissing)
             .Where(l => only == null || only.Contains(l.LineId))
             .Where(l => regenerate || only != null || l.Status is Phase2Status.Pending or Phase2Status.Failed or Phase2Status.Stale)
             .ToList();
@@ -308,10 +308,10 @@ public sealed class Phase2Service
     /// <param name="stateGate">Lock shared with any other code that edits or saves the same patch object.</param>
     public async Task GenerateAsync(DbvoPatch patch, VoicePack voice, IReadOnlyList<Phase2Line> lines, ExternalTools tools,
         IProgress<GenerationProgress>? progress = null, Func<Phase2Line, Task>? onLineDone = null, CancellationToken ct = default,
-        SemaphoreSlim? stateGate = null)
+        SemaphoreSlim? stateGate = null, string? engineOverride = null)
     {
         bool vc = patch.Kind == "vc";
-        string engine = vc ? "sts" : voice.Engine;
+        string engine = engineOverride ?? (vc ? "sts" : voice.Engine);
         var es = voice.Eleven.Clone();
         var sts = voice.Sts;
         var pronunciations = MergePronunciations(_settings.Pronunciations, voice.Pronunciations);

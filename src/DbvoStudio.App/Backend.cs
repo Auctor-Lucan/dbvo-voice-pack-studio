@@ -286,8 +286,8 @@ public sealed partial class Backend
                     var vid = S(p, "voicePackId", _settings.LastVoicePackId ?? "");
                     var voice = voices.FirstOrDefault(v => v.Id == vid) ?? voices[0];
                     var modId = S(p, "modId");
-                    var existing = _lib.LoadPatches().FirstOrDefault(x => x.Kind != "vc" && x.VoicePackId == voice.Id && x.ModIds.Count == 1 && x.ModIds[0] == modId)
-                                   ?? _lib.LoadPatches().FirstOrDefault(x => x.Kind != "vc" && x.VoicePackId == voice.Id && x.ModIds.Contains(modId));
+                    var existing = _lib.LoadPatches().FirstOrDefault(x => x.VoicePackId == voice.Id && x.ModIds.Count == 1 && x.ModIds[0] == modId)
+                                   ?? _lib.LoadPatches().FirstOrDefault(x => x.VoicePackId == voice.Id && x.ModIds.Contains(modId));
                     var patch = existing != null ? LoadPatch(existing.Id) : CreatePatch(voice, new List<string> { modId }, "", null);
                     return new { needVoicePack = false, id = (string?)patch.Id };
                 });
@@ -298,7 +298,7 @@ public sealed partial class Backend
                     var cur = LoadPatch(S(p, "id"));
                     var voice = LoadVoice(S(p, "voicePackId"));
                     var set = cur.ModIds.OrderBy(x => x).ToList();
-                    var existing = _lib.LoadPatches().FirstOrDefault(x => x.Kind == cur.Kind && x.VoicePackId == voice.Id && x.ModIds.OrderBy(y => y).SequenceEqual(set));
+                    var existing = _lib.LoadPatches().FirstOrDefault(x => x.VoicePackId == voice.Id && x.ModIds.OrderBy(y => y).SequenceEqual(set));
                     var patch = existing != null ? LoadPatch(existing.Id) : CreatePatch(voice, cur.ModIds.ToList(), "", cur.ReferenceIds.ToList(), cur.Kind, cur.SourceFolders.ToList());
                     _settings.LastVoicePackId = voice.Id;
                     _lib.Save(_settings);
@@ -317,6 +317,8 @@ public sealed partial class Backend
                     patch.FuzTemplate = S(p, "fuzTemplate", patch.FuzTemplate);
                     patch.FixFolder = S(p, "fixFolder", patch.FixFolder);
                     if (p.TryGetProperty("sourceFolders", out _)) patch.SourceFolders = Strings(p, "sourceFolders");
+                    if (p.TryGetProperty("kind", out _)) patch.Kind = S(p, "kind") == "vc" ? "vc" : "tts";
+                    if (p.TryGetProperty("ttsForMissing", out var tm) && tm.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.TtsForMissing = tm.GetBoolean();
                     if (p.TryGetProperty("overwriteWavLip", out var ow) && ow.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteWavLip = ow.GetBoolean();
                     if (p.TryGetProperty("overwriteFuz", out var of) && of.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteFuz = of.GetBoolean();
                     _lib.Save(patch);
@@ -762,7 +764,7 @@ public sealed partial class Backend
         return new
         {
             patch.Id, patch.Name, patch.VoicePackId, patch.ModIds, patch.ReferenceIds, patch.WavLipFolder, patch.FinalRoot, patch.FuzTemplate,
-            patch.OverwriteWavLip, patch.OverwriteFuz, patch.FixFolder, patch.Kind, patch.SourceFolders, patch.LastFuzUtc,
+            patch.OverwriteWavLip, patch.OverwriteFuz, patch.FixFolder, patch.Kind, patch.SourceFolders, patch.LastFuzUtc, patch.TtsForMissing,
             voiceName = voice?.Name ?? "", voiceColor = voice?.Color ?? "",
             category = mods.FirstOrDefault(m => patch.ModIds.Contains(m.Id))?.Category ?? "Misc",
             mediaBase = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, _lib.PatchFolder(patch.Id)).Replace('\\', '/') + "/",
@@ -870,13 +872,17 @@ public sealed partial class Backend
         if (patch.Kind == "vc")
         {
             var st = voice.Sts;
-            double seconds = lines.Sum(l => l.SourceWav == null ? 0 : Phase2Service.WavSeconds(l.SourceWav));
+            var tts = lines.Where(l => l.SourceWav == null).ToList();
+            lines = lines.Where(l => l.SourceWav != null).ToList();
+            double seconds = lines.Sum(l => Phase2Service.WavSeconds(l.SourceWav!));
             return new
             {
-                kind = "vc", count = lines.Count, seconds, voice = st.VoiceName, voiceId = st.VoiceId, model = st.ModelId, st.OutputFormat, st.Concurrency, st.Seed,
+                kind = "vc", count = lines.Count + tts.Count, srcCount = lines.Count, seconds, voice = st.VoiceName, voiceId = st.VoiceId, model = st.ModelId, st.OutputFormat, st.Concurrency, st.Seed,
                 st.Stability, st.Similarity, st.Style, st.SpeakerBoost, st.RemoveBackgroundNoise,
                 voice.Loudnorm, voice.GainDb, voice.TrimTailMs, voice.FadeOutMs, naming = voice.Naming.ToString(),
                 missingSource = patch.Lines.Count(l => !l.IsOmitted && l.SourceWav == null),
+                ttsCount = tts.Count, ttsCharacters = tts.Sum(l => l.Spoken.Length), ttsEngine = voice.Engine,
+                ttsVoice = voice.Engine == "voxcpm" ? voice.VoxCpm.Voice : voice.Engine == "omnivoice" ? voice.OmniVoice.Voice : voice.Eleven.VoiceName,
             };
         }
         if (voice.Engine is "voxcpm" or "omnivoice")
@@ -935,7 +941,16 @@ public sealed partial class Backend
                 var svc = new Phase2Service(_lib, Runtime());
                 var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "generate", g.Done, g.Total, g.Failed, g.Current, g.Message }));
                 Emit("progress", new { kind = "generate", done = 0, total = lines.Count, failed = 0, current = (string?)null, message = (string?)null });
-                await svc.GenerateAsync(patch, voice, lines, Tools(), progress, l => { Emit("line2", new { patchId = patch.Id, line = Line2Dto(l, voice) }); return Task.CompletedTask; }, ct, _gate);
+                Task OnLine(Phase2Line l) { Emit("line2", new { patchId = patch.Id, line = Line2Dto(l, voice) }); return Task.CompletedTask; }
+                if (patch.Kind == "vc")
+                {
+                    // Voice Changer on: lines with a source are converted; the rest (only when allowed) use text-to-speech.
+                    var src = lines.Where(l => l.SourceWav != null).ToList();
+                    var tts = lines.Where(l => l.SourceWav == null).ToList();
+                    if (src.Count > 0) await svc.GenerateAsync(patch, voice, src, Tools(), progress, OnLine, ct, _gate, "sts");
+                    if (tts.Count > 0) await svc.GenerateAsync(patch, voice, tts, Tools(), progress, OnLine, ct, _gate, voice.Engine);
+                }
+                else await svc.GenerateAsync(patch, voice, lines, Tools(), progress, OnLine, ct, _gate);
                 Emit("jobDone", new { kind = "generate", patchId = patch.Id, ok = true });
             }
             catch (OperationCanceledException)
@@ -1003,7 +1018,6 @@ public sealed partial class Backend
     /// </summary>
     private List<string> WriteFixAndTopics(DbvoPatch patch)
     {
-        if (patch.Kind == "vc") return new List<string>();
         var svc1 = new Phase1Service(_lib, Runtime());
         var voice = LoadVoice(patch.VoicePackId);
         if (string.IsNullOrWhiteSpace(patch.FixFolder) && string.IsNullOrWhiteSpace(patch.FinalRoot))
@@ -1035,7 +1049,6 @@ public sealed partial class Backend
             Kind = kind == "vc" ? "vc" : "tts",
             SourceFolders = sourceFolders ?? new List<string>(),
         };
-        if (patch.Kind == "vc" && string.IsNullOrWhiteSpace(name)) patch.Name = modName + " (Voice Changer)";
         string Expand(string t) => string.IsNullOrWhiteSpace(t) ? "" : Phase2Service.ExpandTemplate(t, modName, voice, patch);
         patch.WavLipFolder = Expand(voice.Destinations.WavLipFolder);
         patch.FinalRoot = Expand(voice.Destinations.FinalRoot);

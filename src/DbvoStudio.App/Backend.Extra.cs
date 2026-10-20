@@ -323,7 +323,7 @@ public sealed partial class Backend
         var warnings = new List<string>();
         if (string.IsNullOrWhiteSpace(x.WavLipFolder)) warnings.Add("WAV + LIP folder not set");
         if (string.IsNullOrWhiteSpace(x.FinalRoot)) warnings.Add("Final folder not set");
-        if (x.Kind != "vc" && string.IsNullOrWhiteSpace(x.FixFolder)) warnings.Add("DBVO Fix folder not set");
+        if (string.IsNullOrWhiteSpace(x.FixFolder)) warnings.Add("DBVO Fix folder not set");
         if (x.Kind == "vc" && x.SourceFolders.Count == 0) warnings.Add("No source WAV folder");
         if (voice != null && voice.Naming == NamingMode.Legacy && !string.IsNullOrWhiteSpace(x.FinalRoot))
         {
@@ -332,7 +332,7 @@ public sealed partial class Backend
             var pw = PathChecks.Check(x.Lines.Where(l => !l.IsOmitted).Select(l => l.FinalLine), voice.Naming, x.WavLipFolder, fuz, Path.Combine(_lib.PatchFolder(x.Id), "takes"));
             if (pw.Count > 0) warnings.Add("Path too long: " + string.Join(", ", pw.Select(w => w.Where).Distinct()));
         }
-        var pending = x.Lines.Where(l => !l.IsOmitted && l.SelectedTakeId == null && (x.Kind != "vc" || l.SourceWav != null)).ToList();
+        var pending = x.Lines.Where(l => !l.IsOmitted && l.SelectedTakeId == null && (x.Kind != "vc" || l.SourceWav != null || x.TtsForMissing)).ToList();
         return new
         {
             x.Id, x.Name, x.VoicePackId, x.ModIds, x.ReferenceIds, x.UpdatedUtc, x.Kind,
@@ -345,8 +345,8 @@ public sealed partial class Backend
             failed = x.Lines.Count(l => l.Status == Phase2Status.Failed),
             omitted = x.Lines.Count(l => l.IsOmitted),
             unreviewed = its.Sum(m => m.Plugins.Sum(pl => Phase1Service.UnreviewedFlags(pl).Count)),
-            charsLeft = x.Kind == "vc" ? 0 : pending.Sum(l => l.Spoken.Length),
-            secondsLeft = x.Kind == "vc" ? pending.Count : 0,
+            charsLeft = pending.Where(l => x.Kind != "vc" || l.SourceWav == null).Sum(l => l.Spoken.Length),
+            secondsLeft = x.Kind == "vc" ? pending.Count(l => l.SourceWav != null) : 0,
             noSource = x.Kind == "vc" ? x.Lines.Count(l => !l.IsOmitted && l.SelectedTakeId == null && l.SourceWav == null) : 0,
             warnings,
         };
