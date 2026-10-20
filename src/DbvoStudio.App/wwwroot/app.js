@@ -69,7 +69,8 @@ const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to L
 on('progress', (p) => {
   app.job = p;
   jobEl.classList.remove('hidden');
-  jobEl.querySelector('.job-label').textContent = `${LABEL[p.kind] || 'Working'} ${p.done}/${p.total}${p.failed ? ` · ${p.failed} failed` : ''}`;
+  jobEl.querySelector('.job-label').textContent = `${(p.kind === 'fomod' && p.message) || LABEL[p.kind] || 'Working'} ${p.done}/${p.total}${p.failed ? ` · ${p.failed} failed` : ''}`;
+  jobEl.title = p.current || '';
   jobEl.querySelector('.bar-fill').style.width = (p.total ? (100 * p.done) / p.total : 0) + '%';
   document.dispatchEvent(new CustomEvent('job-progress', { detail: p }));
 });

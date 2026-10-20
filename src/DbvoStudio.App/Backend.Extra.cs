@@ -438,7 +438,7 @@ public sealed partial class Backend
                 var errors = svc.Validate(proj).Where(i => i.Level == "error" && !i.Message.StartsWith("Missing", StringComparison.Ordinal)).ToList();
                 if (errors.Count > 0) throw new InvalidOperationException("Fix these first: " + string.Join(" · ", errors.Take(5).Select(e => $"{e.Where}: {e.Message}")));
                 _lib.Backup("before-fomod-build", _settings.BackupsToKeep);
-                var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "fomod", g.Done, g.Total, g.Failed, g.Current }));
+                var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "fomod", g.Done, g.Total, g.Failed, g.Current, g.Message }));
                 var res = await svc.BuildAsync(proj, voice?.Naming ?? NamingMode.Legacy, package, progress, ct);
                 await _gate.WaitAsync();
                 try { _lib.Save(proj); } finally { _gate.Release(); }

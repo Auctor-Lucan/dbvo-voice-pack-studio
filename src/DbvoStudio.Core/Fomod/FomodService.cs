@@ -519,48 +519,85 @@ public sealed class FomodService
         await File.WriteAllBytesAsync(Path.Combine(staging, "fomod", "ModuleConfig.xml"), FomodXml.Encode(moduleConfig, p.Encoding), ct);
         await File.WriteAllBytesAsync(Path.Combine(staging, "fomod", "info.xml"), FomodXml.Encode(info, p.Encoding), ct);
 
-        // Copy (hardlink) everything. Duplicate files across options are linked, never copied twice.
-        int done = 0;
+        // Copy (hardlink) everything. First list every file, so progress counts files, not options.
+        // Lists are taken before copying, and nothing inside the release folder is ever picked up
+        // (a release folder inside the FOMOD root would otherwise be copied into itself).
+        var releaseFull = Path.GetFullPath(p.ReleaseFolder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        bool InRelease(string f) => Path.GetFullPath(f).StartsWith(releaseFull, StringComparison.OrdinalIgnoreCase);
+        var pairs = new List<(string from, string to)>();
         foreach (var (from, to, folder) in jobs)
         {
             ct.ThrowIfCancellationRequested();
             if (folder || Directory.Exists(from))
             {
                 if (!Directory.Exists(from)) { res.Warnings.Add($"Missing folder skipped: {from}"); continue; }
-                foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
-                {
-                    var target = Path.Combine(to, Path.GetRelativePath(from, file));
-                    if (File.Exists(target)) continue;
-                    FileLinks.LinkOrCopy(file, target, true);
-                    res.Files++;
-                }
+                foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories).ToList())
+                    if (!InRelease(file)) pairs.Add((file, Path.Combine(to, Path.GetRelativePath(from, file))));
             }
-            else
-            {
-                if (!File.Exists(from)) { res.Warnings.Add($"Missing file skipped: {from}"); continue; }
-                if (!File.Exists(to)) { FileLinks.LinkOrCopy(from, to, true); res.Files++; }
-            }
-            progress?.Report(new GenerationProgress(++done, jobs.Count, 0, Path.GetFileName(from), null));
+            else if (!File.Exists(from)) res.Warnings.Add($"Missing file skipped: {from}");
+            else pairs.Add((from, to));
         }
+        int done = 0, copies = 0;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (from, to) in pairs)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (seen.Add(to) && !File.Exists(to))
+            {
+                if (FileLinks.LinkOrCopy(from, to, true)) res.Linked++; else copies++;
+                res.Files++;
+            }
+            if (++done % 25 == 0 || done == pairs.Count)
+                progress?.Report(new GenerationProgress(done, pairs.Count, 0, Path.GetFileName(from), "Staging files"));
+        }
+        if (copies > 0 && res.Linked == 0 && copies > 50)
+            res.Warnings.Add($"{copies} files were copied instead of hardlinked (the release folder is on another drive than the sources?). The build is correct, just slower and larger on disk.");
 
         if (package)
         {
             Directory.CreateDirectory(p.ReleaseFolder);
+            var all = Directory.EnumerateFiles(staging, "*", SearchOption.AllDirectories).ToList();
             if (p.ArchiveFormat == "7z")
             {
                 var exe = _settings.SevenZipPath;
                 if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe)) throw new InvalidOperationException("Set 7z.exe in Settings to build .7z archives, or choose .zip.");
                 var archive = Path.Combine(p.ReleaseFolder, archiveBase + ".7z");
                 if (File.Exists(archive)) File.Delete(archive);
-                var r = await ExternalTools.RunAsync(exe, new[] { "a", "-t7z", "-mx=9", "-y", archive, Path.Combine(staging, "*") }, ct, TimeSpan.FromHours(2));
+                progress?.Report(new GenerationProgress(0, all.Count, 0, null, "Packing with 7-Zip (no progress shown by 7-Zip)"));
+                var r = await ExternalTools.RunAsync(exe, new[] { "a", "-t7z", "-mx=7", "-mmt=on", "-y", archive, Path.Combine(staging, "*") }, ct, TimeSpan.FromHours(6));
                 if (r.ExitCode != 0 || !File.Exists(archive)) throw new InvalidOperationException("7-Zip failed: " + r.StdErr + r.StdOut);
                 res.Archive = archive;
             }
             else
             {
                 var archive = Path.Combine(p.ReleaseFolder, archiveBase + ".zip");
+                var tmp = archive + ".part";
+                if (File.Exists(tmp)) File.Delete(tmp);
+                try
+                {
+                    await Task.Run(() =>
+                    {
+                        using var zip = ZipFile.Open(tmp, ZipArchiveMode.Create);
+                        int n = 0;
+                        foreach (var file in all)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            var ext = Path.GetExtension(file).ToLowerInvariant();
+                            // .fuz / audio / images barely shrink: store them, compress only text and plugins.
+                            var level = ext is ".fuz" or ".xwm" or ".wav" or ".lip" or ".png" or ".jpg" or ".jpeg" or ".dds" or ".bsa" ? CompressionLevel.NoCompression : CompressionLevel.Fastest;
+                            zip.CreateEntryFromFile(file, Path.GetRelativePath(staging, file).Replace('\\', '/'), level);
+                            if (++n % 50 == 0 || n == all.Count)
+                                progress?.Report(new GenerationProgress(n, all.Count, 0, Path.GetFileName(file), "Packing .zip"));
+                        }
+                    }, ct);
+                }
+                catch
+                {
+                    try { File.Delete(tmp); } catch { }
+                    throw;
+                }
                 if (File.Exists(archive)) File.Delete(archive);
-                await Task.Run(() => ZipFile.CreateFromDirectory(staging, archive, CompressionLevel.Optimal, false), ct);
+                File.Move(tmp, archive);
                 res.Archive = archive;
             }
             p.LastArchive = res.Archive;
