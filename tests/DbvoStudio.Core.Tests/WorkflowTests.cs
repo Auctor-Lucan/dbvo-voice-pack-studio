@@ -38,7 +38,7 @@ public class WorkflowTests : IDisposable
     {
         b.AddTopic(0x01000800, "T1", "What is your homeland like? ", (0x01000801, null));
         b.AddTopic(0x01000802, "T2", "Can you build a portal?", (0x01000803, null));
-        b.AddTopic(0x01000804, "T3", "I'm <Alias=Player>, by the way.", (0x01000805, null));
+        b.AddTopic(0x01000804, "T3", "<Alias=Friend> sent me, by the way.", (0x01000805, null));
         b.AddTopic(0x01000806, "T4", "Follow me.", (0x01000807, null));
     }
 
@@ -60,7 +60,7 @@ public class WorkflowTests : IDisposable
         Assert.Equal(LineKind.Broken, broken.Kind);
         Assert.Null(broken.Final);
         Assert.Single(Phase1Service.UnreviewedFlags(plugin));
-        broken.Variants = new() { "I'm the Dragonborn, by the way." };
+        broken.Variants = new() { "Alvor sent me, by the way." };
         broken.Reviewed = true;
 
         // The user rewords a valid line.
@@ -68,7 +68,7 @@ public class WorkflowTests : IDisposable
         Phase1Service.SetFinal(follow, "Follow me, friend.");
         _lib.Save(mod);
 
-        Assert.Equal(new[] { "What is your homeland like?", "Can you build a portal?", "I'm the Dragonborn, by the way.", "Follow me, friend." }, Phase1Service.TopicLines(plugin));
+        Assert.Equal(new[] { "What is your homeland like?", "Can you build a portal?", "Alvor sent me, by the way.", "Follow me, friend." }, Phase1Service.TopicLines(plugin));
 
         // Only real changes go to the fix plugin; the unresolved alias line gets no override.
         var edits = Phase1Service.FixEdits(plugin);

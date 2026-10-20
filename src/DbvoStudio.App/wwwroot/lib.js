@@ -169,11 +169,15 @@ export const store = {
 
 /**
  * Virtual grid: renders only visible rows, so 10,000+ rows scroll smoothly.
- * columns: [{ title, width | flex, render(row, index) -> Node|string, cls }]
+ * columns: [{ id, title, width, min, flex, render(row, index) -> Node|string, cls, resizable }]
+ * Column widths can be dragged; they are remembered under `storageKey`.
  */
 export class VGrid {
-  constructor(container, { columns, rowHeight = 30, rowKey, rowClass, onRowClick, onRowDblClick }) {
-    this.columns = columns;
+  constructor(container, { columns, rowHeight = 34, rowKey, rowClass, onRowClick, onRowDblClick, storageKey }) {
+    this.columns = columns.map((c, i) => ({ id: c.id || String(i), min: 40, resizable: true, ...c, _orig: { width: c.width, flex: c.flex } }));
+    this.storageKey = storageKey;
+    const saved = storageKey ? store.get('cols:' + storageKey, {}) : {};
+    for (const c of this.columns) if (saved[c.id]) { c.width = saved[c.id]; c.flex = 0; }
     this.rowHeight = rowHeight;
     this.rowKey = rowKey;
     this.rowClass = rowClass;
@@ -183,35 +187,86 @@ export class VGrid {
     this.focusKey = null;
     this.selected = new Set();
     this.el = h('div.vgrid', { tabindex: 0 });
-    this.head = h('div.vgrid-head', columns.map((c) => this.cellFor(c, c.title || '')));
+    this.head = h('div.vgrid-head');
     this.body = h('div.vgrid-body');
     this.el.append(this.head, this.body);
     container.append(this.el);
+    this.renderHead();
     this.el.addEventListener('scroll', () => this.paint());
     new ResizeObserver(() => this.paint()).observe(this.el);
     this.el.addEventListener('keydown', (e) => this.key(e));
   }
 
-  cellFor(c, content) {
-    const cell = h('div.cell' + (c.flex ? '.flex' : '') + (c.cls ? '.' + c.cls : ''));
-    if (c.width) cell.style.width = c.width + 'px';
-    if (c.flex) cell.style.flex = c.flex;
-    if (content instanceof Node) cell.append(content);
-    else cell.textContent = content;
-    return cell;
+  sizeCell(cell, c) {
+    if (c.flex) { cell.style.flex = `${c.flex} 1 ${c.width || 120}px`; cell.style.minWidth = (c.min || 80) + 'px'; }
+    else { cell.style.flex = '0 0 auto'; cell.style.width = (c.width || 100) + 'px'; }
+  }
+
+  renderHead() {
+    clear(this.head);
+    for (const c of this.columns) {
+      const cell = h('div.cell', c.title || '');
+      this.sizeCell(cell, c);
+      if (c.resizable && c.title) {
+        const grip = h('div.resizer', { title: 'Drag to resize. Double-click to reset.' });
+        grip.addEventListener('mousedown', (e) => this.startResize(e, c, cell, grip));
+        grip.addEventListener('dblclick', () => this.resetColumns());
+        cell.append(grip);
+      }
+      this.head.append(cell);
+    }
+  }
+
+  startResize(e, c, cell, grip) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = cell.getBoundingClientRect().width;
+    grip.classList.add('drag');
+    const move = (ev) => {
+      c.width = Math.max(c.min || 40, Math.round(startW + ev.clientX - startX));
+      c.flex = 0;
+      this.sizeCell(cell, c);
+      this.body.querySelectorAll('.vrow').forEach((r) => this.sizeCell(r.children[this.columns.indexOf(c)], c));
+    };
+    const up = () => {
+      grip.classList.remove('drag');
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      if (this.storageKey) {
+        const saved = store.get('cols:' + this.storageKey, {});
+        saved[c.id] = c.width;
+        store.set('cols:' + this.storageKey, saved);
+      }
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }
+
+  resetColumns() {
+    if (this.storageKey) store.set('cols:' + this.storageKey, {});
+    for (const c of this.columns) Object.assign(c, c._orig);
+    this.renderHead();
+    this.paint(true);
   }
 
   setRows(rows) {
     this.rows = rows;
-    const keys = new Set(rows.map(this.rowKey));
+    const keys = new Set(rows.map((r) => String(this.rowKey(r))));
     for (const k of [...this.selected]) if (!keys.has(k)) this.selected.delete(k);
     this.body.style.height = rows.length * this.rowHeight + 'px';
     this.paint(true);
   }
 
-  refreshRow(key) {
-    const el = this.body.querySelector(`[data-key="${CSS.escape(key)}"]`);
+  rowEl(key) {
+    return this.body.querySelector(`[data-key="${CSS.escape(String(key))}"]`);
+  }
+
+  /** Re-render one row (skipped while the user is typing in it, so no keystrokes are lost). */
+  refreshRow(key, force = false) {
+    const el = this.rowEl(key);
     if (!el) return;
+    if (!force && el.contains(document.activeElement) && document.activeElement.matches('input,textarea,select')) return;
     const i = Number(el.dataset.index);
     el.replaceWith(this.renderRow(this.rows[i], i));
   }
@@ -222,7 +277,6 @@ export class VGrid {
     const first = Math.max(0, Math.floor(top / this.rowHeight) - 10);
     const last = Math.min(this.rows.length, Math.ceil((top + height) / this.rowHeight) + 10);
     if (!force && this._first === first && this._last === last) return;
-    // Keep a focused input alive while the user types.
     const active = document.activeElement;
     const activeRow = active && active.closest && active.closest('.vrow');
     this._first = first;
@@ -231,8 +285,9 @@ export class VGrid {
     let keep = null;
     for (let i = first; i < last; i++) {
       const r = this.rows[i];
-      if (activeRow && activeRow.dataset.key === String(this.rowKey(r)) && !force) {
+      if (activeRow && activeRow.dataset.key === String(this.rowKey(r)) && active.matches('input,textarea,select')) {
         activeRow.style.top = i * this.rowHeight + 'px';
+        activeRow.dataset.index = i;
         keep = activeRow;
         frag.append(activeRow);
         continue;
@@ -240,7 +295,7 @@ export class VGrid {
       frag.append(this.renderRow(r, i));
     }
     clear(this.body).append(frag);
-    if (keep && active) active.focus();
+    if (keep && active && document.activeElement !== active) active.focus();
   }
 
   renderRow(r, i) {
@@ -251,39 +306,59 @@ export class VGrid {
     if (this.focusKey === key) row.classList.add('focus');
     const extra = this.rowClass && this.rowClass(r);
     if (extra) row.classList.add(...extra.split(' ').filter(Boolean));
-    for (const c of this.columns) row.append(this.cellFor(c, c.render(r, i)));
+    for (const c of this.columns) {
+      const cell = h('div.cell' + (c.cls ? '.' + c.cls.split(' ').join('.') : ''));
+      this.sizeCell(cell, c);
+      const content = c.render(r, i);
+      if (content instanceof Node) cell.append(content);
+      else if (content != null) cell.textContent = content;
+      row.append(cell);
+    }
     row.addEventListener('mousedown', (e) => {
-      if (e.target.closest('input,button,select,textarea,a')) return;
-      if (e.shiftKey && this.focusKey != null) this.selectRange(this.focusKey, key);
-      else if (e.ctrlKey) this.toggle(key);
+      const onControl = e.target.closest('input,button,select,textarea,a');
+      if (!onControl) {
+        if (e.shiftKey && this.focusKey != null) this.selectRange(this.focusKey, key);
+        else if (e.ctrlKey) this.toggle(key);
+      }
       this.focus(key);
       if (this.onRowClick) this.onRowClick(r, e);
     });
-    if (this.onRowDblClick) row.addEventListener('dblclick', () => this.onRowDblClick(r));
+    if (this.onRowDblClick) row.addEventListener('dblclick', (e) => { if (!e.target.closest('input,button,select')) this.onRowDblClick(r); });
     return row;
   }
 
+  /** Move the focus highlight without re-rendering rows (keeps any input the user clicked into). */
   focus(key, scroll = false) {
-    const prev = this.focusKey;
+    key = String(key);
+    if (this.focusKey === key && !scroll) return;
+    const prev = this.focusKey != null && this.rowEl(this.focusKey);
+    if (prev) prev.classList.remove('focus');
     this.focusKey = key;
-    if (prev != null) this.refreshRow(prev);
-    this.refreshRow(key);
+    const el = this.rowEl(key);
+    if (el) el.classList.add('focus');
     if (scroll) {
       const i = this.rows.findIndex((r) => String(this.rowKey(r)) === key);
       if (i >= 0) {
         const y = i * this.rowHeight;
-        if (y < this.el.scrollTop + 28 || y > this.el.scrollTop + this.el.clientHeight - this.rowHeight * 2)
+        if (y < this.el.scrollTop + 30 || y > this.el.scrollTop + this.el.clientHeight - this.rowHeight * 2)
           this.el.scrollTop = y - this.el.clientHeight / 2;
       }
     }
   }
 
-  toggle(key) {
-    if (this.selected.has(key)) this.selected.delete(key);
-    else this.selected.add(key);
-    this.refreshRow(key);
+  setSelected(key, on) {
+    key = String(key);
+    if (on) this.selected.add(key); else this.selected.delete(key);
+    const el = this.rowEl(key);
+    if (el) {
+      el.classList.toggle('sel', on);
+      const cb = el.querySelector('input[type=checkbox].rowcheck');
+      if (cb) cb.checked = on;
+    }
     this.el.dispatchEvent(new CustomEvent('selection'));
   }
+
+  toggle(key) { this.setSelected(key, !this.selected.has(String(key))); }
 
   selectRange(a, b) {
     const keys = this.rows.map((r) => String(this.rowKey(r)));
@@ -301,12 +376,20 @@ export class VGrid {
     this.el.dispatchEvent(new CustomEvent('selection'));
   }
 
+  /** A checkbox cell bound to the selection. */
+  checkbox(r) {
+    const key = String(this.rowKey(r));
+    const cb = h('input.rowcheck', { type: 'checkbox', checked: this.selected.has(key) });
+    cb.addEventListener('change', () => this.setSelected(key, cb.checked));
+    return cb;
+  }
+
   key(e) {
     if (e.target.closest('input,textarea,select')) return;
     const keys = this.rows.map((r) => String(this.rowKey(r)));
     let i = keys.indexOf(this.focusKey);
-    if (e.key === 'ArrowDown' || e.key === 'j') i = Math.min(keys.length - 1, i + 1);
-    else if (e.key === 'ArrowUp' || e.key === 'k') i = Math.max(0, i - 1);
+    if (e.key === 'ArrowDown') i = Math.min(keys.length - 1, i + 1);
+    else if (e.key === 'ArrowUp') i = Math.max(0, i - 1);
     else if (e.key === ' ' && this.focusKey != null) { e.preventDefault(); this.toggle(this.focusKey); return; }
     else if (e.key === 'a' && e.ctrlKey) { e.preventDefault(); this.selectAll(true); return; }
     else return;
@@ -316,6 +399,35 @@ export class VGrid {
       if (this.onRowClick) this.onRowClick(this.rows[i], e);
     }
   }
+}
+
+/** Toggle switch. */
+export function switchEl(checked, onchange, label, { disabled = false, title = '' } = {}) {
+  const input = h('input', { type: 'checkbox', checked, disabled });
+  input.addEventListener('change', () => onchange(input.checked));
+  return h('label.switch' + (disabled ? '.disabled' : ''), { title }, input, h('span.track'), label ? h('span', label) : null);
+}
+
+/** Segmented control: options [[value, label]]. */
+export function segmented(options, value, onchange, { disabled = false } = {}) {
+  const el = h('div.seg');
+  for (const [v, label] of options) {
+    el.append(h('button' + (String(v) === String(value) ? '.on' : ''), { disabled, onclick: () => onchange(v) }, label));
+  }
+  return el;
+}
+
+/** Small pop-up menu under an anchor: items [{label, sub, onclick}]. */
+export function popupMenu(anchor, items) {
+  document.querySelectorAll('.menu').forEach((m) => m.remove());
+  const r = anchor.getBoundingClientRect();
+  const m = h('div.menu', items.map((it) => h('button', { onclick: () => { m.remove(); it.onclick(); } }, h('div', it.label), it.sub ? h('div.menu-sub', it.sub) : null)));
+  document.body.append(m);
+  const mh = m.getBoundingClientRect().height;
+  m.style.left = Math.min(r.left, window.innerWidth - 260) + 'px';
+  m.style.top = (r.bottom + mh + 6 > window.innerHeight ? r.top - mh - 6 : r.bottom + 6) + 'px';
+  setTimeout(() => document.addEventListener('mousedown', function close(e) { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('mousedown', close); } }), 0);
+  return m;
 }
 
 /** Highlight what b adds to a (word-level), for tag suggestions. */
