@@ -43,3 +43,15 @@ public class RevoiceTests
         Assert.True(RevoiceService.Similarity("Molag Bal will not have this soul!", "This hall was a temple once.") < 0.3);
     }
 }
+
+public class RevoiceExportPathTests
+{
+    [Fact]
+    public void Voice_files_go_to_the_games_own_folders()
+    {
+        var l = new RevoiceLine { PluginFolder = "Vigilant.esm", VoiceType = "MaleOldGrumpy", FileStem = "zzzCHGener_zzzCHgdHoundB01_004279A0_1" };
+        Assert.Equal(Path.Combine("Sound", "Voice", "Vigilant.esm", "MaleOldGrumpy", "zzzCHGener_zzzCHgdHoundB01_004279A0_1.fuz"), l.RelativePath);
+        var plan = new RevoiceLine { PluginFolder = "Skyrim.esm", VoiceType = "_AelaByAuctorVoice", FileStem = "C00_C00JoinTopic_000E1E9F_1", PlanId = "p1" };
+        Assert.Equal(Path.Combine("Sound", "Voice", "Skyrim.esm", "_AelaByAuctorVoice", "C00_C00JoinTopic_000E1E9F_1.fuz"), plan.RelativePath);
+    }
+}

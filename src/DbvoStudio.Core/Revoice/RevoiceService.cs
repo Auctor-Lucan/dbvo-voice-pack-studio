@@ -34,7 +34,11 @@ public sealed record NpcCopy(string Key, string EditorId, string Name, string Pl
 public sealed class RevoiceExportReport
 {
     public int Written { get; set; }
+    /// <summary>Already in the output folder and kept ("keep files already there").</summary>
+    public int Skipped { get; set; }
     public int Failed { get; set; }
+    /// <summary>Files written per game folder, e.g. "Sound\Voice\Vigilant.esm\MaleOldGrumpy" → 120.</summary>
+    public Dictionary<string, int> Folders { get; } = new();
     public List<string> Errors { get; } = new();
     public List<string> Files { get; } = new();
 }
@@ -566,7 +570,8 @@ public sealed class RevoiceService
     {
         if (string.IsNullOrWhiteSpace(p.OutputFolder)) throw new InvalidOperationException("Set the output folder first.");
         var rep = new RevoiceExportReport();
-        var lines = p.Lines.Where(l => !l.Excluded && l.SelectedTake != null && !(p.Speakers.TryGetValue(l.SpeakerKey, out var a) && a.Skip)).ToList();
+        // Lines no longer in the plugins (Gone) are kept for their takes but never exported: the game would not use the file.
+        var lines = p.Lines.Where(l => !l.Excluded && !l.Gone && l.SelectedTake != null && !(p.Speakers.TryGetValue(l.SpeakerKey, out var a) && a.Skip)).ToList();
         var root = _lib.RevoiceFolder(p.Id);
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
         Directory.CreateDirectory(workRoot);
@@ -578,7 +583,7 @@ public sealed class RevoiceService
             try
             {
                 var target = Path.Combine(p.OutputFolder, line.RelativePath);
-                if (!overwrite && File.Exists(target)) return;
+                if (!overwrite && File.Exists(target)) { lock (rep) rep.Skipped++; return; }
                 using var work = new WorkFolder(workRoot);
                 var t = line.SelectedTake!;
                 var xwm = work.File("a.xwm");
@@ -586,7 +591,12 @@ public sealed class RevoiceService
                 var fuz = FuzFile.Build(await File.ReadAllBytesAsync(Path.Combine(root, t.LipPath), ct), await File.ReadAllBytesAsync(xwm, ct));
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 await File.WriteAllBytesAsync(target, fuz, ct);
-                lock (rep) { rep.Written++; }
+                lock (rep)
+                {
+                    rep.Written++;
+                    var folder = Path.GetDirectoryName(line.RelativePath)!;
+                    rep.Folders[folder] = rep.Folders.TryGetValue(folder, out var n) ? n + 1 : 1;
+                }
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex) { lock (rep) { rep.Failed++; rep.Errors.Add($"{line.FileStem}: {ex.Message}"); } }

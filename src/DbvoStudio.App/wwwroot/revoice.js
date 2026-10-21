@@ -69,8 +69,8 @@ export async function revoiceView(id) {
   function renderHead() {
     const exp = h('button.btn', { title: 'Write the chosen takes as .fuz files at the game\'s paths', disabled: !!app.job }, 'Export ▾');
     exp.addEventListener('click', () => popupMenu(exp, [
-      { label: 'Export .fuz files to the output folder', sub: (proj.outputFolder || '(set the output folder first)') + '\\Sound\\Voice\\…  — also the voice type plugin, SkyPatcher and FLM files when there are new voice types', onclick: () => doExport(true) },
-      { label: 'Export, but keep files already there', sub: 'Skips .fuz files that exist in the output folder', onclick: () => doExport(false) },
+      { label: 'Export .fuz files to the output folder', sub: `${proj.outputFolder || '(set the output folder in Setup first)'}\\Sound\\Voice\\<plugin>\\<voice type>\\<file>.fuz, the game's own paths (replaces files already there)` + (proj.plans.length ? '. Also the new voice type plugin, SkyPatcher and FLM files.' : ''), onclick: () => doExport(true) },
+      { label: 'Export, but keep files already there', sub: 'The same, but .fuz files that exist in the output folder are left as they are', onclick: () => doExport(false) },
       proj.plans.length ? { label: 'Only the new voice type pack', sub: 'Plugin + SkyPatcher + FLM + install notes', onclick: writePack } : null,
       proj.outputFolder ? { label: 'Open the output folder', sub: proj.outputFolder, onclick: () => rpc('open.path', { path: proj.outputFolder }) } : null,
     ].filter(Boolean)));
@@ -705,7 +705,9 @@ export async function revoiceView(id) {
       try { proj = await rpc('revoice.get', { id }); reindex(); } catch { /* keep */ }
       if (d.kind === 'revoice-scan' && d.ok) { if (proj.lines.length && tab === 'setup') tab = 'speakers'; toast(`Scan done: ${d.report.lines.toLocaleString()} voice files to make, ${d.report.withOriginal.toLocaleString()} with a current file.`); }
       if (d.kind === 'revoice-export' && d.ok !== undefined && d.report) {
-        await modal('Exported', [h('div.kv', h('div', 'Written'), h('div', String(d.report.written)), h('div', 'Failed'), h('div', String(d.report.failed)), h('div', 'Folder'), h('div.mono', d.folder)),
+        const folders = Object.entries(d.report.folders || {}).sort((a, b) => a[0].localeCompare(b[0]));
+        await modal('Exported', [h('div.kv', h('div', 'Written'), h('div', String(d.report.written)), h('div', 'Kept (already there)'), h('div', String(d.report.skipped || 0)), h('div', 'Failed'), h('div', String(d.report.failed)), h('div', 'Folder'), h('div.mono', d.folder)),
+          folders.length ? h('div', h('div.field-label', 'Written to'), h('div.box.mono', { style: { maxHeight: '180px', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: '12px' } }, folders.map(([f, n]) => `${f}\\  ${n}`).join('\n'))) : null,
           d.report.files.length ? h('div', h('div.field-label', 'New voice type pack'), h('div.box.mono', { style: { whiteSpace: 'pre-wrap' } }, d.report.files.join('\n'))) : null,
           d.report.errors.length ? h('div.box.mono', { style: { maxHeight: '160px', overflow: 'auto' } }, d.report.errors.slice(0, 50).join('\n')) : null],
         [{ label: 'Open folder', value: 'open' }, { label: 'OK', primary: true, value: true }]).then((v) => { if (v === 'open') rpc('open.path', { path: d.folder }); });
