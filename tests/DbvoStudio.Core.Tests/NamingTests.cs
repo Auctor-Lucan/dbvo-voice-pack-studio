@@ -101,3 +101,25 @@ public class TagPlacementTests
     public void Tags_go_after_or_instead_of_the_leading_tags(string text, bool replace, string expected)
         => Assert.Equal(expected, DbvoStudio.Core.Naming.SpokenText.AddTagsAfterLeading(text, new[] { "[whispers]" }, replace));
 }
+
+public class PlayerNameDefaultTests
+{
+    [Fact]
+    public void Player_name_lines_are_voiced_only_when_the_setting_is_on()
+    {
+        var l = new DbvoStudio.Core.Projects.Phase1Line { Original = "I'm <Alias=Player>.", Final = "I'm <Alias=Player>." };
+        try
+        {
+            DbvoStudio.Core.Projects.Phase1Line.PlayerNamesVoicedByDefault = false;
+            Assert.False(l.DefaultVoice);
+            l.VoiceApproved = true;
+            Assert.True(l.Voiced);
+            l.VoiceApproved = null;
+            DbvoStudio.Core.Projects.Phase1Line.PlayerNamesVoicedByDefault = true;
+            Assert.True(l.DefaultVoice);
+            var other = new DbvoStudio.Core.Projects.Phase1Line { Original = "Ask <Alias=Friend>.", Final = "Ask <Alias=Friend>." };
+            Assert.False(other.DefaultVoice);
+        }
+        finally { DbvoStudio.Core.Projects.Phase1Line.PlayerNamesVoicedByDefault = false; }
+    }
+}

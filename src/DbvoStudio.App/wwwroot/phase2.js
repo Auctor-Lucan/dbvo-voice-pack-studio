@@ -587,6 +587,7 @@ export async function patchView(id) {
       count.textContent = mode === 'add' ? `Added to ${n} of ${pool.length} line(s) in the current filter.` : `Removed from ${n} of ${pool.length} line(s) in the current filter (where they have it).`;
     }
     const modeSel = segmented([['add', 'Add'], ['remove', 'Remove']], mode, (v) => { mode = v; labels(); update(); });
+    modeSel.classList.add('accent');
     labels(); update();
     const ok = await modal(h('span.row', modeSel, h('span', 'a tag to every line shown')), [
       h('div.col', h('div.field-label', 'Tags'), tagsIn), count,

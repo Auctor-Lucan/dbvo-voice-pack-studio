@@ -279,7 +279,7 @@ public sealed class Phase1Service
 
     /// <summary>Player-name lines (with &lt;Alias=Player&gt;) of a plugin, as they would appear in a player-name topic file.</summary>
     public static List<string> PlayerNameLines(ModPlugin p) =>
-        p.Lines.Where(l => l.Status != Phase1Status.Removed && !l.Excluded && l.IsPlayerName)
+        p.Lines.Where(l => l.Status != Phase1Status.Removed && l.IsPlayerName)
             .Select(l => (l.Final ?? l.Original).Trim()).Distinct().ToList();
 
     private string? ResolveStringsFolder(Mod mod, string pluginPath)

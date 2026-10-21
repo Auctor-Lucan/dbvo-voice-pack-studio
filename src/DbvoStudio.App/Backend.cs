@@ -44,6 +44,7 @@ public sealed partial class Backend
         if (string.IsNullOrWhiteSpace(root)) root = Library.DefaultRoot;
         _lib = new Library(root);
         _settings = _lib.LoadSettings();
+        Phase1Line.PlayerNamesVoicedByDefault = _settings.PlayerNameLinesVoiced;
         AutoDetectTools();
     }
 
@@ -231,7 +232,7 @@ public sealed partial class Backend
                     var mod = LoadMod(S(p, "id"));
                     var pl = mod.Plugins.First(x => x.FileName == S(p, "plugin"));
                     var keys = Strings(p, "keys").ToHashSet();
-                    var lines = pl.Lines.Where(l => l.IsPlayerName && l.Status != Phase1Status.Removed && !l.Excluded && (keys.Count == 0 || keys.Contains(l.Key))).ToList();
+                    var lines = pl.Lines.Where(l => l.IsPlayerName && l.Status != Phase1Status.Removed && (keys.Count == 0 || keys.Contains(l.Key))).ToList(); // excluded or not voiced here: still exported
                     if (lines.Count == 0) throw new InvalidOperationException("No player-name lines to export.");
                     var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
                     Directory.CreateDirectory(downloads);
@@ -396,6 +397,7 @@ public sealed partial class Backend
                     python = File.Exists(_settings.WavToLip.PythonPath),
                 },
                 _settings.SevenZipPath,
+                _settings.PlayerNameLinesVoiced,
                 wavToLip = _settings.WavToLip,
                 categories = _settings.Categories,
                 pronunciations = _settings.Pronunciations,
@@ -445,6 +447,11 @@ public sealed partial class Backend
         Set("sevenZipPath", v => _settings.SevenZipPath = v);
         if (s.TryGetProperty("wavToLip", out var wl) && wl.ValueKind == JsonValueKind.Object)
             _settings.WavToLip = wl.Deserialize<WavToLipSettings>(JsonOptions) ?? _settings.WavToLip;
+        if (s.TryGetProperty("playerNameLinesVoiced", out var pv) && pv.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            _settings.PlayerNameLinesVoiced = pv.GetBoolean();
+            Phase1Line.PlayerNamesVoicedByDefault = _settings.PlayerNameLinesVoiced;
+        }
         if (s.TryGetProperty("backupsToKeep", out var bk) && bk.ValueKind == JsonValueKind.Number) _settings.BackupsToKeep = bk.GetInt32();
         if (s.TryGetProperty("pronunciations", out var pr) && pr.ValueKind == JsonValueKind.Array)
             _settings.Pronunciations = pr.Deserialize<List<Pronunciation>>(JsonOptions) ?? new();
@@ -580,7 +587,7 @@ public sealed partial class Backend
             fixes = Phase1Service.FixEdits(p).Count,
             flagged = p.Lines.Count(l => l.IsFlagged && l.Status != Phase1Status.Removed && !l.Excluded),
             unreviewed = Phase1Service.UnreviewedFlags(p).Count,
-            playerNames = p.Lines.Count(l => l.IsPlayerName && l.Status != Phase1Status.Removed && !l.Excluded),
+            playerNames = p.Lines.Count(l => l.IsPlayerName && l.Status != Phase1Status.Removed),
             needsFix = p.NeedsFixPlugin,
         }).ToList(),
     };
@@ -606,7 +613,7 @@ public sealed partial class Backend
         topicLines = Phase1Service.TopicLines(p).Count,
         topicFileName = Phase1Service.TopicFileName(p),
         unreviewed = Phase1Service.UnreviewedFlags(p).Count,
-        playerNames = p.Lines.Count(l => l.IsPlayerName && l.Status != Phase1Status.Removed && !l.Excluded),
+        playerNames = p.Lines.Count(l => l.IsPlayerName && l.Status != Phase1Status.Removed),
         playerNamesExported = p.Lines.Count(l => l.IsPlayerName && l.PlayerNameExported && l.Status != Phase1Status.Removed && !l.Excluded),
         lines = withLines ? p.Lines.OrderBy(l => l.Status == Phase1Status.Removed).ThenBy(l => l.Order).Select(l => Line1Dto(l, p.IsTopicFile)).ToList() : null,
     };

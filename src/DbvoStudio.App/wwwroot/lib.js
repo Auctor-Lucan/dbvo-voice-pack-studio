@@ -433,7 +433,12 @@ export function switchEl(checked, onchange, label, { disabled = false, title = '
 export function segmented(options, value, onchange, { disabled = false } = {}) {
   const el = h('div.seg');
   for (const [v, label] of options) {
-    el.append(h('button' + (String(v) === String(value) ? '.on' : ''), { disabled, onclick: () => onchange(v) }, label));
+    const b = h('button' + (String(v) === String(value) ? '.on' : ''), { disabled, onclick: () => {
+      // show the choice right away, also where the caller doesn't redraw
+      el.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+      onchange(v);
+    } }, label);
+    el.append(b);
   }
   return el;
 }

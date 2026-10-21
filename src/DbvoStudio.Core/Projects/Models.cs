@@ -27,6 +27,8 @@ public sealed class AppSettings
     public AiProviderSettings AiProvider { get; set; } = new();
     public LocalEngineSettings LocalEngines { get; set; } = new();
     public int BackupsToKeep { get; set; } = 30;
+    /// <summary>Lines with &lt;Alias=Player&gt; go into the topic file and are voiced in Phase 2. Off (default): they are left out (voiced in a dedicated player-name patch instead) but can still be exported.</summary>
+    public bool PlayerNameLinesVoiced { get; set; }
     public string? LastVoicePackId { get; set; }
     public Dictionary<string, string> Ui { get; set; } = new();
     /// <summary>The global DBVO pronunciation dictionary, used by every voice pack. Voice pack entries win for the same word.</summary>
@@ -272,7 +274,19 @@ public sealed class Phase1Line
 
     /// <summary>What the line gets without an explicit approval: voiced when the final text is usable and not a stage direction.</summary>
     [JsonIgnore]
-    public bool DefaultVoice => Final != null && Final.Length > 0 && !IsStageDirection && !ScriptRules.HasPlaceholder(LineNaming.SpokenPart(Final));
+    public bool DefaultVoice => Final != null && Final.Length > 0 && !IsStageDirection && !HasBlockingPlaceholder(LineNaming.SpokenPart(Final));
+
+    /// <summary>A placeholder that keeps the line out of the topic file by default. &lt;Alias=Player&gt; only does when player-name lines aren't voiced (Global Settings).</summary>
+    private static bool HasBlockingPlaceholder(string spoken)
+    {
+        if (!ScriptRules.HasPlaceholder(spoken)) return false;
+        if (!PlayerNamesVoicedByDefault) return true;
+        var rest = System.Text.RegularExpressions.Regex.Replace(spoken, @"<Alias\s*=\s*Player>", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return ScriptRules.HasPlaceholder(rest);
+    }
+
+    /// <summary>Global Settings: whether &lt;Alias=Player&gt; lines are voiced unless the user says otherwise (off = left out, as before).</summary>
+    public static bool PlayerNamesVoicedByDefault { get; set; }
 
     /// <summary>Default for the DBVO Fix plugin: the edit goes in unless it is an untouched flagged line.</summary>
     [JsonIgnore]

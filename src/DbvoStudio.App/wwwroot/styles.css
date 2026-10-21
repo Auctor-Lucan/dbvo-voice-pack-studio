@@ -427,3 +427,4 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .tag-opt-after { color: var(--dim); }
 .tag-opt-note { grid-column: 2 / -1; color: var(--faint); font-size: 11.5px; }
 .tag-opt:last-child .tag-opt-label { grid-column: 2 / -1; font-weight: 400; }
+.seg.accent button.on { background: var(--accent-strong); color: var(--on-accent); box-shadow: none; }
