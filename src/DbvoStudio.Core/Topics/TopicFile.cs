@@ -3,7 +3,7 @@ using DbvoStudio.Core.Text;
 
 namespace DbvoStudio.Core.Topics;
 
-/// <summary>Topic .txt files: one in-game line per row, UTF-8, CRLF.</summary>
+/// <summary>Topic .txt files: one in-game line per row, UTF-8, CRLF between rows and no empty row at the end.</summary>
 public static class TopicFile
 {
     public static List<string> Read(string path)
@@ -19,9 +19,7 @@ public static class TopicFile
     public static void Write(string path, IEnumerable<string> lines)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        var sb = new StringBuilder();
-        foreach (var l in lines) sb.Append(l).Append("\r\n");
-        File.WriteAllText(path, sb.ToString(), Encodings.Utf8NoBom);
+        File.WriteAllText(path, string.Join("\r\n", lines), Encodings.Utf8NoBom);
     }
 
     /// <summary>UTF-8 (with or without BOM), UTF-16 with BOM, else Windows-1252.</summary>

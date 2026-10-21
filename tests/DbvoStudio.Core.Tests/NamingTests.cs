@@ -77,3 +77,15 @@ public class NamingTests
         Assert.NotEqual(SpokenText.WordsOnly("Wait. We should talk."), SpokenText.WordsOnly("Wait. We must talk."));
     }
 }
+
+public class TopicFileWriteTests
+{
+    [Fact]
+    public void Topic_files_have_no_empty_row_at_the_end()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "dbvo-topic-" + Guid.NewGuid().ToString("N")[..6] + ".txt");
+        DbvoStudio.Core.Topics.TopicFile.Write(path, new[] { "Hello, I'm <Alias=Player>.", "The name's <Alias=Player>." });
+        Assert.Equal("Hello, I'm <Alias=Player>.\r\nThe name's <Alias=Player>.", File.ReadAllText(path));
+        Assert.Equal(2, DbvoStudio.Core.Topics.TopicFile.Read(path).Count);
+    }
+}
