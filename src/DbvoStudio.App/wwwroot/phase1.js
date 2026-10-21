@@ -1,5 +1,5 @@
 // Phase 1: Mods list and the per-plugin workspace.
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const KIND_LABEL = {
@@ -785,7 +785,9 @@ export async function modView(id) {
     const folder = await rpc('pick.folder', { title: 'Folder for topic files and DBVO Fix plugins' });
     if (!folder) return;
     try {
-      const written = await rpc('mod.writeOutputs', { id, fixFolders: [folder], topicFolder: folder });
+      const ow = await askFixOverwrite(await rpc('mod.fixConflicts', { id, folder }).catch(() => []));
+      if (ow == null) return;
+      const written = await rpc('mod.writeOutputs', { id, fixFolders: [folder], topicFolder: folder, keepFix: !ow });
       await modal('Files written', [h('div.box.mono', { style: { whiteSpace: 'pre-wrap' } }, written.join('\n'))]);
     } catch (e) { fail(e); }
   }

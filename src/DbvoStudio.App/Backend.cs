@@ -325,6 +325,7 @@ public sealed partial class Backend
                     if (p.TryGetProperty("ttsForMissing", out var tm) && tm.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.TtsForMissing = tm.GetBoolean();
                     if (p.TryGetProperty("overwriteWavLip", out var ow) && ow.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteWavLip = ow.GetBoolean();
                     if (p.TryGetProperty("overwriteFuz", out var of) && of.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteFuz = of.GetBoolean();
+                    if (p.TryGetProperty("overwriteFix", out var ox) && ox.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteFix = ox.GetBoolean();
                     _lib.Save(patch);
                     new Phase2Service(_lib, Runtime()).Sync(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods());
                     return PatchDto(patch);
@@ -355,11 +356,13 @@ public sealed partial class Backend
                 {
                     var patch = LoadPatch(S(p, "id"));
                     var rep = new Phase2Service(_lib, Runtime()).ExportWavLip(patch, LoadVoice(patch.VoicePackId));
-                    var files = WriteFixAndTopics(patch);
+                    var files = WriteFixAndTopics(patch, B(p, "keepFix"));
                     return new { rep.Written, rep.Skipped, rep.Failed, rep.Errors, files };
                 });
             case "patch.buildFuz": return StartFuz(p);
             case "patch.writeFixPlugins": return await Locked(() => WritePatchFixPlugins(p));
+            case "patch.fixConflicts": return await Locked(() => FixConflicts(LoadPatch(S(p, "id"))));
+            case "mod.fixConflicts": return await Locked(() => Phase1Service.ExistingFixPlugins(LoadMod(S(p, "id")), S(p, "folder")));
             case "patch.checks": return Checks(S(p, "id"));
             case "patch.autotag": return await AutoTag(p);
             default:
@@ -764,7 +767,7 @@ public sealed partial class Backend
         var folders = Strings(p, "fixFolders");
         var topicFolder = S(p, "topicFolder");
         if (string.IsNullOrWhiteSpace(topicFolder)) topicFolder = folders.FirstOrDefault() ?? throw new InvalidOperationException("Choose a folder.");
-        var written = mod.Plugins.SelectMany(pl => svc.WriteOutputs(mod, pl, folders, topicFolder)).ToList();
+        var written = mod.Plugins.SelectMany(pl => svc.WriteOutputs(mod, pl, folders, topicFolder, B(p, "keepFix"))).ToList();
         return written;
     }
 
@@ -778,7 +781,7 @@ public sealed partial class Backend
         {
             patch.Id, patch.Name, patch.VoicePackId, patch.ModIds, patch.ReferenceIds, patch.WavLipFolder, patch.FinalRoot,
             fuzTemplate = voice == null ? patch.FuzTemplate : Phase2Service.ResolveFuzTemplate(patch, voice),
-            patch.OverwriteWavLip, patch.OverwriteFuz, patch.FixFolder, patch.Kind, patch.SourceFolders, patch.LastFuzUtc, patch.TtsForMissing,
+            patch.OverwriteWavLip, patch.OverwriteFuz, patch.OverwriteFix, patch.FixFolder, patch.Kind, patch.SourceFolders, patch.LastFuzUtc, patch.TtsForMissing,
             voiceName = voice?.Name ?? "", voiceColor = voice?.Color ?? "",
             category = mods.FirstOrDefault(m => patch.ModIds.Contains(m.Id))?.Category ?? "Misc",
             mediaBase = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, _lib.PatchFolder(patch.Id)).Replace('\\', '/') + "/",
@@ -1006,6 +1009,7 @@ public sealed partial class Backend
         if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
         var id = S(p, "id");
         var custom = S(p, "customFolder");
+        var keepFix = B(p, "keepFix");
         _jobCts = new CancellationTokenSource();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
@@ -1017,7 +1021,7 @@ public sealed partial class Backend
                 var svc = new Phase2Service(_lib, Runtime());
                 List<string> files;
                 await _gate.WaitAsync();
-                try { files = string.IsNullOrWhiteSpace(custom) ? WriteFixAndTopics(patch) : new List<string>(); }
+                try { files = string.IsNullOrWhiteSpace(custom) ? WriteFixAndTopics(patch, keepFix) : new List<string>(); }
                 finally { _gate.Release(); }
                 var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "fuz", g.Done, g.Total, g.Failed, g.Current }));
                 var rep = await svc.ExportFuzAsync(patch, voice, _lib.LoadMods(), Tools(), string.IsNullOrWhiteSpace(custom) ? null : custom, progress, ct);
@@ -1041,13 +1045,22 @@ public sealed partial class Backend
     }
 
     /// <summary>Write each mod's DBVO Fix plugin (when needed) to the WAV+LIP folder and the mod's final folder.</summary>
-    private object WritePatchFixPlugins(JsonElement p) => WriteFixAndTopics(LoadPatch(S(p, "id")));
+    private object WritePatchFixPlugins(JsonElement p) => WriteFixAndTopics(LoadPatch(S(p, "id")), B(p, "keepFix"));
+
+    /// <summary>DBVO Fix plugins already in the patch's final folder(s), when the patch asks before replacing them.</summary>
+    private List<string> FixConflicts(DbvoPatch patch)
+    {
+        if (patch.OverwriteFix || string.IsNullOrWhiteSpace(patch.FinalRoot)) return new();
+        var voice = LoadVoice(patch.VoicePackId);
+        return _lib.LoadMods().Where(m => patch.ModIds.Contains(m.Id))
+            .SelectMany(m => Phase1Service.ExistingFixPlugins(m, Core.Fomod.FomodService.ModContentFolder(patch, voice, m))).Distinct().ToList();
+    }
 
     /// <summary>
     /// Write each mod's DBVO Fix plugin (when needed) and topic file to the patch's WAV + LIP folder and its
     /// final mod folder. Runs automatically with "Copy WAV + LIP" and "Build .fuz".
     /// </summary>
-    private List<string> WriteFixAndTopics(DbvoPatch patch)
+    private List<string> WriteFixAndTopics(DbvoPatch patch, bool keepExistingFinalFix = false)
     {
         var svc1 = new Phase1Service(_lib, Runtime());
         var voice = LoadVoice(patch.VoicePackId);
@@ -1056,11 +1069,19 @@ public sealed partial class Backend
         var written = new List<string>();
         foreach (var mod in _lib.LoadMods().Where(m => patch.ModIds.Contains(m.Id)))
         {
-            // The working copy goes to the DBVO Fix folder; the release copy into the mod's folder inside the final folder.
-            var folders = new List<string>();
-            if (!string.IsNullOrWhiteSpace(patch.FixFolder)) folders.Add(patch.FixFolder);
-            if (!string.IsNullOrWhiteSpace(patch.FinalRoot)) folders.Add(Core.Fomod.FomodService.ModContentFolder(patch, voice, mod));
-            foreach (var pl in mod.Plugins) written.AddRange(svc1.WriteOutputs(mod, pl, folders, folders[0]));
+            // The working copy (always replaced) goes to the DBVO Fix folder; the release copy into the mod's folder
+            // inside the final folder. Both get the DBVO Fix plugin and the topic file.
+            foreach (var pl in mod.Plugins)
+            {
+                if (!string.IsNullOrWhiteSpace(patch.FixFolder))
+                    written.AddRange(svc1.WriteOutputs(mod, pl, new[] { patch.FixFolder }, patch.FixFolder));
+                if (!string.IsNullOrWhiteSpace(patch.FinalRoot))
+                {
+                    var final = Core.Fomod.FomodService.ModContentFolder(patch, voice, mod);
+                    if (!final.Equals(patch.FixFolder, StringComparison.OrdinalIgnoreCase))
+                        written.AddRange(svc1.WriteOutputs(mod, pl, new[] { final }, final, keepExistingFinalFix && !patch.OverwriteFix));
+                }
+            }
         }
         return written;
     }

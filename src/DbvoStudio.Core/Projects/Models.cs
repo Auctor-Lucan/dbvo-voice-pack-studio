@@ -441,6 +441,8 @@ public sealed class DbvoPatch
     public string FixFolder { get; set; } = "";
     public bool OverwriteWavLip { get; set; }
     public bool OverwriteFuz { get; set; }
+    /// <summary>Replace DBVO Fix plugins already in the final folder without asking (the working copy is always replaced).</summary>
+    public bool OverwriteFix { get; set; } = true;
     /// <summary>"tts" = text-to-speech; "vc" = the Voice Changer toggle is on (speech-to-speech from another voice pack's WAV / .fuz files).</summary>
     public string Kind { get; set; } = "tts";
     /// <summary>With the Voice Changer on: lines without a source file are generated with the voice pack's text-to-speech engine.</summary>

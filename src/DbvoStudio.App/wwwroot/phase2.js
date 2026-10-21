@@ -1,5 +1,5 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon } from './lib.js';
+import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Text changed since take' };
@@ -360,9 +360,14 @@ export async function patchView(id) {
   }
 
   // ---- toolbar: the voice pack's engine settings, saved on every change
+  // The toolbar's controls edit this voice object (and its eleven / sts / … objects) directly, so it is never
+  // replaced: the saved copy is merged into it, and only when nothing changed while it was saving.
+  let voiceEdits = 0;
   const saveVoice = debounce(async () => {
+    const seq = voiceEdits;
     try {
-      voice = await rpc('voice.save', { voice });
+      const saved = await rpc('voice.save', { voice });
+      if (seq === voiceEdits) mergeInto(voice, saved);
       const i = app.state.voicePacks.findIndex((v) => v.id === voice.id);
       if (i >= 0) app.state.voicePacks[i] = voice;
     } catch (e) { fail(e); }
@@ -371,6 +376,7 @@ export async function patchView(id) {
   function setIn(obj, key, value) {
     if (voice.settingsLocked) { toast('This voice pack\'s settings are locked. Unlock them in Global Settings → Voice packs.', true); renderToolbar(); return; }
     obj[key] = value;
+    voiceEdits++;
     saveVoice();
     renderToolbar();
   }
@@ -893,9 +899,16 @@ export async function patchView(id) {
 
   const filesModal = (title, summary, files) => modal(title, [summary, files && files.length ? h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), h('div.box.mono', { style: { whiteSpace: 'pre-wrap', maxHeight: '180px', overflow: 'auto' } }, files.join('\n'))) : null]);
 
+  // DBVO Fix plugins in the final folder: ask first when the patch says so (Folders & options → Overwrite).
+  async function fixChoice() {
+    const ow = await askFixOverwrite(await rpc('patch.fixConflicts', { id }).catch(() => []));
+    return ow == null ? null : { keepFix: !ow };
+  }
+
   async function exportWavLip() {
     try {
-      const r = await rpc('patch.exportWavLip', { id });
+      const fc = await fixChoice(); if (!fc) return;
+      const r = await rpc('patch.exportWavLip', { id, ...fc });
       await filesModal('WAV + LIP exported', h('div.kv',
         h('div', 'Written'), h('div', r.written), h('div', 'Skipped (already there)'), h('div', r.skipped), h('div', 'Failed'), h('div', r.failed),
         r.errors && r.errors.length ? [h('div', 'Errors'), h('div.mono', r.errors.slice(0, 10).join('\n'))] : null), r.files);
@@ -908,12 +921,16 @@ export async function patchView(id) {
       customFolder = await rpc('pick.folder', { title: 'Folder for the .fuz files' });
       if (!customFolder) return;
     }
-    try { await rpc('patch.buildFuz', { id, customFolder }); renderActions(); } catch (e) { fail(e); }
+    try {
+      const fc = other ? {} : await fixChoice(); if (!fc) return;
+      await rpc('patch.buildFuz', { id, customFolder, ...fc }); renderActions();
+    } catch (e) { fail(e); }
   }
 
   async function writeFix() {
     try {
-      const written = await rpc('patch.writeFixPlugins', { id });
+      const fc = await fixChoice(); if (!fc) return;
+      const written = await rpc('patch.writeFixPlugins', { id, ...fc });
       await modal('Files written', [h('div.box.mono', { style: { whiteSpace: 'pre-wrap' } }, written.length ? written.join('\n') : 'Nothing to write: no plugin needs a DBVO Fix.')]);
     } catch (e) { fail(e); }
   }
@@ -1017,7 +1034,7 @@ export async function patchView(id) {
     const name = h('input', { type: 'text', value: patch.name });
     const refOn = new Set(patch.referenceIds);
     const sources = [...(patch.sourceFolders || [])];
-    let owWav = patch.overwriteWavLip, owFuz = patch.overwriteFuz;
+    let owWav = patch.overwriteWavLip, owFuz = patch.overwriteFuz, owFix = patch.overwriteFix !== false;
     const modName = Object.values(patch.modNames || {})[0] || patch.name;
     const expand = (t) => (t || '').replace(/\{mod\}/gi, modName).replace(/\{packId\}/gi, voice.packId || 'packId').replace(/\{voicePack\}/gi, voice.name).replace(/\{patch\}/gi, name.value || patch.name);
     const preview = h('div.opt-preview.mono');
@@ -1050,9 +1067,10 @@ export async function patchView(id) {
       const i = sub.toLowerCase().indexOf('sound\\');
       const modFolder = i > 0 ? root + '\\' + sub.slice(0, i).replace(/\\$/, '') : root;
       clear(preview).append(
-        h('div', h('span.faint', '.fuz files → '), `${root}\\${sub}\\`),
-        h('div', h('span.faint', 'DBVO Fix plugins → '), `${modFolder}\\`),
-        h('div', h('span.faint', 'Working copies → '), `${wl.i.value.trim() || '<WAV + LIP folder>'}\\ (WAV + LIP),  ${fx.i.value.trim() || '<DBVO Fix folder>'}\\ (Fix plugin + topic file)`));
+        h('div', h('span.faint', 'WAV + LIP → '), `${wl.i.value.trim() || '<WAV + LIP folder>'}\\`),
+        h('div', h('span.faint', 'Phase 2 DBVO Fix + Topic File → '), `${fx.i.value.trim() || '<DBVO Fix folder>'}\\`),
+        h('div', h('span.faint', 'Final DBVO Fix + Topic File → '), `${modFolder}\\`),
+        h('div', h('span.faint', '.fuz files → '), `${root}\\${sub}\\`));
     }
     const srcList = h('div.col');
     const renderSrc = () => clear(srcList).append(sources.length ? sources.map((f, i) => h('div.row', h('span.mono.grow.ellipsis', f), h('button.icon-btn', { onclick: () => { sources.splice(i, 1); renderSrc(); } }, '×'))) : h('div.faint', 'No folder yet.'));
@@ -1066,11 +1084,12 @@ export async function patchView(id) {
           h('button.btn.sm', { style: { alignSelf: 'flex-start' }, onclick: async () => { const f = await rpc('pick.folder', { title: 'Folder with the source WAV files' }); if (f) { sources.push(f); renderSrc(); } } }, '+ Add folder')) : null,
         row('WAV + LIP folder', 'Your copy of the takes as .wav + .lip', wl.el),
         row('DBVO Fix folder', 'Your copy of the Fix plugin + topic file', fx.el),
-        row('Final folder', 'The FOMOD root (or a page of it)', fr.el),
+        row('Final folder', 'The FOMOD root (or a page of it). The final DBVO Fix plugin and its topic file go here too.', fr.el),
         row('.fuz sub-folder', 'Inside the final folder, e.g. Sound\\DBVO\\{packId}. {packId} = the voice pack ID (' + (voice.packId || 'not set') + ')', tpl),
         row('Result', null, preview),
-        row('Overwrite', 'Off: existing files are skipped',
-          h('div.row', { style: { gap: '18px' } }, switchEl(owWav, (v) => { owWav = v; }, 'WAV + LIP'), switchEl(owFuz, (v) => { owFuz = v; }, '.fuz'))),
+        row('Overwrite', 'Off: existing WAV + LIP and .fuz are skipped; for DBVO Fix you are asked',
+          h('div.row', { style: { gap: '18px' } }, switchEl(owWav, (v) => { owWav = v; }, 'WAV + LIP'), switchEl(owFuz, (v) => { owFuz = v; }, '.fuz'),
+            switchEl(owFix, (v) => { owFix = v; }, 'DBVO Fix', { title: 'DBVO Fix plugins in the final folder. Off: you are asked before one with the same name is replaced. The working copy in the DBVO Fix folder is always replaced.' }))),
         row('Omit lines users have', 'Only packs every user installs',
           s.references.length ? h('div.col', { style: { gap: '4px' } }, s.references.map((r) => switchEl(refOn.has(r.id), (v) => { if (v) refOn.add(r.id); else refOn.delete(r.id); }, `${r.name}  ·  ${r.lineCount} lines`)))
             : h('div.faint', 'None yet: Global Settings → Omit references.'))),
@@ -1081,7 +1100,7 @@ export async function patchView(id) {
       patch = await rpc('patch.saveMeta', {
         id, name: name.value, modIds, referenceIds: [...refOn],
         wavLipFolder: wl.i.value.trim(), finalRoot: fr.i.value.trim(), fuzTemplate: normTpl(tpl.value), fixFolder: fx.i.value.trim(),
-        overwriteWavLip: owWav, overwriteFuz: owFuz, sourceFolders: sources,
+        overwriteWavLip: owWav, overwriteFuz: owFuz, overwriteFix: owFix, sourceFolders: sources,
       });
       if (vc) {
         const r = await rpc('patch.matchSources', { id });

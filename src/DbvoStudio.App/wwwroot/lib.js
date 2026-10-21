@@ -443,6 +443,33 @@ export function segmented(options, value, onchange, { disabled = false } = {}) {
   return el;
 }
 
+/**
+ * Copy a saved object's values into the object the page is editing, keeping every nested object the same
+ * (controls hold references to them, so replacing them would make later edits go nowhere).
+ */
+export function mergeInto(target, src) {
+  for (const [k, v] of Object.entries(src || {})) {
+    const t = target[k];
+    if (v && typeof v === 'object' && !Array.isArray(v) && t && typeof t === 'object' && !Array.isArray(t)) mergeInto(t, v);
+    else target[k] = v;
+  }
+  return target;
+}
+
+/**
+ * Ask before replacing DBVO Fix plugins that are already in a folder. Resolves to null (cancel),
+ * false (keep the existing ones) or true (overwrite). With no conflicts it resolves to true at once.
+ */
+export async function askFixOverwrite(paths) {
+  if (!paths || !paths.length) return true;
+  const v = await modal('Overwrite DBVO Fix plugins?', [
+    h('div', `${paths.length} DBVO Fix plugin(s) with the same name are already in the destination:`),
+    h('div.box.mono', { style: { maxHeight: '180px', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: '12px' } }, paths.join('\n')),
+    h('div.faint', 'Keep existing writes everything else and leaves these files as they are.'),
+  ], [{ label: 'Cancel', value: null }, { label: 'Keep existing', value: 'keep' }, { label: 'Overwrite', primary: true, value: 'overwrite' }]);
+  return v == null ? null : v === 'overwrite';
+}
+
 /** Small pop-up menu under an anchor: items [{label, sub, onclick}]. */
 export function popupMenu(anchor, items) {
   document.querySelectorAll('.menu').forEach((m) => m.remove());

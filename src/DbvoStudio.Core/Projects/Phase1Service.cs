@@ -343,7 +343,11 @@ public sealed class Phase1Service
     /// Write the DBVO Fix plugin (only when needed) and the topic file for one plugin into the given folders.
     /// Returns the files written.
     /// </summary>
-    public List<string> WriteOutputs(Mod mod, ModPlugin p, IEnumerable<string> fixFolders, string topicFolder)
+    /// <summary>DBVO Fix plugins of this mod that already exist in a folder.</summary>
+    public static List<string> ExistingFixPlugins(Mod mod, string folder) =>
+        mod.Plugins.Where(p => p.NeedsFixPlugin).Select(p => Path.Combine(folder, p.FixFileName)).Where(File.Exists).ToList();
+
+    public List<string> WriteOutputs(Mod mod, ModPlugin p, IEnumerable<string> fixFolders, string topicFolder, bool keepExistingFix = false)
     {
         var written = new List<string>();
         var topicPath = Path.Combine(topicFolder, TopicFileName(p));
@@ -363,6 +367,7 @@ public sealed class Phase1Service
         {
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, p.FixFileName);
+            if (keepExistingFix && File.Exists(path)) continue;
             File.WriteAllBytes(path, bytes);
             written.Add(path);
         }

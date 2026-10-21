@@ -1,6 +1,6 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon } from './lib.js';
+import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip } from './phase2.js';
 
@@ -245,13 +245,16 @@ export async function revoiceView(id) {
     if (tab === 'speakers') renderAll();
   }
 
+  let voiceEdits = 0;
   const saveVoiceSettings = debounce(async () => {
-    try { const r = await rpc('revoice.save', { id, voice: proj.voice }); proj.voice = r.voice; } catch (e) { fail(e); }
+    // keep the edited object (the controls hold its eleven / voxCpm / … objects); merge the saved copy in
+    const seq = voiceEdits;
+    try { const r = await rpc('revoice.save', { id, voice: proj.voice }); if (seq === voiceEdits) mergeInto(proj.voice, r.voice); } catch (e) { fail(e); }
   }, 300);
 
   function voiceSettings() {
     const v = proj.voice;
-    const set = (obj, k, val) => { obj[k] = val; saveVoiceSettings(); };
+    const set = (obj, k, val) => { obj[k] = val; voiceEdits++; saveVoiceSettings(); };
     const grp = (label, ...kids) => h('div.tgroup', h('label', label), h('div.row', ...kids));
     const slider = (obj, k, min, max, step, label, title) => {
       const val = h('span.mono.dim', { style: { width: '34px' } }, Number(obj[k]).toFixed(2));
