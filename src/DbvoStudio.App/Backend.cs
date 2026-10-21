@@ -333,8 +333,8 @@ public sealed partial class Backend
             case "patch.delete":
                 return await Locked(() =>
                 {
-                    _lib.Backup("before-delete-patch", _settings.BackupsToKeep);
                     if (_jobCts != null) throw new InvalidOperationException("Stop the running job first.");
+                    _lib.Backup("before-delete-patch", _settings.BackupsToKeep);
                     ForgetPatch(S(p, "id"));
                     Directory.Delete(_lib.PatchFolder(S(p, "id")), true);
                     return State();
@@ -355,11 +355,20 @@ public sealed partial class Backend
                 return await Locked(() =>
                 {
                     var patch = LoadPatch(S(p, "id"));
-                    var rep = new Phase2Service(_lib, Runtime()).ExportWavLip(patch, LoadVoice(patch.VoicePackId));
+                    var voice = LoadVoice(patch.VoicePackId);
+                    var svc = new Phase2Service(_lib, Runtime());
+                    int removed = B(p, "removeStale") ? svc.RemoveStaleExports(patch, voice, _lib.LoadMods()) : 0;
+                    var rep = svc.ExportWavLip(patch, voice);
                     var files = WriteFixAndTopics(patch, B(p, "keepFix"));
-                    return new { rep.Written, rep.Skipped, rep.Failed, rep.Errors, files };
+                    return new { rep.Written, rep.Skipped, rep.Failed, rep.Errors, files, removed };
                 });
             case "patch.buildFuz": return StartFuz(p);
+            case "patch.staleExports":
+                return await Locked(() =>
+                {
+                    var patch = LoadPatch(S(p, "id"));
+                    return new Phase2Service(_lib, Runtime()).StaleExports(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods());
+                });
             case "patch.writeFixPlugins": return await Locked(() => WritePatchFixPlugins(p));
             case "patch.fixConflicts": return await Locked(() => FixConflicts(LoadPatch(S(p, "id"))));
             case "mod.fixConflicts": return await Locked(() => Phase1Service.ExistingFixPlugins(LoadMod(S(p, "id")), S(p, "folder")));
@@ -1054,6 +1063,7 @@ public sealed partial class Backend
         var id = S(p, "id");
         var custom = S(p, "customFolder");
         var keepFix = B(p, "keepFix");
+        var removeStale = B(p, "removeStale");
         _jobCts = new CancellationTokenSource();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
@@ -1065,10 +1075,16 @@ public sealed partial class Backend
                 var svc = new Phase2Service(_lib, Runtime());
                 List<string> files;
                 await _gate.WaitAsync();
-                try { files = string.IsNullOrWhiteSpace(custom) ? WriteFixAndTopics(patch, keepFix) : new List<string>(); }
+                int removed = 0;
+                try
+                {
+                    files = string.IsNullOrWhiteSpace(custom) ? WriteFixAndTopics(patch, keepFix) : new List<string>();
+                    if (removeStale && string.IsNullOrWhiteSpace(custom)) { removed = svc.RemoveStaleExports(patch, voice, _lib.LoadMods()); _lib.Save(patch); }
+                }
                 finally { _gate.Release(); }
+                if (removed > 0) files.Insert(0, $"{removed} file(s) from earlier exports removed (lines no longer exported).");
                 var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "fuz", g.Done, g.Total, g.Failed, g.Current }));
-                var rep = await svc.ExportFuzAsync(patch, voice, _lib.LoadMods(), Tools(), string.IsNullOrWhiteSpace(custom) ? null : custom, progress, ct);
+                var rep = await svc.ExportFuzAsync(patch, voice, _lib.LoadMods(), Tools(), string.IsNullOrWhiteSpace(custom) ? null : custom, progress, ct, _gate);
                 Emit("jobDone", new { kind = "fuz", patchId = id, ok = rep.Failed == 0, report = rep, files, reminders = Phase2Service.EndOfPhaseReminders(patch, voice, _lib.LoadMods()) });
             }
             catch (OperationCanceledException)

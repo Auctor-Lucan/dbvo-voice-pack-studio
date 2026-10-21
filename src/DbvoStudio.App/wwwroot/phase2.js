@@ -852,12 +852,25 @@ export async function patchView(id) {
     return ow == null ? null : { keepFix: !ow };
   }
 
+  // Files from earlier exports whose lines are no longer exported (excluded, removed or renamed in Phase 1):
+  // left in place they still play in game and end up in the FOMOD. Ask once per export. null = cancelled.
+  async function staleChoice() {
+    const stale = await rpc('patch.staleExports', { id }).catch(() => []);
+    if (!stale.length) return { removeStale: false };
+    const v = await modal('Files from earlier exports', [
+      h('div', `${stale.length} file(s) this patch exported earlier belong to lines that are no longer exported: excluded, omitted, removed or changed in Phase 1. Left in place they still play in game and go into the FOMOD.`),
+      h('div.box.mono', { style: { whiteSpace: 'pre', maxHeight: '220px', overflow: 'auto', fontSize: '12px' } }, stale.slice(0, 200).join('\n') + (stale.length > 200 ? `\n… +${stale.length - 200} more` : '')),
+    ], [{ label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' }, { label: 'Delete them', primary: true, value: 'delete' }], { wide: true });
+    return v == null ? null : { removeStale: v === 'delete' };
+  }
+
   async function exportWavLip() {
     try {
       const fc = await fixChoice(); if (!fc) return;
-      const r = await rpc('patch.exportWavLip', { id, ...fc });
+      const sc = await staleChoice(); if (!sc) return;
+      const r = await rpc('patch.exportWavLip', { id, ...fc, ...sc });
       await filesModal('WAV + LIP exported', h('div.kv',
-        h('div', 'Written'), h('div', r.written), h('div', 'Skipped (already there)'), h('div', r.skipped), h('div', 'Failed'), h('div', r.failed),
+        h('div', 'Written'), h('div', r.written), r.removed ? [h('div', 'Removed (no longer exported)'), h('div', r.removed)] : null, h('div', 'Skipped (up to date, or not ours and Overwrite is off)'), h('div', r.skipped), h('div', 'Failed'), h('div', r.failed),
         r.errors && r.errors.length ? [h('div', 'Errors'), h('div.mono', r.errors.slice(0, 10).join('\n'))] : null), r.files);
     } catch (e) { fail(e); }
   }
@@ -870,7 +883,8 @@ export async function patchView(id) {
     }
     try {
       const fc = other ? {} : await fixChoice(); if (!fc) return;
-      await rpc('patch.buildFuz', { id, customFolder, ...fc }); renderActions();
+      const sc = other ? {} : await staleChoice(); if (!sc) return;
+      await rpc('patch.buildFuz', { id, customFolder, ...fc, ...sc }); renderActions();
     } catch (e) { fail(e); }
   }
 
@@ -1034,7 +1048,7 @@ export async function patchView(id) {
         row('Final folder', 'The FOMOD root (or a page of it). The final DBVO Fix plugin and its topic file go here too.', fr.el),
         row('.fuz sub-folder', 'Inside the final folder, e.g. Sound\\DBVO\\{packId}. {packId} = the voice pack ID (' + (voice.packId || 'not set') + ')', tpl),
         row('Result', null, preview),
-        row('Overwrite', 'Off: existing WAV + LIP and .fuz are skipped; for DBVO Fix you are asked',
+        row('Overwrite', 'Files this patch exported are always updated when their line has a new take. Off: other files already there (e.g. from another tool) are left alone; for DBVO Fix you are asked',
           h('div.row', { style: { gap: '18px' } }, switchEl(owWav, (v) => { owWav = v; }, 'WAV + LIP'), switchEl(owFuz, (v) => { owFuz = v; }, '.fuz'),
             switchEl(owFix, (v) => { owFix = v; }, 'DBVO Fix', { title: 'DBVO Fix plugins in the final folder. Off: you are asked before one with the same name is replaced. The working copy in the DBVO Fix folder is always replaced.' }))),
         row('Omit lines users have', 'Only packs every user installs',

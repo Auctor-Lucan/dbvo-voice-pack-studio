@@ -202,3 +202,61 @@ public class AuditFixTests : IDisposable
         Assert.Contains(written, w => w.StartsWith("Removed"));
     }
 }
+
+public class ExportTrackingTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "dbvo-exp-" + Guid.NewGuid().ToString("N")[..8]);
+    public ExportTrackingTests() => Directory.CreateDirectory(_dir);
+    public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
+
+    [Fact]
+    public void New_take_replaces_our_export_but_foreign_files_stay_and_excluded_lines_are_stale()
+    {
+        var lib = new Library(Path.Combine(_dir, "lib"));
+        var svc = new Phase2Service(lib, lib.LoadSettings());
+        var voice = new VoicePack { Name = "V", PackId = "v" };
+        var wl = Path.Combine(_dir, "wl");
+        var patch = new DbvoPatch { WavLipFolder = wl };
+        Phase2Line Line(string text)
+        {
+            var l = new Phase2Line { LineId = NewId.Short(), Key = text, FinalLine = text, Spoken = text, Status = Phase2Status.Generated };
+            patch.Lines.Add(l);
+            return l;
+        }
+        Take AddTake(Phase2Line l, byte b)
+        {
+            var t = new Take { Slot = l.Takes.Count + 1, SpokenText = l.Spoken };
+            t.WavPath = Path.Combine("takes", l.LineId, t.Slot.ToString("00"), "a.wav");
+            t.LipPath = Path.Combine("takes", l.LineId, t.Slot.ToString("00"), "a.lip");
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(lib.PatchFolder(patch.Id), t.WavPath))!);
+            File.WriteAllBytes(Path.Combine(lib.PatchFolder(patch.Id), t.WavPath), new[] { b });
+            File.WriteAllBytes(Path.Combine(lib.PatchFolder(patch.Id), t.LipPath), new[] { b });
+            l.Takes.Add(t); l.SelectedTakeId = t.Id;
+            return t;
+        }
+        var a = Line("Follow me.");
+        AddTake(a, 1);
+        var foreign = Line("Wait here.");
+        AddTake(foreign, 2);
+        Directory.CreateDirectory(wl);
+        var foreignWav = Path.Combine(wl, LineNaming.Stem("Wait here.", NamingMode.Legacy) + ".wav");
+        File.WriteAllBytes(foreignWav, new byte[] { 9 });
+
+        svc.ExportWavLip(patch, voice);
+        var aWav = Path.Combine(wl, LineNaming.Stem("Follow me.", NamingMode.Legacy) + ".wav");
+        Assert.Equal(1, File.ReadAllBytes(aWav)[0]);
+        Assert.Equal(9, File.ReadAllBytes(foreignWav)[0]); // not ours, Overwrite off
+
+        AddTake(a, 3); // regenerated
+        var rep = svc.ExportWavLip(patch, voice);
+        Assert.Equal(3, File.ReadAllBytes(aWav)[0]);
+        Assert.Equal(0, svc.ExportWavLip(patch, voice).Written); // up to date now
+
+        a.Excluded = true;
+        var stale = svc.StaleExports(patch, voice, Array.Empty<Mod>());
+        Assert.Contains(aWav, stale);
+        Assert.Equal(2, svc.RemoveStaleExports(patch, voice, Array.Empty<Mod>()));
+        Assert.False(File.Exists(aWav));
+        Assert.True(File.Exists(foreignWav));
+    }
+}

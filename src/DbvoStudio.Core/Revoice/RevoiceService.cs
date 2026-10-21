@@ -599,7 +599,9 @@ public sealed class RevoiceService
     public static List<string> StaleExports(RevoiceProject p)
     {
         if (string.IsNullOrWhiteSpace(p.OutputFolder)) return new();
-        var current = p.Lines.Where(l => !l.Gone).Select(l => l.RelativePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Exported files of lines that are no longer exported (gone, excluded, skipped speaker, no take) are stale too:
+        // left in place the game would still play them.
+        var current = ExportLines(p).Select(l => l.RelativePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return p.ExportedFiles.Where(f => !current.Contains(f) && File.Exists(Path.Combine(p.OutputFolder, f))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
@@ -620,6 +622,7 @@ public sealed class RevoiceService
                     for (var dir = Path.GetDirectoryName(full); dir != null && dir.Length > p.OutputFolder.Length && Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any(); dir = Path.GetDirectoryName(dir))
                         Directory.Delete(dir);
                     p.ExportedFiles.RemoveAll(x => x.Equals(f, StringComparison.OrdinalIgnoreCase));
+                    p.ExportedTakes.Remove(f.ToLowerInvariant());
                 }
                 catch (Exception ex) { rep.Errors.Add($"{f}: not removed ({ex.Message})"); }
             }
@@ -634,7 +637,11 @@ public sealed class RevoiceService
             try
             {
                 var target = Path.Combine(p.OutputFolder, line.RelativePath);
-                if (!overwrite && File.Exists(target)) { lock (rep) rep.Skipped++; return; }
+                var key = line.RelativePath.ToLowerInvariant();
+                bool skip;
+                // A file this tool wrote is rebuilt when the line has another take; other files follow "overwrite".
+                lock (rep) skip = File.Exists(target) && (p.ExportedTakes.TryGetValue(key, out var had) ? had == line.SelectedTakeId : !overwrite);
+                if (skip) { lock (rep) rep.Skipped++; return; }
                 using var work = new WorkFolder(workRoot);
                 var t = line.SelectedTake!;
                 var xwm = work.File("a.xwm");
@@ -646,6 +653,7 @@ public sealed class RevoiceService
                 {
                     rep.Written++;
                     if (!p.ExportedFiles.Contains(line.RelativePath, StringComparer.OrdinalIgnoreCase)) p.ExportedFiles.Add(line.RelativePath);
+                    p.ExportedTakes[key] = t.Id;
                     var folder = Path.GetDirectoryName(line.RelativePath)!;
                     rep.Folders[folder] = rep.Folders.TryGetValue(folder, out var n) ? n + 1 : 1;
                 }

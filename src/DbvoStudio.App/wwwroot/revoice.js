@@ -120,7 +120,7 @@ export async function revoiceView(id) {
       let removeStale = false;
       if (stale.length) {
         const v = await modal('Files from an earlier export', [
-          h('div', `${stale.length} .fuz file(s) in the output folder were written by an earlier export but no line uses them now. The mod or the plugin list changed since, or these lines now belong to another voice type, so the game looks for them in another folder.`),
+          h('div', `${stale.length} .fuz file(s) in the output folder were written by an earlier export but are no longer exported: their lines are excluded, their speaker is skipped, their take was deleted, or the mod changed so the game looks for them elsewhere. Left in place the game still plays them.`),
           h('div.box.mono', { style: { maxHeight: '180px', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: '12px' } }, stale.slice(0, 200).join('\n') + (stale.length > 200 ? `\n… ${stale.length - 200} more` : '')),
           h('div.faint', 'Only files this tool wrote are listed; nothing else in the folder is touched.'),
         ], [{ label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' }, { label: 'Delete them', primary: true, value: 'delete' }]);

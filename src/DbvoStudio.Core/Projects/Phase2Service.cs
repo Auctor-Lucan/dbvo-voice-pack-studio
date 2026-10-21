@@ -645,11 +645,76 @@ public sealed class Phase2Service
         return kept.Select((t, i) => (t, Path.Combine(stem, i.ToString()))).ToList();
     }
 
+    private static string ExportKey(string path) => Path.GetFullPath(path);
+
+    /// <summary>The export map, compared without case like Windows paths (a loaded map has no comparer).</summary>
+    private static void ExportMap(DbvoPatch patch)
+    {
+        if (patch.Exported.Comparer != StringComparer.OrdinalIgnoreCase)
+            patch.Exported = new Dictionary<string, string>(patch.Exported, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Write a target unless it holds this take already, or it is someone else's file and overwriting is off.</summary>
+    private static bool ShouldWrite(DbvoPatch patch, string target, Take take, bool overwrite)
+    {
+        if (!File.Exists(target)) return true;
+        if (patch.Exported.TryGetValue(ExportKey(target), out var tid)) return tid != take.Id;
+        return overwrite;
+    }
+
+    /// <summary>The files a full export would write now: WAV + LIP folder and each mod's .fuz folder.</summary>
+    public HashSet<string> PlannedExports(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var wl = WavLipFolder(patch, voice);
+        var root = FinalRoot(patch, voice);
+        var template = FuzTemplate(patch, voice);
+        foreach (var line in patch.Lines.Where(l => !l.IsOmitted && !l.Excluded))
+            foreach (var (_, stem) in ExportTakes(line, voice.Naming))
+            {
+                if (!string.IsNullOrWhiteSpace(wl)) { set.Add(ExportKey(Path.Combine(wl, stem + ".wav"))); set.Add(ExportKey(Path.Combine(wl, stem + ".lip"))); }
+                if (!string.IsNullOrWhiteSpace(root))
+                    foreach (var name in line.Sources.Select(x => mods.FirstOrDefault(m => m.Id == x.ModId)?.Name ?? "Mod").Distinct())
+                        set.Add(ExportKey(Path.Combine(root, ExpandTemplate(template, name, voice, patch), stem + ".fuz")));
+            }
+        return set;
+    }
+
+    /// <summary>Files from earlier exports that a full export would no longer write (still on disk).</summary>
+    public List<string> StaleExports(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods)
+    {
+        ExportMap(patch);
+        var planned = PlannedExports(patch, voice, mods);
+        return patch.Exported.Keys.Where(k => !planned.Contains(k) && File.Exists(k)).OrderBy(k => k).ToList();
+    }
+
+    /// <summary>Delete the stale exported files (and empty folders they leave). Returns how many were removed.</summary>
+    public int RemoveStaleExports(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods, List<string>? errors = null)
+    {
+        int n = 0;
+        foreach (var f in StaleExports(patch, voice, mods))
+        {
+            try
+            {
+                File.Delete(f);
+                patch.Exported.Remove(f);
+                n++;
+                var dir = Path.GetDirectoryName(f);
+                if (dir != null && Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+            }
+            catch (Exception ex) { errors?.Add($"{f}: not removed ({ex.Message})"); }
+        }
+        // forget entries whose files are gone
+        foreach (var k in patch.Exported.Keys.Where(k => !File.Exists(k)).ToList()) patch.Exported.Remove(k);
+        return n;
+    }
+
     public ExportReport ExportWavLip(DbvoPatch patch, VoicePack voice)
     {
         var rep = new ExportReport();
         var folder = WavLipFolder(patch, voice);
         if (string.IsNullOrWhiteSpace(folder)) throw new InvalidOperationException("Set the WAV + LIP folder first.");
+        ExportMap(patch);
         foreach (var (line, t, stem) in patch.Lines.Where(l => !l.IsOmitted && !l.Excluded).SelectMany(l => ExportTakes(l, voice.Naming).Select(x => (l, x.Take, x.Stem))))
         {
             try
@@ -658,9 +723,10 @@ public sealed class Phase2Service
                 foreach (var (srcRel, ext) in new[] { (t.WavPath, ".wav"), (t.LipPath, ".lip") })
                 {
                     var target = Path.Combine(folder, stem + ext);
-                    if (File.Exists(target) && !patch.OverwriteWavLip) continue;
+                    if (!ShouldWrite(patch, target, t, patch.OverwriteWavLip)) continue;
                     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                     FileLinks.LinkOrCopy(Path.Combine(_lib.PatchFolder(patch.Id), srcRel), target, true);
+                    patch.Exported[ExportKey(target)] = t.Id;
                     any = true;
                 }
                 if (any) rep.Written++; else rep.Skipped++;
@@ -671,15 +737,17 @@ public sealed class Phase2Service
                 rep.Errors.Add($"{stem}: {ex.Message}");
             }
         }
+        _lib.Save(patch);
         return rep;
     }
 
     /// <summary>
     /// Build .fuz files from the selected takes into each source mod's template folder (or one custom folder).
-    /// A line shared by several mods is encoded once and hardlinked into each folder.
+    /// A line shared by several mods is encoded once and hardlinked into each folder. A .fuz this patch made earlier
+    /// is rebuilt when its line has another take; other files follow "Overwrite .fuz".
     /// </summary>
     public async Task<ExportReport> ExportFuzAsync(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods, ExternalTools tools,
-        string? customFolder = null, IProgress<GenerationProgress>? progress = null, CancellationToken ct = default)
+        string? customFolder = null, IProgress<GenerationProgress>? progress = null, CancellationToken ct = default, SemaphoreSlim? stateGate = null)
     {
         var rep = new ExportReport();
         var root = FinalRoot(patch, voice);
@@ -689,6 +757,9 @@ public sealed class Phase2Service
         var lines = patch.Lines.Where(l => !l.IsOmitted && !l.Excluded).SelectMany(l => ExportTakes(l, voice.Naming).Select(x => (Line: l, x.Take, x.Stem))).ToList();
         int done = 0;
         var gate = new SemaphoreSlim(Math.Max(2, Environment.ProcessorCount / 2));
+        var written = new List<(string Target, string TakeId)>();
+        bool track = customFolder == null;
+        ExportMap(patch);
 
         await Task.WhenAll(lines.Select(async item =>
         {
@@ -701,7 +772,8 @@ public sealed class Phase2Service
                     : line.Sources.Select(s => mods.FirstOrDefault(m => m.Id == s.ModId)?.Name ?? "Mod").Distinct()
                         .Select(name => Path.Combine(root, ExpandTemplate(template, name, voice, patch))).ToList();
                 var targets = folders.Select(f => Path.Combine(f, stem + ".fuz")).ToList();
-                var needed = targets.Where(t => patch.OverwriteFuz || !File.Exists(t)).ToList();
+                List<string> needed;
+                lock (rep) needed = targets.Where(t => track ? ShouldWrite(patch, t, take, patch.OverwriteFuz) : patch.OverwriteFuz || !File.Exists(t)).ToList();
                 if (needed.Count == 0)
                 {
                     lock (rep) rep.Skipped++;
@@ -718,7 +790,11 @@ public sealed class Phase2Service
                 Directory.CreateDirectory(Path.GetDirectoryName(first)!);
                 await File.WriteAllBytesAsync(first, fuz, ct);
                 foreach (var other in needed.Skip(1)) FileLinks.LinkOrCopy(first, other, true);
-                lock (rep) rep.Written++;
+                lock (rep)
+                {
+                    rep.Written++;
+                    if (track) foreach (var n in needed) written.Add((n, t.Id));
+                }
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -736,6 +812,15 @@ public sealed class Phase2Service
                 progress?.Report(new GenerationProgress(d, lines.Count, rep.Failed, line.FinalLine, null));
             }
         }));
+        var sg = stateGate ?? new SemaphoreSlim(1, 1);
+        await sg.WaitAsync(CancellationToken.None);
+        try
+        {
+            foreach (var (target, takeId) in written) patch.Exported[ExportKey(target)] = takeId;
+            if (track) patch.LastFuzUtc = DateTime.UtcNow;
+            _lib.Save(patch);
+        }
+        finally { sg.Release(); }
         return rep;
     }
 

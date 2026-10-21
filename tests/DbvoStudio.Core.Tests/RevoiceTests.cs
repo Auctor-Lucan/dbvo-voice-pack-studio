@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Projects;
 using DbvoStudio.Core.Plugins;
 using DbvoStudio.Core.Revoice;
 
@@ -63,7 +64,8 @@ public class RevoiceStaleExportTests
     {
         var root = Path.Combine(Path.GetTempPath(), "dbvo-stale-" + Guid.NewGuid().ToString("N")[..6]);
         var p = new RevoiceProject { OutputFolder = root };
-        var now = new RevoiceLine { PluginFolder = "Mod.esp", VoiceType = "MaleNord", FileStem = "a_b_00000800_1" };
+        var take = new Take();
+        var now = new RevoiceLine { PluginFolder = "Mod.esp", VoiceType = "MaleNord", FileStem = "a_b_00000800_1", Takes = { take }, SelectedTakeId = take.Id };
         p.Lines.Add(now);
         var old = Path.Combine("Sound", "Voice", "Mod.esp", "MaleCommoner", "a_b_00000800_1.fuz");
         foreach (var f in new[] { now.RelativePath, old })
@@ -73,5 +75,8 @@ public class RevoiceStaleExportTests
             p.ExportedFiles.Add(f);
         }
         Assert.Equal(new[] { old }, RevoiceService.StaleExports(p));
+        // an excluded line's exported file would still play in game: it is stale too
+        now.Excluded = true;
+        Assert.Equal(2, RevoiceService.StaleExports(p).Count);
     }
 }

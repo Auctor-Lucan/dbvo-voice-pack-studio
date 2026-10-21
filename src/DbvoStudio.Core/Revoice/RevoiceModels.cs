@@ -151,4 +151,6 @@ public sealed class RevoiceProject
     public DateTime? LastExportUtc { get; set; }
     /// <summary>.fuz files this tool has written to the output folder (relative paths), so files that no longer match a line can be cleaned up.</summary>
     public List<string> ExportedFiles { get; set; } = new();
+    /// <summary>The take each exported file holds (relative path, lower case → take id): a file is rebuilt when its line has another take.</summary>
+    public Dictionary<string, string> ExportedTakes { get; set; } = new();
 }

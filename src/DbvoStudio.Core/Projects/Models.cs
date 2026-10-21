@@ -467,6 +467,12 @@ public sealed class DbvoPatch
     public List<string> SourceFolders { get; set; } = new();
     /// <summary>When .fuz files were last built, and how many.</summary>
     public DateTime? LastFuzUtc { get; set; }
+    /// <summary>
+    /// Files this patch exported to its WAV + LIP and final folders (full path, lower case) and the take each one holds.
+    /// A file the patch made is replaced when its line has another take; files it did not make follow the Overwrite
+    /// settings. Files of lines no longer exported (excluded, removed, renamed) can be cleaned up.
+    /// </summary>
+    public Dictionary<string, string> Exported { get; set; } = new();
     public List<Phase2Line> Lines { get; set; } = new();
     /// <summary>Lines no longer in Phase 1 that have takes: kept (hidden) so the takes come back if the line returns.</summary>
     public List<Phase2Line> Parked { get; set; } = new();
