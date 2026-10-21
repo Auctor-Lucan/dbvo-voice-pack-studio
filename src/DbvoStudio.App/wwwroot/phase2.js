@@ -19,6 +19,8 @@ export const VOICE_COLORS = [
 ];
 
 let creditsCache = null; // { at, data }
+// Voices and models per engine, kept across pages so the toolbar draws complete at once.
+const engineCache = new Map(); // engine -> { voices, models, localVoices }
 async function loadCredits(force = false) {
   if (!force && creditsCache && Date.now() - creditsCache.at < 60000) return creditsCache.data;
   const data = await rpc('eleven.subscriptionInfo');
@@ -196,6 +198,8 @@ export async function patchView(id) {
   let search = '';
   let focusedId = null;
   let voices = [], models = [], localVoices = [];
+  let creditsEl = null; // one credits button per page, updated in place
+  { const c = engineCache.get(vc ? 'sts' : voice.engine || 'elevenlabs'); if (c) ({ voices, models, localVoices } = c); }
   let showInsp = store.get('insp2', true);
   let lastEdit = null; // { el, line } — the last spoken-text box the user was in
   const audio = new Audio();
@@ -462,7 +466,7 @@ export async function patchView(id) {
         numIn(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit; the app slows down automatically on "too many requests".' }));
     }
     if (locked) tb.append(h('span.badge.b-toolong', { title: 'Unlock in Global Settings → Voice packs' }, '🔒 locked'));
-    if (eng === 'elevenlabs' || eng === 'sts') tb.append(h('div.spacer'), creditsButton());
+    if (eng === 'elevenlabs' || eng === 'sts') tb.append(h('div.spacer'), creditsEl || (creditsEl = creditsButton()));
   }
 
   // ---- ElevenLabs credits (cached for a minute across pages)
@@ -589,12 +593,12 @@ export async function patchView(id) {
       h('span.lbl', 'Tags'),
       voice.tags.map(chip),
       custom,
+      h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
       h('button.btn.sm.ghost', { title: 'Add a [tag] to every line in the current filter…', onclick: async () => {
         const r = await prompt('Add a tag to every line shown', [{ name: 't', label: 'Tags', placeholder: '[whispers]', help: `Added to the start of ${grid.rows.filter((l) => !l.omitted).length} line(s) in the current filter.` }]);
         if (r && r.t.trim()) applyTags(r.t.match(/\[[^\]]+\]|[^\s\[\]]+/g), 'add', grid.rows.filter((l) => !l.omitted).map((l) => l.lineId));
       } }, 'Add a [tag] to all shown…'),
       h('div.spacer'),
-      h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
       folderButton());
   }
 
@@ -1006,6 +1010,7 @@ export async function patchView(id) {
 
   async function loadEngine(refresh = false) {
     const eng = engine();
+    const before = JSON.stringify([voices, models, localVoices]);
     try {
       if (eng === 'voxcpm' || eng === 'omnivoice') {
         localVoices = await rpc('engine.voices', { engine: eng }).catch(() => []);
@@ -1017,8 +1022,9 @@ export async function patchView(id) {
     } catch (e) {
       if (app.state.settings.hasApiKey) fail(e);
     }
-    renderToolbar();
-    renderTagbar();
+    engineCache.set(eng, { voices, models, localVoices });
+    // Only redraw when something changed, so the toolbar doesn't flicker.
+    if (refresh || JSON.stringify([voices, models, localVoices]) !== before) { renderToolbar(); renderTagbar(); }
   }
 
   // live updates from generation

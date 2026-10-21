@@ -376,9 +376,8 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .act-btn.on.warn { color: var(--warn); }
 .act-btn.on.bad { color: var(--bad); }
 .icon-bar { padding-right: 14px; flex-wrap: nowrap; }
-.excl-btn { opacity: 0; }
-.vrow:hover .excl-btn, .excl-btn.on, .excl-btn:focus-visible { opacity: 1; }
-.vrow:hover .excl-btn:not(.on) { opacity: .45; }
+.excl-btn { color: var(--faint); opacity: .55; }
+.excl-btn:hover, .excl-btn.on { opacity: 1; }
 .vrow.excluded input, .vrow.excluded .dim, .vrow.excluded .faint, .vrow.excluded .take-lbl { text-decoration: line-through; opacity: .55; }
 .take-lbl.click { cursor: pointer; }
 .take-lbl.click:hover { color: var(--accent); text-decoration: underline; }
@@ -410,6 +409,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .legend-note b { color: var(--text); font-weight: 600; }
 .legend-item { display: inline-flex; gap: 6px; align-items: center; }
 .appr.demo { cursor: default; pointer-events: none; }
-.demo-ex { color: var(--dim); font-size: 15px; }
+.demo-ex { color: var(--bad); font-size: 15px; }
 .icon-btn.on-bad { color: var(--bad); }
 .act-btn:hover:not(:disabled) .corner { stroke: var(--warn); }
+.appr .note { font-size: 16px; line-height: 17px; display: inline-block; height: 17px; overflow: visible; }

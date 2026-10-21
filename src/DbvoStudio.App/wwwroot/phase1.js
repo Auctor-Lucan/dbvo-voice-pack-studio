@@ -325,7 +325,7 @@ export async function modView(id) {
     if (l.status === 'Removed' || l.excluded) return null;
     const chip = (on, explicit, against, label, title, onclick) => h('button.appr' + (on ? '.on' : '') + (against ? '.against' : '') + (explicit ? '.explicit' : ''), { title, onclick }, label);
     if (which === 'voice') return chip(l.voiced, l.voiceApproved != null, l.voiceApproved != null && l.voiceApproved !== l.defaultVoice,
-      '♪', (l.voiced ? 'Voiced: in the topic file and generated in Phase 2.' : 'Not voiced.') + (l.voiceApproved == null ? ' (default)' : ' (your choice)') + ' Click to switch.',
+      h('span.note', '♪'), (l.voiced ? 'Voiced: in the topic file and generated in Phase 2.' : 'Not voiced.') + (l.voiceApproved == null ? ' (default)' : ' (your choice)') + ' Click to switch.',
       () => act(l, 'voice', !l.voiced));
     if (plugin.isTopicFile) return null;
     const f = chip(l.inFix, l.fixApproved != null, l.fixApproved != null && l.fixApproved !== l.defaultFix,
@@ -479,6 +479,7 @@ export async function modView(id) {
       unrev && mod.plugins.length > 1 ? h('span.badge.b-broken', { title: 'Plugins with flagged lines not reviewed yet' }, `${unrev} with lines to review`) : null,
       drop, h('div.spacer'));
     if (plugin && !plugin.isTopicFile) {
+      if (plugin.importedFixPlugin) tabs.append(h('span.appr.on.demo', { title: 'A DBVO Fix plugin is loaded for this plugin: ' + plugin.importedFixPlugin }, 'Fix'));
       tabs.append(h('button.btn.sm', { onclick: importFix, title: 'Take the texts of a DBVO Fix plugin you made earlier (for example with xEdit) into this plugin\'s lines' },
         plugin.importedFixPlugin ? `Imported: ${plugin.importedFixPlugin} · import again…` : 'Import existing DBVO Fix plugin…'));
     }
@@ -519,9 +520,9 @@ export async function modView(id) {
       h('div.filter-tools',
         h('div.legend',
           h('span.legend-note', 'Review ', h('b', 'BROKEN'), ' and ', h('b', 'TOO LONG WILL CTD'), ' lines before Phase 2.'),
-          h('span.legend-item', h('span.appr.on.demo', 'Fix'), 'edit goes into the DBVO Fix plugin'),
-          h('span.legend-item', h('span.appr.on.demo', '♪'), 'voiced in Phase 2'),
-          h('span.legend-item', h('span.demo-ex', '⊘'), 'exclude from the topic file')),
+          h('span.legend-item', h('span.appr.on.demo', 'Fix'), '= Edit made in DBVO Fix plugin'),
+          h('span.legend-item', h('span.appr.on.demo', h('span.note', '♪')), '= To be voiced in Phase 2'),
+          h('span.legend-item', h('span.demo-ex', '⊕'), '= Excluded from voicing in Phase 2')),
         h('div.spacer'), q, columnsMenu(grid),
         h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp1', showInsp); split.classList.toggle('no-insp', !showInsp); renderFilters(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel')));
   }
