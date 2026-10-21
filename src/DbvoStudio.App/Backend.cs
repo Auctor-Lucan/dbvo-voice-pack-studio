@@ -670,7 +670,7 @@ public sealed partial class Backend
         var mod = LoadMod(S(p, "id"));
         var paths = Paths(p, "paths").Where(f => new[] { ".esp", ".esm", ".esl", ".txt" }.Contains(Path.GetExtension(f).ToLowerInvariant())).ToList();
         if (paths.Count == 0) throw new InvalidOperationException("Choose .esp, .esm or .esl plugins, or topic .txt files.");
-        _lib.Backup("before-import-" + mod.Name, _settings.BackupsToKeep);
+        if (!B(p, "noBackup")) _lib.Backup("before-import-" + mod.Name, _settings.BackupsToKeep);
         var svc = new Phase1Service(_lib, Runtime());
         var reports = new List<object>();
         foreach (var f in paths)

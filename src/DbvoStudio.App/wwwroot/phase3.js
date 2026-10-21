@@ -214,7 +214,7 @@ export async function fomodView(id) {
   const ICONS = [['⚠️', 'Warning'], ['✅', 'Required / done'], ['⭐', 'Recommended'], ['ℹ️', 'Info'],
     ['❌', 'Not compatible'], ['⛔', 'Do not use'], ['❗', 'Important'], ['❓', 'Question / optional'],
     ['✏️', 'Edited / changed'], ['⚙️', 'Settings / setup'], ['⏳', 'Work in progress'], ['➡️', 'Next / see'],
-    ['✨', 'New'], ['⚡', 'Performance'], ['❤️', 'Thanks'], ['☠️', 'Danger']];
+    ['✨', 'New'], ['⚡', 'Performance'], ['❤️', 'Thanks'], ['☠️', 'Danger'], ['🔒', 'Mandatory / locked'], ['💾', 'Save / files']];
   const descArea = (obj, key, rows) => {
     const area = txt(obj, key, { area: true, rows });
     const insert = (ch) => {

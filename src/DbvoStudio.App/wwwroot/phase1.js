@@ -43,12 +43,20 @@ export async function modsView() {
     h('h1', 'Mods'),
     h('span.sub', 'Read plugins or topic files and make their lines DBVO-ready. Shared by every voice pack.'),
     h('div.spacer'),
+    h('button.btn', { title: 'Add many plugins at once: give each its mod name and category, and every mod becomes its own card', onclick: () => batchAdd([]) }, '+ Add many mods…'),
     h('button.btn.primary', { title: 'Create a mod project and add its plugins', onclick: newMod }, '+ New mod')));
   const body = h('div.view-body');
   view.append(body);
+  // Dropping plugins anywhere on the list opens the batch table.
+  body.addEventListener('dragover', (e) => { e.preventDefault(); body.classList.add('drop-hint'); });
+  body.addEventListener('dragleave', (e) => { if (!body.contains(e.relatedTarget)) body.classList.remove('drop-hint'); });
+  body.addEventListener('drop', async (e) => {
+    e.preventDefault(); body.classList.remove('drop-hint');
+    try { batchAdd(await droppedPaths([...(e.dataTransfer.files || [])])); } catch (err) { fail(err); }
+  });
   if (!s.mods.length) {
     body.append(h('div.empty', h('h2', 'No mods yet'),
-      h('div', 'Create a mod, then drop its .esp / .esm files (or topic .txt files) into it.'),
+      h('div', 'Create a mod, then drop its .esp / .esm files (or topic .txt files) into it. Or drop many plugins here to add many mods at once.'),
       h('div', { style: { marginTop: '14px' } }, h('button.btn.primary', { title: 'Create a mod project and add its plugins', onclick: newMod }, '+ New mod'))));
     return view;
   }
@@ -80,6 +88,172 @@ export async function modsView() {
   render();
   body.append(q, listEl);
   return view;
+}
+
+// ------------------------------------------------------------------ batch add
+
+const PLUGIN_EXT = /\.(esp|esm|esl|txt)$/i;
+const fileOf = (p) => p.split(/[\\/]/).pop();
+
+/** A readable mod name from a plugin file name: "SeranaDialogAddon.esp" -> "Serana Dialog Addon". */
+function nameFromFile(file) {
+  let n = file.replace(PLUGIN_EXT, '').replace(/[_]+/g, ' ');
+  if (!/\s/.test(n)) n = n.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+  return n.replace(/\s+/g, ' ').trim();
+}
+
+/** Plugins whose name starts with another dropped plugin's name ("Mod - Patch.esp" after "Mod.esp") get that mod's name. */
+function defaultRows(paths) {
+  const files = paths.filter((p) => PLUGIN_EXT.test(p));
+  const bases = files.map((p) => fileOf(p).replace(PLUGIN_EXT, ''));
+  return files.map((p, i) => {
+    const base = bases[i];
+    const parent = bases.filter((b, j) => j !== i && b.length >= 3 && base.length > b.length && base.toLowerCase().startsWith(b.toLowerCase()) && /^[\s_\-.]/.test(base.slice(b.length)))
+      .sort((a, b) => b.length - a.length)[0];
+    return { path: p, file: fileOf(p), name: nameFromFile(parent ? parent + '.esp' : fileOf(p)), category: 'Misc' };
+  });
+}
+
+async function batchAdd(initial) {
+  const s = app.state;
+  let rows = defaultRows(initial || []);
+  const known = new Set(s.mods.map((m) => m.name.trim().toLowerCase()));
+  const body = h('tbody');
+  const summary = h('div.faint');
+  const problems = h('div');
+  const table = h('div.batch-wrap', h('table.tbl.batch', h('thead', h('tr', h('th', 'Plugin'), h('th', 'Mod name'), h('th', 'Category'), h('th', ''))), body));
+  const drop = h('div.dropzone', { title: 'Drop .esp / .esm / .esl or topic .txt files' }, 'Drop more plugins here, or ', h('a', { href: '#', onclick: async (e) => { e.preventDefault(); add(await rpc('pick.files', { title: 'Choose plugins', filter: 'Plugins and topic files|*.esp;*.esm;*.esl;*.txt' }).catch(() => null)); } }, 'choose files…'));
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', async (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('over'); try { add(await droppedPaths([...(e.dataTransfer.files || [])])); } catch (err) { fail(err); } });
+  const paste = h('textarea', { rows: 4, placeholder: 'SeranaDialogAddon.esp | Serana Dialogue Addon | Followers\nSDA Patch Collection.esp | Serana Dialogue Addon | Followers', spellcheck: false });
+  const pasteMsg = h('div.faint');
+
+  function add(paths) {
+    if (!paths || !paths.length) return;
+    const have = new Set(rows.map((r) => r.path.toLowerCase()));
+    const fresh = defaultRows([...rows.map((r) => r.path), ...paths.filter((p) => !have.has(p.toLowerCase()))]);
+    // keep what was typed for rows already in the table
+    rows = fresh.map((f) => rows.find((r) => r.path === f.path) || f);
+    render();
+  }
+
+  function groups() {
+    const g = new Map();
+    for (const r of rows) {
+      const key = r.name.trim().toLowerCase();
+      if (!key) continue;
+      if (!g.has(key)) g.set(key, { name: r.name.trim(), category: r.category, rows: [] });
+      g.get(key).rows.push(r);
+    }
+    return [...g.values()];
+  }
+
+  function check() {
+    const out = [];
+    if (rows.some((r) => !r.name.trim())) out.push('Every plugin needs a mod name.');
+    for (const g of groups()) {
+      if (known.has(g.name.toLowerCase())) out.push(`"${g.name}" already exists. Add its plugins on that mod's page instead, or use another name.`);
+      const cats = new Set(g.rows.map((r) => r.category));
+      if (cats.size > 1) out.push(`"${g.name}" has plugins in different categories (${[...cats].join(', ')}): pick one.`);
+      const files = g.rows.map((r) => r.file.toLowerCase());
+      if (new Set(files).size !== files.length) out.push(`"${g.name}" has the same file twice.`);
+    }
+    return out;
+  }
+
+  function render() {
+    clear(body);
+    const g = groups();
+    rows.forEach((r, i) => {
+      const nameIn = h('input', { type: 'text', value: r.name, placeholder: 'Mod name' });
+      nameIn.addEventListener('input', () => { r.name = nameIn.value; renderMeta(); });
+      nameIn.addEventListener('change', render);
+      const cat = categorySelect(r.category, (c) => {
+        // the whole mod shares one category
+        for (const x of rows) if (x.name.trim().toLowerCase() === r.name.trim().toLowerCase()) x.category = c;
+        if (!app.state.settings.categories.includes(c)) app.state.settings.categories.push(c);
+        render();
+      });
+      const grp = g.find((x) => x.rows.includes(r));
+      const shared = grp && grp.rows.length > 1 && grp.rows[0] !== r;
+      body.append(h('tr' + (shared ? '.joined' : ''),
+        h('td.mono', { title: r.path }, r.file),
+        h('td', nameIn, shared ? h('div.faint', { style: { fontSize: '11px' } }, 'same mod as ' + grp.rows[0].file) : null),
+        h('td', cat),
+        h('td', h('button.icon-btn', { title: 'Leave this plugin out', onclick: () => { rows.splice(i, 1); render(); } }, '✕'))));
+    });
+    if (!rows.length) body.append(h('tr', h('td', { colSpan: 4 }, h('div.faint', { style: { padding: '14px', textAlign: 'center' } }, 'No plugins yet.'))));
+    renderMeta();
+  }
+
+  function renderMeta() {
+    const g = groups();
+    summary.textContent = rows.length ? `${rows.length} plugin(s) → ${g.length} mod(s). Plugins with the same mod name become one mod.` : '';
+    const p = rows.length ? check() : [];
+    clear(problems).append(...p.map((x) => h('div.banner.bad', { style: { margin: '4px 0 0' } }, x)));
+  }
+
+  function applyPaste() {
+    const lines = paste.value.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    const bad = [];
+    let applied = 0;
+    for (const l of lines) {
+      const parts = l.split('|').map((x) => x.trim());
+      if (parts.length < 2 || !parts[0] || !parts[1]) { bad.push(`"${l}": use Plugin.esp | Mod Name | Category`); continue; }
+      const r = rows.find((x) => x.file.toLowerCase() === parts[0].toLowerCase());
+      if (!r) { bad.push(`${parts[0]}: not in the table (drop it first)`); continue; }
+      r.name = parts[1];
+      if (parts[2]) { r.category = parts[2]; if (!app.state.settings.categories.includes(parts[2])) app.state.settings.categories.push(parts[2]); }
+      applied++;
+    }
+    pasteMsg.textContent = `${applied} line(s) applied.` + (bad.length ? ` ${bad.length} skipped: ` + bad.slice(0, 4).join('; ') + (bad.length > 4 ? '…' : '') : '');
+    pasteMsg.style.color = bad.length ? 'var(--warn)' : '';
+    render();
+  }
+
+  const status = h('div.faint');
+  const createBtn = h('button.btn.primary', { onclick: create }, 'Create mods and import');
+  async function create() {
+    const p = check();
+    if (!rows.length) { toast('Add plugins first.', true); return; }
+    if (p.length) { toast(p[0], true); return; }
+    createBtn.disabled = true;
+    const g = groups();
+    try { await rpc('backup.now', { reason: 'before-batch-add-mods' }); } catch { /* the import still runs */ }
+    const results = [];
+    for (let i = 0; i < g.length; i++) {
+      const m = g[i];
+      status.textContent = `Importing ${i + 1} / ${g.length}: ${m.name}…`;
+      try {
+        const mod = await rpc('mod.create', { name: m.name, category: m.category || 'Misc' });
+        const r = await rpc('mod.import', { id: mod.id, paths: m.rows.map((x) => x.path), noBackup: true });
+        const miss = [...new Set(r.reports.flatMap((x) => x.missingMasters || []))];
+        const strings = r.reports.reduce((a, x) => a + (x.unresolvedStrings || 0), 0);
+        results.push({ name: m.name, ok: true, plugins: m.rows.length, lines: r.reports.reduce((a, x) => a + x.added + x.kept + x.changed, 0), miss, strings });
+      } catch (e) { results.push({ name: m.name, ok: false, error: e.message || String(e) }); }
+    }
+    document.querySelector('#modal .modal-card')?.querySelector(':scope > .row:last-child .btn')?.click();
+    const bad = results.filter((r) => !r.ok);
+    await modal('Mods added', [
+      h('div', `${results.length - bad.length} of ${results.length} mod(s) created.`),
+      h('div.batch-wrap', h('table.tbl', h('tbody', results.map((r) => h('tr',
+        h('td', h('b', r.name)),
+        r.ok ? h('td', `${r.plugins} plugin(s), ${r.lines.toLocaleString()} lines`) : h('td', { style: { color: 'var(--bad)' } }, r.error),
+        h('td.faint', r.ok ? [r.miss.length ? 'Missing masters: ' + r.miss.join(', ') : '', r.strings ? ` ${r.strings} unresolved strings` : ''].join(' ').trim() || 'OK' : '')))))),
+    ], [{ label: 'OK', primary: true, value: true }], { wide: true });
+    go('mods');
+  }
+
+  render();
+  await modal('Add many mods', [
+    h('div.faint', 'One row per plugin. Give each a mod name and a category; plugins with the same mod name become one mod (e.g. a mod and its patch). Every mod becomes its own card, reviewed on its own page as usual.'),
+    drop, table, summary, problems,
+    h('details.batch-paste', h('summary', 'Paste names and categories'),
+      h('div.faint', { style: { margin: '6px 0' } }, 'One line per plugin: ', h('span.mono', 'Plugin.esp | Mod Name | Category'), '. Order doesn\'t matter; the plugin file name finds the row. A new category is created.'),
+      paste, h('div.row', { style: { marginTop: '6px' } }, h('button.btn.sm', { onclick: applyPaste }, 'Apply list'), pasteMsg)),
+    h('div.row', status, h('div.spacer'), createBtn),
+  ], [{ label: 'Cancel', value: false }], { wide: true });
 }
 
 async function newMod() {

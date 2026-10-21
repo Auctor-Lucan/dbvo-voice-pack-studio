@@ -1,5 +1,5 @@
 // Other Tools → WAV to LIP: a port of the WAV_to_LIP app (Whisper transcription + FaceFXWrapper).
-import { rpc, on, h, clear, toast, fail, confirmBox, droppedPaths, switchEl } from './lib.js';
+import { rpc, on, h, clear, toast, fail, confirmBox, droppedPaths, switchEl, icon } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 let files = []; // kept while the app runs, like the Python app's queue
@@ -52,7 +52,8 @@ export async function wavLipView() {
     if (!files.length) list.append(h('div.faint', { style: { padding: '30px', textAlign: 'center' } }, 'Drop WAV files or folders here. Folders are scanned recursively.'));
     files.forEach((f, i) => {
       const row = h('div.f' + (selected.has(i) ? '.sel' : ''), { onclick: (e) => { if (!e.ctrlKey) selected.clear(); selected.has(i) ? selected.delete(i) : selected.add(i); renderList(); } },
-        h('span.mono.grow.ellipsis', f.path), f.hasLip ? h('span.badge.b-skip', 'has .lip') : null);
+        h('span.mono.grow.ellipsis', { title: f.path }, f.path.split(/[\\/]/).pop()), f.hasLip ? h('span.badge.b-skip', 'has .lip') : null,
+        h('button.act-btn', { title: 'Open the folder: ' + f.path.replace(/[\\/][^\\/]*$/, ''), onclick: (e) => { e.stopPropagation(); rpc('open.path', { path: f.path }).catch(fail); } }, icon('folder', { size: 14 })));
       list.append(row);
     });
     counter.textContent = `${files.length} WAV file(s) queued.`;

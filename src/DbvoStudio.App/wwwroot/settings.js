@@ -259,7 +259,7 @@ async function voices(selectedId, rerender, onSelect) {
       const isNew = i < 0;
       if (isNew) packs.push(saved); else packs[i] = saved;
       if (current && current.id === saved.id) { savedEl.textContent = 'Saved ✓'; savedEl.className = 'saved ok'; }
-      if (isNew && onSelect) onSelect(saved.id);
+      if (onSelect) onSelect(isNew ? saved.id : (current ? current.id : saved.id)); // refresh the name / colour in the left list
       return true;
     } catch (e) {
       savedEl.textContent = 'Not saved: ' + e.message;
@@ -344,7 +344,7 @@ async function voices(selectedId, rerender, onSelect) {
         srow('Preview', null, preview)),
       section('Tags toolbar', null, srow('Tags for this voice', 'Shown above the Phase 2 grid (ElevenLabs v3 / v4).', tagsBox)),
       section('Voice pack pronunciation', h('div.row', h('span.pill.gold', 'THIS VOICE'), h('div.spacer'), pronFileButtons(v.id, async () => { await refreshState(); const fresh = app.state.voicePacks.find((x) => x.id === v.id); if (fresh) { current = structuredClone(fresh); renderEditor(); } })),
-        h('div.help', { style: { margin: '10px 0' } }, 'Words this voice should say differently. The global DBVO dictionary (Global Settings → Pronunciation) applies to every voice pack; when both have the same word, ', h('b', 'this voice pack\'s entry wins'), '.'),
+        h('div.help', { style: { margin: '10px 0' } }, 'Words this voice should say differently. The global DBVO dictionary (Global Settings → Pronunciation) applies to every voice pack; when both have the same word, ', h('b', 'this voice pack\'s entry wins'), '.', h('div', { style: { marginTop: '8px' } }, pronHelp())),
         pronTable(v.pronunciations, persistSoon)),
       section('Audio', null,
         srow('Tail trim', 'Removes the end-of-clip artefact before the LIP is made.', h('div.row', txt(v, 'trimTailMs', { type: 'number', width: '80px' }), h('span.dim', 'ms cut, then'), txt(v, 'fadeOutMs', { type: 'number', width: '80px' }), h('span.dim', 'ms fade-out'))),
@@ -412,6 +412,15 @@ function pronFileButtons(target, after) {
   return h('div.row', imp, exp);
 }
 
+/** What the pronunciation columns mean, shown above the global and voice pack dictionaries. */
+export function pronHelp() {
+  return h('div.col', { style: { gap: '4px' } },
+    h('div', h('b', 'Sounds like'), ' replaces the word with a respelling the voice reads as ordinary text, e.g. Alduin → ', h('i', 'Aldooin'), ', Galerion → ', h('i', 'GAL-air-ee-on'), '. Works with every engine (ElevenLabs, VoxCPM, OmniVoice). Use capitals or hyphens to steer the stress.'),
+    h('div', h('b', 'IPA'), ' gives the exact sounds in the International Phonetic Alphabet, e.g. ', h('i', 'ˈæl.duː.ɪn'), '. More precise, but only ElevenLabs v3/v4 and Flash v2 read it; other engines ignore the entry. Use it when a respelling keeps coming out wrong.'),
+    h('div', h('b', 'Whole word'), ' (on): only the word on its own, not inside a longer word. ', h('b', 'Match case'), ' (on): only with the same capitals, e.g. the region "Reach" but not the verb "reach".'),
+    h('div.faint', 'Only the spoken text changes; the subtitles and file names never do.'));
+}
+
 export function pronTable(list, onChange) {
   const tbody = h('tbody');
   const render = () => {
@@ -419,19 +428,20 @@ export function pronTable(list, onChange) {
     list.forEach((p, i) => {
       const word = h('input', { type: 'text', value: p.word, placeholder: 'Alduin' });
       const rep = h('input', { type: 'text', value: p.replacement, placeholder: p.kind === 'phoneme' ? 'ˈæl.duː.ɪn' : 'Aldooin' });
-      const kind = h('select', h('option', { value: 'alias', selected: p.kind === 'alias' }, 'Sounds like'), h('option', { value: 'phoneme', selected: p.kind === 'phoneme' }, 'IPA'));
+      const kind = h('select', { title: 'Sounds like: the word is replaced by a respelling the voice reads as normal text (e.g. Aldooin). Works with every engine.\nIPA: an exact pronunciation in the International Phonetic Alphabet (e.g. ˈæl.duː.ɪn). Only ElevenLabs v3/v4 and Flash v2 read it; other engines ignore it.' },
+        h('option', { value: 'alias', selected: p.kind === 'alias' }, 'Sounds like'), h('option', { value: 'phoneme', selected: p.kind === 'phoneme' }, 'IPA'));
       const upd = () => { Object.assign(p, { word: word.value, replacement: rep.value, kind: kind.value }); onChange(); };
       [word, rep].forEach((x) => x.addEventListener('input', upd));
       kind.addEventListener('change', upd);
       tbody.append(h('tr', h('td', word), h('td', { style: { width: '130px' } }, kind), h('td', rep),
-        h('td', { style: { width: '110px' } }, switchEl(p.wholeWord, (x) => { p.wholeWord = x; onChange(); }, 'whole')),
-        h('td', { style: { width: '100px' } }, switchEl(p.caseSensitive, (x) => { p.caseSensitive = x; onChange(); }, 'case')),
+        h('td', { style: { width: '110px' } }, switchEl(p.wholeWord, (x) => { p.wholeWord = x; onChange(); }, 'whole', { title: 'Whole word: on = only the word on its own ("Alduin" but not "Alduin\'s Bane" glued into another word). Off = also inside longer words.' })),
+        h('td', { style: { width: '100px' } }, switchEl(p.caseSensitive, (x) => { p.caseSensitive = x; onChange(); }, 'case', { title: 'Match case: on = only with the same capitals (Reach, not reach). Off = any capitals.' })),
         h('td', { style: { width: '40px' } }, h('button.icon-btn', { title: 'Remove', onclick: () => { list.splice(i, 1); render(); onChange(); } }, '×'))));
     });
   };
   render();
   return h('div', { style: { padding: '6px 0 12px' } },
-    h('table.tbl', h('thead', h('tr', h('th', 'Word in the line'), h('th', 'Kind'), h('th', 'How it\'s spoken'), h('th', ''), h('th', ''), h('th', ''))), tbody),
+    h('table.tbl', h('thead', h('tr', h('th', { title: 'The word as it is written in the line' }, 'Word in the line'), h('th', { title: 'Sounds like = respelling; IPA = phonetic alphabet' }, 'Kind'), h('th', 'How it\'s spoken'), h('th', { title: 'Match only the word on its own' }, 'Whole word'), h('th', { title: 'Match only with the same capitals' }, 'Match case'), h('th', ''))), tbody),
     h('div.row', { style: { marginTop: '8px' } },
       h('button.btn.sm', { onclick: () => { list.push({ word: '', kind: 'alias', replacement: '', wholeWord: true, caseSensitive: false }); render(); } }, '+ Add word'),
       h('span.faint', '"Sounds like" works with every engine. IPA is sent as inline /…/ to Eleven v3/v4 and Flash v2. Never changes filenames. Longer words are applied first.')));
@@ -452,7 +462,9 @@ async function pronunciation(_, rerender) {
     }, 400);
   };
   return section('DBVO pronunciation dictionary', h('div.row', h('span.pill.blue', 'GLOBAL'), h('div.spacer'), savedEl, pronFileButtons('global', rerender)),
-    h('div.help', { style: { margin: '10px 0' } }, 'Used by every voice pack: Skyrim names and places once, for all voices. A voice pack can have its own dictionary (Global Settings → Voice packs); ', h('b', 'its entries win'), ' for the same word. Import brings in a 2.7.0 list, a CSV or an ElevenLabs .pls; the same word is replaced, new words are added.'),
+    h('div.help', { style: { margin: '10px 0' } },
+      h('p', 'Used by every voice pack: Skyrim names and places once, for all voices. A voice pack can have its own dictionary (Global Settings → Voice packs); ', h('b', 'its entries win'), ' for the same word. Import brings in a 2.7.0 list, a CSV or an ElevenLabs .pls; the same word is replaced, new words are added.'),
+      pronHelp()),
     pronTable(list, onChange));
 }
 

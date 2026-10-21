@@ -392,3 +392,13 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .tool-log { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .tool-log .log { flex: 1; min-height: 260px; max-height: 52vh; }
 @media (max-width: 1000px) { .tool-top, .tool-bottom { grid-template-columns: 1fr; } }
+
+/* batch add mods */
+.batch-wrap { max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; margin-top: 10px; }
+.tbl.batch td { vertical-align: top; padding: 5px 8px; }
+.tbl.batch td input { width: 100%; min-width: 220px; }
+.tbl.batch tr.joined td:first-child { padding-left: 22px; color: var(--dim); }
+.batch-paste { margin-top: 10px; }
+.batch-paste summary { cursor: pointer; color: var(--link); }
+.batch-paste textarea { width: 100%; font-family: Consolas, monospace; font-size: 12px; }
+.view-body.drop-hint { outline: 2px dashed var(--accent); outline-offset: -8px; }
