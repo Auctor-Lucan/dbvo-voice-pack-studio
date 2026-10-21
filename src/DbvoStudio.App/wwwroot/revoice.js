@@ -668,6 +668,8 @@ export async function revoiceView(id) {
 
   // ---------------------------------------------------------------- layout
   function renderAll() {
+    // Re-attaching the grid resets its scroll position: keep where the user was.
+    const scroll = grid.el.isConnected ? grid.el.scrollTop : null;
     renderHead();
     clear(body);
     if (tab === 'setup') { body.append(renderSetup()); return; }
@@ -679,6 +681,7 @@ export async function revoiceView(id) {
     body.append(filters, split, actions);
     renderFilters();
     grid.setRows(visible());
+    if (scroll != null) { grid.el.scrollTop = scroll; grid.paint(true); }
     renderInspector();
     renderActions();
   }
