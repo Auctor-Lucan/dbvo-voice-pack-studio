@@ -28,6 +28,16 @@ public sealed partial class Backend
                 OpenPath(dir);
                 return true;
             }
+            case "patch.openTakeFolder":
+            {
+                var patch = LoadPatch(S(p, "id"));
+                var line = patch.Lines.FirstOrDefault(l => l.LineId == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
+                var take = line.SelectedTake ?? line.Takes.LastOrDefault() ?? throw new InvalidOperationException("This line has no takes yet.");
+                var wav = Path.Combine(_lib.PatchFolder(patch.Id), take.WavPath);
+                if (File.Exists(wav)) OpenPath(wav); // selects the take in Explorer
+                else OpenPath(Path.GetDirectoryName(wav) is { } d && Directory.Exists(d) ? d : Path.Combine(_lib.PatchFolder(patch.Id), "takes"));
+                return true;
+            }
             case "window.theme":
                 _owner.Dispatcher.Invoke(() => WindowChrome.Apply(_owner, S(p, "caption"), S(p, "text"), B(p, "dark")));
                 return true;

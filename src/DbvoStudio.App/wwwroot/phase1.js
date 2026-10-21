@@ -289,7 +289,7 @@ export async function modView(id) {
   const head = h('div.view-head');
   const hint = h('div.hint', h('b', 'Review flagged lines'), ' (BROKEN LINE, TOO LONG WILL CTD, PLAYER NAME), then ', h('b', 'Continue to Phase 2'), '. ',
     'A DBVO Fix plugin is only made when at least one line needs fixing; a clean plugin gets none. ',
-    'Your edits are saved as you go. In Phase 2 they are written for you to the patch\'s DBVO Fix folder and its final folder, or use ', h('b', 'Export…'), ' (top right) to write them anywhere now.');
+    'Your edits are saved as you go. In Phase 2 they are written for you to the patch\'s DBVO Fix folder and its final folder, or use ', h('b', 'Export…'), ' (top right) to extract them anywhere now.');
   const banners = h('div');
   const tabs = h('div.filters');
   const filters = h('div.filters');
@@ -307,33 +307,32 @@ export async function modView(id) {
     onRowClick: (l) => { focusedKey = l.key; renderInspector(); },
     columns: [
       { id: 'sel', title: '', width: 32, resizable: false, render: (l) => grid.checkbox(l) },
-      { id: 'type', title: 'Type', width: 170, render: (l) => h('div.row', kindBadge(l),
+      { id: 'type', title: 'Status', width: 170, align: 'center', render: (l) => h('div.row', { style: { justifyContent: 'safe center' } }, kindBadge(l),
         l.status === 'ChangedInMod' ? h('span.badge.b-changed', 'changed in mod') : null,
         l.hiddenByPrompts ? h('span.badge.b-hidden', { title: 'Every response has its own prompt, so the game never shows this topic text.' }, l.includeAnyway ? 'hidden · incl.' : 'hidden') : null) },
       { id: 'formid', title: plugin && plugin.isTopicFile ? '' : 'FormID', width: 90, cls: 'mono dim', render: (l) => l.formId },
       { id: 'orig', title: 'Original', flex: 1, width: 260, render: (l) => h('span.dim', { title: l.original }, l.original) },
-      { id: 'final', title: 'Final in-game line', flex: 1.3, width: 320, render: (l) => finalInput(l) },
-      { id: 'appr', title: 'Voice / Fix', width: 104, render: (l) => approvalChips(l) },
-      { id: 'act', title: '', width: 92, resizable: false, render: (l) => h('div.row',
-        l.suggested && l.final !== l.suggested ? h('button.icon-btn', { title: 'Use the script\'s suggestion', onclick: () => act(l, 'accept') }, '✓') : null,
-        l.final != null && l.final !== l.original ? h('button.icon-btn', { title: 'Undo: back to the original text', onclick: () => act(l, 'revert') }, '↶') : null,
-        h('button.icon-btn', { title: l.excluded ? 'Include again' : 'Exclude from the topic file', onclick: () => act(l, 'exclude', !l.excluded) }, l.excluded ? '⊕' : '⊘')) },
+      { id: 'final', title: 'Final in-game line', flex: 1.3, width: 320, render: (l) => finalCell(l) },
+      { id: 'fix', title: 'Fix', tip: 'Edit goes into the DBVO Fix plugin', width: 56, resizable: false, align: 'center', render: (l) => approvalChip(l, 'fix') },
+      { id: 'voice', title: 'Voice', tip: 'Voiced in Phase 2 (in the topic file)', width: 56, resizable: false, align: 'center', render: (l) => approvalChip(l, 'voice') },
+      { id: 'excl', title: 'Exclude', tip: 'Leave the line out of the topic file', width: 66, resizable: false, align: 'center', render: (l) => h('button.icon-btn' + (l.excluded ? '.on-bad' : ''), { title: l.excluded ? 'Excluded: click to include again' : 'Exclude from the topic file', onclick: () => act(l, 'exclude', !l.excluded) }, l.excluded ? '⊕' : '⊘') },
     ],
   });
   grid.el.addEventListener('selection', () => renderActions());
 
   // Two independent approvals: voiced (topic file) and the edit in the DBVO Fix plugin.
-  function approvalChips(l) {
-    if (l.status === 'Removed' || l.excluded) return h('span.faint', l.excluded ? 'excluded' : '');
+  function approvalChip(l, which) {
+    if (l.status === 'Removed' || l.excluded) return null;
     const chip = (on, explicit, against, label, title, onclick) => h('button.appr' + (on ? '.on' : '') + (against ? '.against' : '') + (explicit ? '.explicit' : ''), { title, onclick }, label);
-    const v = chip(l.voiced, l.voiceApproved != null, l.voiceApproved != null && l.voiceApproved !== l.defaultVoice,
+    if (which === 'voice') return chip(l.voiced, l.voiceApproved != null, l.voiceApproved != null && l.voiceApproved !== l.defaultVoice,
       '♪', (l.voiced ? 'Voiced: in the topic file and generated in Phase 2.' : 'Not voiced.') + (l.voiceApproved == null ? ' (default)' : ' (your choice)') + ' Click to switch.',
       () => act(l, 'voice', !l.voiced));
-    const f = plugin.isTopicFile ? null : chip(l.inFix, l.fixApproved != null, l.fixApproved != null && l.fixApproved !== l.defaultFix,
+    if (plugin.isTopicFile) return null;
+    const f = chip(l.inFix, l.fixApproved != null, l.fixApproved != null && l.fixApproved !== l.defaultFix,
       'Fix', !l.changed ? 'The text is unchanged, so nothing goes into the DBVO Fix plugin.' : (l.inFix ? 'Your edit goes into the DBVO Fix plugin (the subtitle changes in game).' : 'Your edit is NOT written to the DBVO Fix plugin.') + (l.fixApproved == null ? ' (default)' : ' (your choice)') + ' Click to switch.',
       () => { if (l.changed) act(l, 'fix', !l.inFix); });
-    if (f && !l.changed) f.disabled = true;
-    return h('div.row', { style: { gap: '4px' } }, v, f);
+    if (!l.changed) f.disabled = true;
+    return f;
   }
 
   function finalInput(l) {
@@ -343,6 +342,14 @@ export async function modView(id) {
     inp.addEventListener('change', () => act(l, 'setFinal', inp.value));
     inp.addEventListener('focus', () => { if (focusedKey !== l.key) { focusedKey = l.key; renderInspector(); } });
     return inp;
+  }
+
+  // The final line, with the script's suggestion (✓) and undo (↶) next to it.
+  function finalCell(l) {
+    const inp = finalInput(l);
+    const acc = l.suggested && l.final !== l.suggested ? h('button.icon-btn', { title: 'Use the script\'s suggestion: ' + l.suggested, onclick: () => act(l, 'accept') }, '✓') : null;
+    const rev = l.final != null && l.final !== l.original && l.status !== 'Removed' ? h('button.icon-btn', { title: 'Undo: back to the original text', onclick: () => act(l, 'revert') }, '↶') : null;
+    return acc || rev ? h('span.spoken-wrap', inp, acc, rev) : inp;
   }
 
   async function act(l, action, value) {
@@ -499,17 +506,24 @@ export async function modView(id) {
 
   function renderFilters() {
     const c = counts();
-    const chip = (key, label) => h('span.chip' + (filter === key ? '.on' : ''), { onclick: () => { filter = key; save(); renderFilters(); grid.setRows(visibleLines()); } }, label, h('span.n', c[key]));
+    const chip = (key, label, title) => h('span.chip' + (filter === key ? '.on' : ''), { title: title || '', onclick: () => { filter = key; save(); renderFilters(); grid.setRows(visibleLines()); } }, label, h('span.n', c[key]));
     clear(filters);
     if (!plugin) return;
     const q = h('input', { type: 'text', placeholder: 'Search text, FormID, EditorID…', value: search });
     q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visibleLines()); }, 150));
-    filters.append(chip('all', 'All'), chip('fixes', 'In DBVO Fix'), chip('notvoiced', 'Not voiced'), chip('flagged', 'Flagged'), chip('unreviewed', 'Not reviewed'),
-      c.stage ? chip('stage', 'Stage directions') : null,
-      c.player ? chip('player', 'Player names') : null,
-      chip('changed', 'Changed in mod'), chip('edited', 'Edited by you'), chip('hidden', 'Hidden by prompts'), chip('excluded', 'Excluded'), chip('removed', 'Removed'),
-      h('div.spacer'), q, columnsMenu(grid),
-      h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp1', showInsp); split.classList.toggle('no-insp', !showInsp); renderFilters(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel'));
+    // Only filters that match at least one line (the open one always stays).
+    const opt = (key, label, title) => (key === 'all' || filter === key || c[key] ? chip(key, label, title) : null);
+    filters.append(h('div.filter-chips', opt('all', 'All'), opt('fixes', 'In DBVO Fix'), opt('notvoiced', 'Not voiced'), opt('flagged', 'Flagged'), opt('unreviewed', 'Not reviewed'),
+      opt('stage', 'Stage directions'), opt('player', 'Player names'),
+      opt('changed', 'Changed in mod'), opt('edited', 'Edited by you'), opt('hidden', 'Hidden by prompts'), opt('excluded', 'Excluded'), opt('removed', 'Removed')),
+      h('div.filter-tools',
+        h('div.legend',
+          h('span.legend-note', 'Review ', h('b', 'BROKEN'), ' and ', h('b', 'TOO LONG WILL CTD'), ' lines before Phase 2.'),
+          h('span.legend-item', h('span.appr.on.demo', 'Fix'), 'edit goes into the DBVO Fix plugin'),
+          h('span.legend-item', h('span.appr.on.demo', '♪'), 'voiced in Phase 2'),
+          h('span.legend-item', h('span.demo-ex', '⊘'), 'exclude from the topic file')),
+        h('div.spacer'), q, columnsMenu(grid),
+        h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp1', showInsp); split.classList.toggle('no-insp', !showInsp); renderFilters(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel')));
   }
 
   function renderActions() {

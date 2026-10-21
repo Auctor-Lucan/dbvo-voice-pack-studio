@@ -402,3 +402,14 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .batch-paste summary { cursor: pointer; color: var(--link); }
 .batch-paste textarea { width: 100%; font-family: Consolas, monospace; font-size: 12px; }
 .view-body.drop-hint { outline: 2px dashed var(--accent); outline-offset: -8px; }
+.cell.center { display: flex; justify-content: safe center; align-items: center; text-align: center; }
+.vgrid-head .cell.center { justify-content: center; }
+.filter-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; width: 100%; }
+.filter-tools { display: flex; gap: 8px; align-items: center; width: 100%; }
+.legend { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--dim); min-width: 0; }
+.legend-note b { color: var(--text); font-weight: 600; }
+.legend-item { display: inline-flex; gap: 6px; align-items: center; }
+.appr.demo { cursor: default; pointer-events: none; }
+.demo-ex { color: var(--dim); font-size: 15px; }
+.icon-btn.on-bad { color: var(--bad); }
+.act-btn:hover:not(:disabled) .corner { stroke: var(--warn); }

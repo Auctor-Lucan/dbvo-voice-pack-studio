@@ -192,7 +192,7 @@ export async function patchView(id) {
   let voice = app.state.voicePacks.find((v) => v.id === patch.voicePackId);
   if (!voice) throw new Error('This patch\'s voice pack was deleted.');
   const ui = store.get('patch:' + id, { filter: 'all' });
-  let filter = ui.filter || 'all';
+  let filter = ['stale', 'differs'].includes(ui.filter) ? 'all' : (ui.filter || 'all');
   let search = '';
   let focusedId = null;
   let voices = [], models = [], localVoices = [];
@@ -239,7 +239,7 @@ export async function patchView(id) {
       { id: 'take', title: 'Take', width: 64, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s); #${(l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot} is used. Click to play, switch, keep or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } },
           l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—')) },
-      { id: 'act', title: '', width: 144, resizable: false, render: (l) => rowIcons(l) },
+      { id: 'act', title: '', width: 176, resizable: false, render: (l) => rowIcons(l) },
     ].filter(Boolean),
   });
   grid.el.addEventListener('selection', () => renderActions());
@@ -258,7 +258,8 @@ export async function patchView(id) {
     return h('span.row.icon-bar', { style: { gap: '2px' } },
       h('button.act-btn', { title: regenTitle, disabled: l.excluded || l.omitted || !!app.job || !canGen(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.lineId]); } }, icon('regen')),
       h('button.act-btn' + (sel && sel.kept ? '.on' : ''), { title: keepTitle, disabled: !sel, onclick: (e) => { e.stopPropagation(); keep(l, sel); } }, icon('star', { filled: !!(sel && sel.kept) })),
-      h('button.act-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit (stays until you clear it; "Flagged lines" generates them)', onclick: (e) => { e.stopPropagation(); upd(l, 'mark', !l.marked); } }, icon('flag')),
+      h('button.act-btn', { title: sel ? 'Open this line\'s takes folder' : 'No takes yet', disabled: !l.takes.length, onclick: (e) => { e.stopPropagation(); rpc('patch.openTakeFolder', { id, lineId: l.lineId }).catch(fail); } }, icon('folder')),
+      h('button.act-btn.flag-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit (stays until you clear it; "Flagged lines" generates them)', onclick: (e) => { e.stopPropagation(); upd(l, 'mark', !l.marked); } }, icon('flag')),
       h('button.act-btn', { title: sel ? 'Play (or double-click the row)' : vc ? 'No take yet: convert the line first' : 'No take yet: generate the line first', disabled: !sel, onclick: (e) => { e.stopPropagation(); play(l); } }, icon('play')));
   }
 
@@ -515,9 +516,8 @@ export async function patchView(id) {
         patch.wavLipFolder ? { label: 'WAV + LIP folder', sub: patch.wavLipFolder, onclick: () => rpc('open.path', { path: patch.wavLipFolder }).catch(fail) } : null,
         patch.finalRoot ? { label: 'Final folder (.fuz)', sub: patch.finalRoot, onclick: () => rpc('open.path', { path: patch.finalRoot }).catch(fail) } : null,
         patch.fixFolder ? { label: 'DBVO Fix folder', sub: patch.fixFolder, onclick: () => rpc('open.path', { path: patch.fixFolder }).catch(fail) } : null,
-        { label: 'Takes (this app\'s library)', sub: 'Every generated take of this patch', onclick: () => rpc('patch.openTakes', { id }).catch(fail) },
       ].filter(Boolean);
-      if (items.length === 1) toast('Set the folders in Folders & options first.', true);
+      if (!items.length) { toast('Set the folders in Folders & options first.', true); return; }
       popupMenu(btn, items);
     });
     return btn;
@@ -562,11 +562,11 @@ export async function patchView(id) {
     if (vc) {
       tagbar.append(h('span.lbl', 'Voice Changer'),
         h('span.dim', 'The source recording decides the delivery. For converted lines the text column is only used for the .lip, so edit it if the source says something different. Lines without a source use it as text-to-speech when that is turned on.'),
-        h('div.spacer'), columnsMenu(grid), folderButton());
+        h('div.spacer'), folderButton());
       return;
     }
     if (engine() !== 'elevenlabs') {
-      tagbar.append(h('span.lbl', 'Tags'), h('span.dim', 'Audio tags are an ElevenLabs v3/v4 feature; local engines ignore them (they are removed before sending).'), h('div.spacer'), columnsMenu(grid), folderButton());
+      tagbar.append(h('span.lbl', 'Tags'), h('span.dim', 'Audio tags are an ElevenLabs v3/v4 feature; local engines ignore them (they are removed before sending).'), h('div.spacer'), folderButton());
       return;
     }
     const chip = (t) => {
@@ -589,14 +589,12 @@ export async function patchView(id) {
       h('span.lbl', 'Tags'),
       voice.tags.map(chip),
       custom,
-      h('button.btn.sm.ghost', { title: 'Add a tag to every line in the current filter', onclick: async () => {
+      h('button.btn.sm.ghost', { title: 'Add a [tag] to every line in the current filter…', onclick: async () => {
         const r = await prompt('Add a tag to every line shown', [{ name: 't', label: 'Tags', placeholder: '[whispers]', help: `Added to the start of ${grid.rows.filter((l) => !l.omitted).length} line(s) in the current filter.` }]);
         if (r && r.t.trim()) applyTags(r.t.match(/\[[^\]]+\]|[^\s\[\]]+/g), 'add', grid.rows.filter((l) => !l.omitted).map((l) => l.lineId));
-      } }, 'Add to all shown…'),
+      } }, 'Add a [tag] to all shown…'),
       h('div.spacer'),
-      columnsMenu(grid),
-      h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, '✨ Auto-tag ticked'),
-      h('button.btn.sm.ghost', { title: 'Edit the tag list in the voice pack settings', onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, 'Edit tags…'),
+      h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
       folderButton());
   }
 
@@ -645,11 +643,9 @@ export async function patchView(id) {
         case 'pending': if (!pendingLine(l)) return false; break;
         case 'generated': if (!(l.status === 'Generated' && !l.stale)) return false; break;
         case 'failed': if (l.status !== 'Failed') return false; break;
-        case 'stale': if (!(l.stale || l.status === 'Stale')) return false; break;
         case 'omitted': if (!l.omitted) return false; break;
         case 'marked': if (!l.marked) return false; break;
         case 'excluded': if (!l.excluded) return false; break;
-        case 'differs': if (!l.differs) return false; break;
         case 'p1': if (!l.editedInPhase1) return false; break;
         case 'suggestions': if (!l.tagSuggestion) return false; break;
         case 'nosource': if (l.hasSource) return false; break;
@@ -664,11 +660,14 @@ export async function patchView(id) {
     const had = filters.querySelector('input[type=text]');
     const q = had || h('input', { type: 'text', placeholder: 'Search…', value: search });
     if (!had) q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 150));
-    clear(filters).append(chip('all', 'All'), chip('pending', vc ? 'To convert' : 'To generate'), chip('generated', vc ? 'Converted' : 'Generated'), chip('stale', 'Changed since take'),
-      chip('failed', 'Failed'), chip('marked', 'Flagged', 'Flagged to revisit'), c.excluded ? chip('excluded', 'Excluded', 'Won\'t generate or export') : null,
-      chip('omitted', 'Omitted', 'Left out because a ticked reference topic file (e.g. the base game pack) already has the line'),
-      vc ? chip('nosource', 'No source file') : chip('differs', 'Spoken ≠ in-game'), chip('p1', 'Edited in Phase 1'),
-      c.suggestions ? chip('suggestions', '✨ Suggestions') : null, h('div.spacer'), q,
+    // Only filters that match at least one line (the open one always stays).
+    const opt = (key, label, title) => (key === 'all' || filter === key || c[key] ? chip(key, label, title) : null);
+    clear(filters).append(opt('all', 'All'), opt('pending', vc ? 'To convert' : 'To generate', 'Lines without a take yet, and failed ones'), opt('generated', vc ? 'Converted' : 'Generated'),
+      opt('failed', 'Failed', 'The last attempt made no usable take (engine error, credits, offline local engine, LIP or WAV step). The error is shown at the top of the line\'s panel; Generate missing retries these.'),
+      opt('marked', 'Flagged', 'Flagged to revisit'), opt('excluded', 'Excluded', 'Won\'t generate or export'),
+      opt('omitted', 'Omitted', 'Left out because a ticked reference topic file (e.g. the base game pack) already has the line'),
+      vc ? opt('nosource', 'No source file') : null, opt('p1', 'Edited in Phase 1', 'The in-game line was edited in Phase 1'),
+      opt('suggestions', 'AI suggestions', 'AI tag suggestions waiting for Accept or Undo'), h('div.spacer'), q, columnsMenu(grid),
       h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp2', showInsp); split.classList.toggle('no-insp', !showInsp); renderCounts(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel'));
   }
 
@@ -700,7 +699,7 @@ export async function patchView(id) {
       vc ? h('div', h('div.field-label', 'Source WAV'), l.hasSource ? h('div.row', h('button.btn.sm', { onclick: () => playSource(l) }, '▶ Play source'), h('span.mono.faint.ellipsis', { title: l.sourceWav }, l.sourceWav)) : h('div.banner.bad', { style: { margin: 0 } }, 'No source WAV found with this name.')) : null,
       h('div', h('div.field-label', vc ? 'Text for the LIP' : 'Spoken text (tags allowed)'), spoken,
         h('div.row', { style: { marginTop: '6px' } },
-          vc || engine() !== 'elevenlabs' ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.omitted, onclick: () => autotag([l.lineId]) }, '✨ Auto-tag'),
+          vc || engine() !== 'elevenlabs' ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.omitted, onclick: () => autotag([l.lineId]) }, 'AI Auto Tag'),
           l.spokenEdited ? h('button.btn.sm.ghost', { title: 'Put the in-game line back as the spoken text', onclick: () => upd(l, 'resetSpoken') }, '↺ Restore in-game line') : null,
           h('div.spacer'),
           h('button.btn.sm.primary', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running' : !canGen(l) ? 'No source file for this line (text-to-speech for such lines is off)' : 'Make a new take of this line', disabled: l.omitted || !!app.job || !canGen(l), onclick: () => generate('selected', [l.lineId]) }, l.takes.length ? 'New take' : vc ? 'Convert' : 'Generate'))),
