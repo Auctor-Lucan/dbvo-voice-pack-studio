@@ -4,6 +4,7 @@ using DbvoStudio.App.Tools;
 using DbvoStudio.Core.Projects;
 using DbvoStudio.Core.Naming;
 using DbvoStudio.Core.Revoice;
+using DbvoStudio.Core.ElevenLabs;
 
 namespace DbvoStudio.App;
 
@@ -287,6 +288,67 @@ public sealed partial class Backend
                 var s = await Task.Run(() => RvSession(proj));
                 var wav = await RevoiceService.DecodeAsync(s.Files, VoiceFileIndex.Make(src, S(p, "inner")), Tools(), CancellationToken.None);
                 return "data:audio/wav;base64," + Convert.ToBase64String(wav);
+            }
+            case "revoice.openTakeFolder":
+            {
+                var proj = LoadRv(S(p, "id"));
+                var line = proj.Lines.FirstOrDefault(l => l.LineId == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
+                var take = line.SelectedTake ?? line.Takes.LastOrDefault() ?? throw new InvalidOperationException("This line has no takes yet.");
+                var wav = Path.Combine(_lib.RevoiceFolder(proj.Id), take.WavPath);
+                if (File.Exists(wav)) OpenPath(wav);
+                else OpenPath(Path.GetDirectoryName(wav) is { } d && Directory.Exists(d) ? d : _lib.RevoiceFolder(proj.Id));
+                return true;
+            }
+            case "revoice.bulkTags":
+                return await Locked(() =>
+                {
+                    var proj = LoadRv(S(p, "id"));
+                    var ids = Strings(p, "lineIds").ToHashSet();
+                    var tags = Strings(p, "tags");
+                    bool remove = S(p, "mode") == "remove";
+                    var placement = S(p, "placement");
+                    var changed = new List<RevoiceLine>();
+                    foreach (var l in proj.Lines.Where(x => ids.Contains(x.LineId) && !x.Gone))
+                    {
+                        var before = l.Spoken;
+                        l.Spoken = remove ? SpokenText.RemoveTags(l.Spoken, tags)
+                            : placement.Length > 0 ? SpokenText.AddTagsAfterLeading(l.Spoken, tags, placement == "replace")
+                            : SpokenText.AddPrefixTags(l.Spoken, tags);
+                        if (l.Spoken == before) continue;
+                        l.SpokenEdited = l.Spoken != l.FinalLine;
+                        l.TagSuggestion = null;
+                        l.RefreshStale();
+                        changed.Add(l);
+                    }
+                    _lib.Save(proj);
+                    return new { changed = changed.Count, lines = changed.Select(RvLineDto).ToList() };
+                });
+            case "revoice.autotag":
+            {
+                var proj = LoadRv(S(p, "id"));
+                var ids = Strings(p, "lineIds").ToHashSet();
+                var rt = Runtime();
+                using var tagger = new AutoTagger(rt.AiProvider.Endpoint, rt.AiProvider.ApiKey, rt.AiProvider.Model);
+                var lines = proj.Lines.Where(l => ids.Contains(l.LineId) && !l.Gone).ToList();
+                var sem = new SemaphoreSlim(4);
+                var results = await Task.WhenAll(lines.Select(async l =>
+                {
+                    await sem.WaitAsync();
+                    try { return await tagger.TagAsync(l.LineId, l.Spoken, null, proj.Voice.Tags); }
+                    finally { sem.Release(); }
+                }));
+                await _gate.WaitAsync();
+                try
+                {
+                    foreach (var r in results.Where(r => r.Suggestion != null))
+                    {
+                        var l = proj.Lines.FirstOrDefault(x => x.LineId == r.LineId);
+                        if (l != null && r.Suggestion != l.Spoken) l.TagSuggestion = r.Suggestion;
+                    }
+                    _lib.Save(proj);
+                }
+                finally { _gate.Release(); }
+                return new { results, lines = lines.Select(RvLineDto).ToList() };
             }
             case "revoice.speakerChanges":
                 return await Locked(() =>

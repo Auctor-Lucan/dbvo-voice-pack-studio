@@ -166,6 +166,9 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .srow { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
 .srow:last-child { border-bottom: 0; }
 .srow .lbl { display: flex; flex-direction: column; gap: 2px; }
+.switch-help { display: flex; align-items: flex-start; gap: 16px; max-width: 760px; }
+.switch-help > .faint { line-height: 1.5; padding-top: 1px; }
+.switch-help > :first-child { flex-shrink: 0; }
 .srow .lbl small { color: var(--faint); font-size: 12px; line-height: 1.35; }
 .pill { display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .5px; padding: 1px 7px; border-radius: 10px; border: 1px solid; }
 .pill.blue { color: var(--link); border-color: color-mix(in srgb, var(--accent) 45%, var(--bg)); background: color-mix(in srgb, var(--accent) 15%, var(--bg)); }

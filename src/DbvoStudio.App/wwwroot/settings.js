@@ -19,6 +19,10 @@ function section(title, extra, ...rows) {
 function srow(label, help, control) {
   return h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', control));
 }
+/** A switch row: the label on the left, the switch and its explanation side by side on the right. */
+function switchRow(label, help, control) {
+  return h('div.srow', h('div.lbl', h('span', label)), h('div.switch-help', control, h('div.faint', help)));
+}
 function status(ok, label) {
   if (label === 'found') label = ok ? 'found' : 'not found';
   return h('span.badge.' + (ok ? 'b-valid' : 'b-broken'), (ok ? '✓ ' : '✕ ') + label);
@@ -83,10 +87,28 @@ async function credits() {
   const pf = (name) => 'https://www.nexusmods.com/profile/' + name;
   return h('div.col', { style: { gap: '18px' } },
     section('DBVO Studio', null,
-      h('div.col', { style: { gap: '8px', padding: '4px 0' } },
-        h('div', h('b', 'DBVO Studio'), ' by Auctor Lucan: one workbench for making ', h('b', 'Dragonborn Voice Over (DBVO)'), ' patches, from a mod\'s plugin to a finished installer.'),
-        h('div', 'Phase 1 reads the plugins and fixes their dialogue for DBVO. Phase 2 voices every line with your voice pack (text-to-speech or the Voice Changer), with takes, audio tags, lip sync and .fuz files. Phase 3 packs it all into a FOMOD installer. Other Tools add WAV to LIP and NPC Revoice, which gives existing NPCs new voices.'),
-        h('div', 'The aim: let anyone give the player, and the characters of their favourite mods, a voice, without the hours of renaming, converting and packing by hand.'))),
+      h('div.col.dim', { style: { gap: '10px', padding: '4px 0', lineHeight: '1.55' } },
+        h('div', h('b', 'DBVO Studio'), ' by ', link('https://www.nexusmods.com/skyrimspecialedition/users/148677848', 'Auctor Lucan'), ' is the complete workshop for ',
+          link('https://www.nexusmods.com/skyrimspecialedition/mods/84329', 'Dragonborn Voice Over (DBVO)'), ' voice packs: it takes a mod from its plugin to a finished, installable DBVO patch, all in one place.'),
+        h('div', 'No xEdit and no collecting topic files by hand. Drop in a mod\'s plugins and ', h('b', 'Phase 1'), ' pulls out every player line, checks it against DBVO\'s rules and writes the DBVO Fix plugin that takes care of the formatting. ',
+          h('b', 'Phase 2'), ' voices the lines back to back (text-to-speech or the Voice Changer, with audio tags, takes and lip sync) and builds the .fuz files itself, so you never open Yakitori to fuz your player lines. ',
+          h('b', 'Phase 3'), ' moves it all into a FOMOD installer that is easy to keep working on. You can export at any stage, and skip the FOMOD altogether if you wish.'),
+        h('div', h('b', 'NPC Revoice'), ' has no match in the modding community. Point it at any mod, or the base game, and it finds every line a character speaks, works out who says what (helped by UESP\'s quotes), lets you give each character a voice of your choosing and writes the files exactly where the game looks for them. That is how a whole follower is revoiced, as in Aela Revoiced, or how an NPC gets a voice type all of their own.'))),
+
+    section('Shout outs', null,
+      h('ul.credits-list', { style: { margin: '6px 0', paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '8px' } },
+        h('li', 'The mod authors of the many wonderful mods whose characters DBVO Studio helps give a voice.'),
+        h('li', link(nx('2716809'), 'isophe'), ', whose DBVO2 Tool served as a great crutch for handling all the WAV files before DBVO Studio existed.'),
+        h('li', 'I built DBVO Studio with ', link('https://claude.ai/', 'Claude'), ' (Anthropic), which wrote the code to my designs, testing and feedback. (AI-Assisted Tag)'),
+        h('li', link('https://elevenlabs.io/', 'ElevenLabs'), ' for the voices generated in Phase 2. (AI Generation Tag)'),
+        h('li', link('https://www.audacityteam.org/', 'Audacity'), ' for the countless hours of editing and its Macro Manager for reverb and volume fixes.'),
+        h('li', link(nx('32344400'), 'Anbeegod'), ' for feedback and sanity checks! Looking forward to working on FDE Karliah with you next!'),
+        h('li', link(pf('JobiWanUK?gameId=1704'), 'JobiWanUK'), ', ', link(pf('toostruus?gameId=1704'), 'toostruus'), ', ', link(pf('Leet'), 'Leet'), ', ', link(pf('Ormcloakstay'), 'Ormcloakstay'),
+          ' and too many others to mention for advice and inspiration.'),
+        h('li', link(pf('xXFEARTCBXx'), 'xXFEARTCBXx'), ' for the original version of the Vampire voice (the "V1 English" voice model is sadly gone from ElevenLabs).'),
+        h('li', 'To all my DBVO users, and ', link(nx('30219160'), 'MathiewMay'), '\'s whole DBVO community, for your kind feedback and endorsements over the years!'),
+        h('li', 'To all new users who may find DBVO Studio useful!'),
+        h('li', 'Bethesda Game Studios for Skyrim and the Creation Kit.'))),
 
     section('Included with DBVO Studio', null,
       h('div.faint', { style: { padding: '4px 0 6px' } }, 'These components ship with the app, unmodified. Each keeps its own license; the full texts are in THIRD-PARTY-NOTICES.txt and in each tool\'s folder.'),
@@ -128,28 +150,13 @@ async function credits() {
 
     section('Reference data', null,
       row('UESP', 'The Unofficial Elder Scrolls Pages',
-        h('div', 'NPC voice types, quoted dialogue and book authors used by NPC Revoice come from ', link('https://en.uesp.net/', 'UESP — en.uesp.net'),
+        h('div.dim', 'NPC voice types, quoted dialogue and book authors used by NPC Revoice come from ', link('https://en.uesp.net/', 'UESP — en.uesp.net'),
           '. All credit for this information goes to the UESP editors and community; it was collected by Auctor Lucan.'),
         u ? lic(`${u.pages.toLocaleString()} Skyrim pages (revisions ${day(u.revisionsFrom)} – ${day(u.revisionsTo)}) → ${u.npcs.toLocaleString()} NPCs, ${u.quotes.toLocaleString()} quotes, ${u.books.toLocaleString()} books.`) : lic('Reference data not found in this build.'),
         lic('UESP text is licensed under ', link('https://creativecommons.org/licenses/by-sa/2.5/', 'CC BY-SA 2.5'),
           '; the derived data in this app is shared under the same license. Each entry links back to its UESP article (', link('https://en.uesp.net/wiki/UESPWiki:Copyrights', 'UESP copyright policy'), ').'),
         lic('Used for base-game lines only: when several NPCs share a voice type, a UESP quote of the exact line by one of them picks the speaker (shown as "UESP quote", certainty Probable).')),
-    ),
-
-    section('Shout outs', null,
-      h('ul.credits-list', { style: { margin: '6px 0', paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '8px' } },
-        h('li', 'The mod authors of the many wonderful mods whose characters DBVO Studio helps give a voice.'),
-        h('li', link(nx('2716809'), 'isophe'), ', whose DBVO2 Tool served as a great crutch for handling all the WAV files before DBVO Studio existed.'),
-        h('li', 'I built DBVO Studio with ', link('https://claude.ai/', 'Claude'), ' (Anthropic), which wrote the code to my designs, testing and feedback. (AI-Assisted Tag)'),
-        h('li', link('https://elevenlabs.io/', 'ElevenLabs'), ' for the voices generated in Phase 2. (AI Generation Tag)'),
-        h('li', link('https://www.audacityteam.org/', 'Audacity'), ' for the countless hours of editing and its Macro Manager for reverb and volume fixes.'),
-        h('li', link(nx('32344400'), 'Anbeegod'), ' for feedback and sanity checks! Looking forward to working on FDE Karliah with you next!'),
-        h('li', link(pf('JobiWanUK?gameId=1704'), 'JobiWanUK'), ', ', link(pf('toostruus?gameId=1704'), 'toostruus'), ', ', link(pf('Leet'), 'Leet'), ', ', link(pf('Ormcloakstay'), 'Ormcloakstay'),
-          ' and too many others to mention for advice and inspiration.'),
-        h('li', link(pf('xXFEARTCBXx'), 'xXFEARTCBXx'), ' for the original version of the Vampire voice (the "V1 English" voice model is sadly gone from ElevenLabs).'),
-        h('li', 'To all my DBVO users, and ', link(nx('30219160'), 'MathiewMay'), '\'s whole DBVO community, for your kind feedback and endorsements over the years!'),
-        h('li', 'To all new users who may find DBVO Studio useful!'),
-        h('li', 'Bethesda Game Studios for Skyrim and the Creation Kit.'))));
+    ));
 }
 
 async function saveSettings(patchObj) {
@@ -257,10 +264,10 @@ async function general(_, rerender) {
           h('div.tp-name', t.name + (t.id === 'github-dark' ? ' (default)' : '')));
       })))),
     section('Phase 1', null,
-      srow('Voice player-name lines', 'Off (default): lines with <Alias=Player> are left out of the topic files (♪ off), so they are not generated by accident when you voice them in a dedicated Player Names patch. They stay listed under "Player names" in Phase 1 and can still be exported there. On: they are voiced in Phase 2 like any other line. A ♪ you set by hand on a line always wins.',
+      switchRow('Voice player-name lines', 'Off (default): lines with <Alias=Player> are left out of the topic files (♪ off), so they are not generated by accident when you voice them in a dedicated Player Names patch. They stay listed under "Player names" in Phase 1 and can still be exported there. On: they are voiced in Phase 2 like any other line. A ♪ you set by hand on a line always wins.',
         switchEl(!!st.playerNameLinesVoiced, (x) => save({ playerNameLinesVoiced: x }), null, { title: 'Voice <Alias=Player> lines in Phase 2' }))),
     section('Generation', null,
-      srow('Confirm batch generation', 'Shows the count, characters and engine before generating or converting several lines. Single lines never ask.',
+      switchRow('Confirm batch generation', 'Shows the count, characters and engine before generating or converting several lines. Single lines never ask.',
         switchEl((st.ui || {}).confirmBatch !== 'false', (x) => save({ ui: { confirmBatch: x ? 'true' : 'false' } }), null, { title: 'Ask before generating more than one line' }))),
     section('Tools', h('div.row', status(t.fonix, 'FonixData'), status(t.xwma, 'xWMAEncode'), status(t.ffmpeg, 'ffmpeg'), status(t.faceFx, 'FaceFXWrapper'), status(t.sevenZip, '7-Zip')),
       srow(h('span.row', { style: { gap: '4px' } }, 'FonixData.cdf', needInfo('fonix')), 'Needed for LIP files. From the Creation Kit: click ⓘ for how to get it.', pathField(st.fonixDataPath, (x) => save({ fonixDataPath: x }), { filter: 'FonixData|*.cdf', title: 'FonixData.cdf' })),

@@ -3,6 +3,7 @@
 import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip } from './phase2.js';
+import { bulkTagDialog, insertTagAtCaret } from './tagtools.js';
 
 const CERT = { Exact: 'Speaker known', Probable: 'Probable speakers', Unknown: 'Speaker unknown' };
 
@@ -275,6 +276,7 @@ export async function revoiceView(id) {
       if (!elevenModels || refresh) elevenModels = await (proj.voiceChanger ? rpc('eleven.stsModels', {}) : rpc('eleven.models', { refresh })).catch(() => []);
     } finally { loadingVoices = false; }
     if (tab === 'speakers') renderAll();
+    else if (tab === 'lines' && vbar.isConnected) clear(vbar).append(...voiceSettingRows());
   }
 
   let voiceEdits = 0;
@@ -285,6 +287,14 @@ export async function revoiceView(id) {
   }, 300);
 
   function voiceSettings() {
+    return h('div.box', { style: { maxWidth: '1100px', marginBottom: '12px' } },
+      h('div.row', h('b', 'Voice settings'), h('span.faint', 'Shared by every speaker; each speaker picks its own voice below.'), h('div.spacer'),
+        h('button.btn.sm.ghost', { title: 'Reload voices from your accounts and local servers', onclick: () => loadVoices(true) }, '⟳ Reload voices')),
+      h('div.col', { style: { gap: '8px', marginTop: '8px' } }, voiceSettingRows()));
+  }
+
+  // The engine settings (shared by every speaker), as rows: the Speakers tab and the toolbar above the lines.
+  function voiceSettingRows() {
     const v = proj.voice;
     const set = (obj, k, val) => { obj[k] = val; voiceEdits++; saveVoiceSettings(); };
     const grp = (label, ...kids) => h('div.tgroup', h('label', label), h('div.row', ...kids));
@@ -337,10 +347,7 @@ export async function revoiceView(id) {
           num(o, 'concurrency', 'Concurrent', { min: 1, width: '56px' })));
       }
     }
-    return h('div.box', { style: { maxWidth: '1100px', marginBottom: '12px' } },
-      h('div.row', h('b', 'Voice settings'), h('span.faint', 'Shared by every speaker; each speaker picks its own voice below.'), h('div.spacer'),
-        h('button.btn.sm.ghost', { title: 'Reload voices from your accounts and local servers', onclick: () => loadVoices(true) }, '⟳ Reload voices')),
-      h('div.col', { style: { gap: '8px', marginTop: '8px' } }, rows));
+    return rows;
   }
 
   function voicePick(sp) {
@@ -387,7 +394,10 @@ export async function revoiceView(id) {
   const left = h('div.left');
   const insp = h('div.inspector');
   const filters = h('div.filters');
+  const tagbar = h('div.tagbar');
+  const vbar = h('div.toolbar');
   const actions = h('div.statusbar');
+  let lastEdit = null; // { el, line }: the last spoken-text box the user was in
   const grid = new VGrid(left, {
     storageKey: 'revoice',
     rowKey: (l) => l.id,
@@ -405,9 +415,10 @@ export async function revoiceView(id) {
       { id: 'emo', title: 'Emotion', width: 90, render: (l) => l.emo === 'Neutral' ? h('span.faint', '—') : h('span.faint', { title: `${l.emo} ${l.emoV}` }, `${l.emo} ${l.emoV}`) },
       { id: 'take', title: 'Take', width: 64, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s). Click to play, switch or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } }, l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—')) },
-      { id: 'act', title: '', width: 116, resizable: false, render: (l) => h('span.row.icon-bar', { style: { gap: '2px' } },
+      { id: 'act', title: '', width: 146, resizable: false, render: (l) => h('span.row.icon-bar', { style: { gap: '2px' } },
         h('button.act-btn', { title: genBlock(l) || 'Regenerate (a new take; older takes stay)', disabled: !!genBlock(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.id], { autoplay: true }); } }, icon('regen')),
-        h('button.act-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit', onclick: (e) => { e.stopPropagation(); upd(l, 'mark'); } }, icon('flag')),
+        h('button.act-btn', { title: l.takes.length ? 'Open this line\'s takes folder' : 'No takes yet', disabled: !l.takes.length, onclick: (e) => { e.stopPropagation(); rpc('revoice.openTakeFolder', { id, lineId: l.id }).catch(fail); } }, icon('folder')),
+        h('button.act-btn.flag-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit', onclick: (e) => { e.stopPropagation(); upd(l, 'mark'); } }, icon('flag')),
         h('button.act-btn', { title: l.sel ? 'Play the new take (or double-click the row)' : 'No take yet: generate the line first', disabled: !l.sel, onclick: (e) => { e.stopPropagation(); play(l); } }, icon('play'))) },
     ],
   });
@@ -431,14 +442,14 @@ export async function revoiceView(id) {
     if (l.tag) {
       return h('span.row', { style: { width: '100%' } },
         h('span.grow.ellipsis', { title: l.tag }, diffAdded(l.spoken, l.tag)),
-        h('button.icon-btn', { title: 'Accept the emotion tag', onclick: (e) => { e.stopPropagation(); upd(l, 'acceptTags'); } }, '✓'),
+        h('button.icon-btn', { title: 'Accept the suggested tag', onclick: (e) => { e.stopPropagation(); upd(l, 'acceptTags'); } }, '✓'),
         h('button.icon-btn', { title: 'Undo', onclick: (e) => { e.stopPropagation(); upd(l, 'rejectTags'); } }, '✕'));
     }
     const inp = h('input', { type: 'text', value: l.spoken, disabled: l.excl });
     if (l.spokenEdited) { inp.style.color = 'var(--link)'; inp.title = 'Blue: differs from the subtitle. The arrow on the left restores it.'; }
     inp.addEventListener('change', () => { if (inp.value !== l.spoken) upd(l, 'spoken', inp.value); });
     inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.value = l.spoken; inp.blur(); } });
-    inp.addEventListener('focus', () => { if (focusedId !== l.id) { focusedId = l.id; grid.focus(l.id); renderInspector(); } });
+    inp.addEventListener('focus', () => { lastEdit = { el: inp, line: l }; if (focusedId !== l.id) { focusedId = l.id; grid.focus(l.id); renderInspector(); } });
     if (l.spokenEdited) return h('span.spoken-wrap', h('button.act-btn', { title: 'Restore the subtitle: ' + l.text, onclick: (e) => { e.stopPropagation(); upd(l, 'resetSpoken'); } }, icon('restore', { size: 14 })), inp);
     if (l.undo) return h('span.spoken-wrap', h('button.act-btn', { title: 'Undo the restore (bring your edit back)', onclick: (e) => { e.stopPropagation(); upd(l, 'undoReset'); } }, icon('undo', { size: 14 })), inp);
     return inp;
@@ -492,6 +503,7 @@ export async function revoiceView(id) {
     }
     const spoken = h('textarea', { rows: 3, disabled: l.excl }, l.spoken);
     spoken.addEventListener('change', () => upd(l, 'spoken', spoken.value));
+    spoken.addEventListener('focus', () => { lastEdit = { el: spoken, line: l }; });
     insp.append(
       h('h3', 'Line'),
       h('div.kv', h('div', 'Speaker'), h('div', l.speakerName), h('div', 'Who'), h('div', l.npcs || '—'), h('div', 'Found by'), h('div', `${CERT[l.cert] || l.cert}${l.via ? ' · ' + l.via : ''}`),
@@ -520,8 +532,8 @@ export async function revoiceView(id) {
     bulkBtn.addEventListener('click', () => {
       if (!sel.length) { toast('Tick rows first.', true); return; }
       popupMenu(bulkBtn, [
-        { label: 'Accept emotion tags', sub: 'Use the suggested tag on each ticked line', onclick: () => bulk('acceptTags', sel) },
-        { label: 'Undo emotion tags', onclick: () => bulk('rejectTags', sel) },
+        { label: 'Accept suggested tags', sub: 'Use the emotion or AI tag suggestion on each ticked line', onclick: () => bulk('acceptTags', sel) },
+        { label: 'Undo suggested tags', onclick: () => bulk('rejectTags', sel) },
         { label: 'Exclude', sub: 'Leave out of generation and export', onclick: () => bulk('exclude', sel) },
         { label: 'Include', onclick: () => bulk('include', sel) },
         { label: 'Flag to revisit', onclick: () => bulk('markOn', sel) },
@@ -536,6 +548,71 @@ export async function revoiceView(id) {
       h('button.btn', { disabled: !!app.job || !sel.length, title: 'Generate the ticked rows', onclick: () => generate('selected', sel) }, `Generate ticked (${sel.length})`),
       h('button.btn', { disabled: !!app.job || !c.marked, title: 'Generate the flagged lines', onclick: () => generate('marked') }, `Flagged (${c.marked})`),
       h('button.btn.primary', { disabled: !!app.job || !c.todo, title: 'Generate every line without a take (for speakers with a voice)', onclick: () => generate('missing') }, `Generate missing (${c.todo})`));
+  }
+
+  // ---------------------------------------------------------------- tags (ElevenLabs audio tags, as in Phase 2)
+  const saveSpoken = debounce((l, value) => { if (value !== l.spoken) upd(l, 'spoken', value); }, 600);
+  function tagClick(t, remove) {
+    const ids = [...grid.selected];
+    if (!remove && lastEdit && document.activeElement === lastEdit.el) { saveSpoken(lastEdit.line, insertTagAtCaret(lastEdit.el, t)); return; }
+    if (ids.length) { applyTags([t], remove ? 'remove' : 'add', ids); return; }
+    toast('Click into a spoken text first (the tag goes in at the cursor), or tick rows to add it to the start of each.', true);
+  }
+  async function applyTags(tags, mode, ids, placement = '') {
+    try {
+      const r = await rpc('revoice.bulkTags', { id, lineIds: ids, tags, mode, placement });
+      for (const nl of r.lines) replaceLine(nl, false);
+      grid.setRows(visible()); renderFilters(); renderActions(); renderInspector();
+      toast(`${r.changed} line(s) changed.`);
+    } catch (e) { fail(e); }
+  }
+  async function autotag(ids) {
+    if (!app.state.settings.aiProvider.endpoint) { toast('Set up AI auto-tagging in Global Settings → General & tools first.', true); return; }
+    try {
+      toast(`Asking the AI for tags on ${ids.length} line(s)…`);
+      const r = await rpc('revoice.autotag', { id, lineIds: ids });
+      for (const nl of r.lines) replaceLine(nl, false);
+      grid.setRows(visible()); renderActions(); renderInspector();
+      const bad = r.results.filter((x) => x.error);
+      toast(bad.length ? `${r.results.length - bad.length} suggestion(s). ${bad.length} skipped: ${bad[0].error}` : `${r.results.length} suggestion(s) ready — accept (✓) or undo (✕) in each row.`, bad.length > 0);
+    } catch (e) { fail(e); }
+  }
+  function renderTagbar() {
+    clear(tagbar);
+    if (proj.voiceChanger) {
+      tagbar.append(h('span.lbl', 'Voice Changer'), h('span.dim', 'The current recording decides the delivery, so audio tags are not used. The spoken text only feeds the .lip.'));
+      return;
+    }
+    const engines = new Set(proj.speakers.filter((sp) => sp.voiceId && !sp.skip).map((sp) => sp.engine || 'elevenlabs'));
+    const chip = (t) => {
+      const c = h('span.chip.tag-chip', { title: 'Click: insert at the cursor, or add to the start of the ticked rows. Shift-click: remove from the ticked rows.' }, t);
+      c.addEventListener('mousedown', (e) => e.preventDefault()); // keep the caret in the text box
+      c.addEventListener('click', (e) => tagClick(t, e.shiftKey));
+      return c;
+    };
+    const custom = h('input', { type: 'text', placeholder: '[custom tag]', style: { width: '130px' } });
+    custom.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !custom.value.trim()) return;
+      let t = custom.value.trim();
+      if (!t.startsWith('[')) t = `[${t.replace(/[\[\]]/g, '')}]`;
+      const ids = [...grid.selected];
+      if (!ids.length) { toast('Tick rows first.', true); return; }
+      applyTags([t], 'add', ids);
+      custom.value = '';
+    });
+    tagbar.append(
+      h('span.lbl', 'Tags'),
+      (proj.voice.tags || []).map(chip),
+      custom,
+      h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
+      h('button.btn.sm.ghost', { title: 'Add a [tag] to every line in the current filter…', onclick: () => bulkTagDialog({
+        pool: grid.rows.filter((l) => !l.excl && !l.gone), idOf: (l) => l.id,
+        original: (l) => `${l.text} ${l.notes || ''} ${l.emo || ''}`,
+        originalLabel: 'in SUBTITLE, ACTOR NOTES or EMOTION', originalPlaceholder: 'Anger, whisper',
+        originalNote: 'Searches the in-game subtitle, the actor notes from the plugin and the emotion name (Anger, Fear, Happy…). Separate several with commas.',
+        apply: applyTags,
+      }) }, 'Add a [tag] to all shown…'),
+      engines.size && !engines.has('elevenlabs') ? h('span.dim', 'Your speakers use local engines, which ignore audio tags.') : null);
   }
 
   async function upd(l, action, value) {
@@ -558,6 +635,7 @@ export async function revoiceView(id) {
     index.set(nl.id, nl);
     const ri = grid.rows.findIndex((x) => x.id === nl.id);
     if (ri >= 0) grid.rows[ri] = nl;
+    if (lastEdit && lastEdit.line.id === nl.id) lastEdit.line = nl;
     if (!refresh) return;
     grid.refreshRow(nl.id);
     if (focusedId === nl.id && !insp.contains(document.activeElement)) renderInspector();
@@ -713,8 +791,11 @@ export async function revoiceView(id) {
     if (!proj.lines.length) { body.append(h('div.empty', h('h2', 'No lines yet'), h('div', proj.plugins.some((p) => p.target) ? 'Scan to find the lines.' : 'Add the plugins to revoice in Setup, then Scan.'))); return; }
     const split = h('div.split' + (showInsp ? '' : '.no-insp'));
     split.append(left, insp);
-    body.append(filters, split, actions);
+    if (!elevenModels) loadVoices();
+    clear(vbar).append(...voiceSettingRows());
+    body.append(vbar, filters, tagbar, split, actions);
     renderFilters();
+    renderTagbar();
     grid.setRows(visible());
     if (scroll != null) { grid.el.scrollTop = scroll; grid.paint(true); }
     renderInspector();
