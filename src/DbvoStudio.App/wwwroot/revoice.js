@@ -2,7 +2,7 @@
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
 import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto } from './lib.js';
 import { app, go, refreshState } from './app.js';
-import { voiceChip } from './phase2.js';
+import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret } from './tagtools.js';
 
 const CERT = { Exact: 'Speaker known', Probable: 'Probable speakers', Unknown: 'Speaker unknown' };
@@ -276,7 +276,7 @@ export async function revoiceView(id) {
       if (!elevenModels || refresh) elevenModels = await (proj.voiceChanger ? rpc('eleven.stsModels', {}) : rpc('eleven.models', { refresh })).catch(() => []);
     } finally { loadingVoices = false; }
     if (tab === 'speakers') renderAll();
-    else if (tab === 'lines' && vbar.isConnected) clear(vbar).append(...voiceSettingRows());
+    else if (tab === 'lines' && vbar.isConnected) renderVbar();
   }
 
   let voiceEdits = 0;
@@ -479,11 +479,9 @@ export async function revoiceView(id) {
   function renderFilters() {
     const c = counts();
     const chip = (k, label, tip) => h('button.chip' + (filter === k ? '.on' : ''), { title: tip, onclick: () => { filter = k; renderFilters(); grid.setRows(visible()); } }, label, ' ', h('span.n', String(c[k])));
-    const spSel = h('select', { title: 'Show one speaker\'s lines' }, h('option', { value: '' }, 'All speakers'), proj.speakers.map((sp) => h('option', { value: sp.key, selected: sp.key === speakerFilter }, `${sp.name} (${sp.lines})`)));
-    spSel.addEventListener('change', () => { speakerFilter = spSel.value; renderFilters(); grid.setRows(visible()); renderActions(); });
     const q = h('input', { type: 'text', placeholder: 'Search text, file, speaker, quest…', value: search, title: 'Filter the list' });
     q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 200));
-    clear(filters).append(spSel,
+    clear(filters).append(
       chip('all', 'All', 'Every voice file to make'), chip('todo', 'To generate', 'No take yet, failed, or text changed since the take'), chip('done', 'Generated', 'Has a take'),
       chip('failed', 'Failed', 'The last attempt failed'), chip('orig', 'Has current file', 'The game plays a file for this line now (▶ in the Now column)'),
       chip('silent', 'Silent now', 'No voice file yet: subtitles only in game'), chip('unsure', 'Speaker unsure', 'The speaker was worked out as probable or unknown — check before generating'),
@@ -550,6 +548,80 @@ export async function revoiceView(id) {
       h('button.btn.primary', { disabled: !!app.job || !c.todo, title: 'Generate every line without a take (for speakers with a voice)', onclick: () => generate('missing') }, `Generate missing (${c.todo})`));
   }
 
+  // ---------------------------------------------------------------- toolbar above the lines (laid out like Phase 2's)
+  let creditsEl = null;
+  function renderVbar() {
+    const v = proj.voice;
+    const set = (obj, k, val) => { obj[k] = val; voiceEdits++; saveVoiceSettings(); renderVbar(); };
+    const grp = (label, ...kids) => h('div.tgroup', h('label', label), h('div.row', ...kids));
+    const slider = (obj, k, min, max, step, label) => {
+      const val = h('span.mono.dim', { style: { width: '34px' } }, Number(obj[k]).toFixed(2));
+      const r = h('input', { type: 'range', min, max, step, value: obj[k], style: { width: '96px' } });
+      r.addEventListener('input', () => { val.textContent = Number(r.value).toFixed(2); });
+      r.addEventListener('change', () => set(obj, k, Number(r.value)));
+      return grp(label, r, val);
+    };
+    const num = (obj, k, label, o = {}) => {
+      const i = h('input', { type: 'number', value: obj[k] ?? '', placeholder: o.placeholder || '', step: o.step || 'any', min: o.min, title: o.title || '', style: { width: o.width || '76px' } });
+      i.addEventListener('change', () => set(obj, k, i.value === '' ? (o.nullable ? null : 0) : Number(i.value)));
+      return grp(label, i);
+    };
+    // Speaker: filters the lines; with one speaker picked, its engine and voice can be changed right here.
+    const spSel = h('select', { title: 'Show one speaker\'s lines (and pick its voice here)', style: { maxWidth: '240px' } }, h('option', { value: '' }, `All speakers (${proj.speakers.length})`),
+      proj.speakers.map((sp) => h('option', { value: sp.key, selected: sp.key === speakerFilter }, `${sp.name} (${sp.lines})`)));
+    spSel.addEventListener('change', () => { speakerFilter = spSel.value; renderVbar(); renderFilters(); grid.setRows(visible()); renderActions(); });
+    const sp = speakerFilter && proj.speakers.find((x) => x.key === speakerFilter);
+    const voiceGrp = sp ? grp('Engine · voice', voicePick(sp), h('button.icon-btn', { title: 'Reload voices and models', onclick: () => loadVoices(true) }, '⟳'))
+      : grp('Voice', h('button.btn.sm.ghost', { title: 'Each speaker has its own voice: pick a speaker on the left, or set them all in the Speakers tab', onclick: () => { tab = 'speakers'; renderAll(); } }, 'Per speaker · Speakers tab →'));
+    const kids = [grp('Speaker', spSel), voiceGrp];
+    const fmts = [['mp3_44100_128', 'MP3 44.1k 128'], ['mp3_44100_192', 'MP3 44.1k 192'], ['pcm_44100', 'PCM 44.1k (lossless)']];
+    if (proj.voiceChanger) {
+      const st = v.sts;
+      const ms = h('select', { onchange: (e) => set(st, 'modelId', e.target.value) }, (elevenModels && elevenModels.length ? elevenModels : [{ modelId: st.modelId }]).map((m) => h('option', { value: m.modelId, selected: m.modelId === st.modelId }, m.modelId)));
+      kids.push(grp('Model', ms), slider(st, 'stability', 0, 1, 0.01, 'Stability'), slider(st, 'similarity', 0, 1, 0.01, 'Similarity'), slider(st, 'style', 0, 1, 0.01, 'Style'),
+        grp('Remove background noise', switchEl(st.removeBackgroundNoise, (x) => set(st, 'removeBackgroundNoise', x), '', { title: 'Strip background noise from the original before converting' })),
+        num(st, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px' }), num(st, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'Your plan\'s concurrent request limit' }));
+    } else {
+      const used = new Set(proj.speakers.filter((x) => x.voiceId && !x.skip).map((x) => x.engine || 'elevenlabs'));
+      const eng = sp ? (sp.engine || 'elevenlabs') : (used.size === 1 ? [...used][0] : 'elevenlabs');
+      if (eng === 'elevenlabs') {
+        const e = v.eleven;
+        const tag = /^eleven_v[34]/i.test(e.modelId || '');
+        const mi = (elevenModels || []).find((x) => x.modelId === e.modelId) || {};
+        const style = mi.canUseStyle != null ? mi.canUseStyle && !tag : !tag;
+        const boost = mi.canUseSpeakerBoost != null ? mi.canUseSpeakerBoost && !tag : !tag;
+        const langOk = !/multilingual_v2|monolingual_v1|english_v1/.test(e.modelId || '');
+        const ms = h('select', { onchange: (ev) => set(e, 'modelId', ev.target.value) }, (elevenModels && elevenModels.length ? elevenModels : [{ modelId: e.modelId }]).map((x) => h('option', { value: x.modelId, selected: x.modelId === e.modelId }, x.modelId + (/^eleven_v[34]/i.test(x.modelId) ? ' · tags' : ''))));
+        const stabVal = e.stability < 0.25 ? 0 : e.stability < 0.75 ? 0.5 : 1;
+        const lang = h('select', { disabled: !langOk, title: langOk ? 'Force the language (ISO 639-1). Auto lets the model detect it.' : 'This model does not accept a language code.', onchange: (ev) => set(e, 'languageCode', ev.target.value) },
+          LANGS.map(([k, t]) => h('option', { value: k, selected: k === (e.languageCode || '') }, t)));
+        const norm = h('select', { title: 'Text normalization: whether ElevenLabs writes out numbers, dates and abbreviations before speaking. Auto lets the model decide; On is safer for numbers; Off keeps the text exactly as written.', onchange: (ev) => set(e, 'textNormalization', ev.target.value) },
+          [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']].map(([k, t]) => h('option', { value: k, selected: k === (e.textNormalization || 'auto') }, t)));
+        const fmt = h('select', { onchange: (ev) => set(e, 'outputFormat', ev.target.value) }, fmts.map(([k, t]) => h('option', { value: k, selected: k === e.outputFormat }, t)));
+        kids.push(grp('Model', ms),
+          tag ? grp('Stability', segmented([[0, 'Creative'], [0.5, 'Natural'], [1, 'Robust']], stabVal, (x) => set(e, 'stability', Number(x)))) : slider(e, 'stability', 0, 1, 0.01, 'Stability'),
+          slider(e, 'similarity', 0, 1, 0.01, 'Similarity'),
+          style ? slider(e, 'style', 0, 1, 0.01, 'Style') : null,
+          boost ? grp('Speaker boost', switchEl(e.speakerBoost, (x) => set(e, 'speakerBoost', x), '', { title: 'Closer to the voice; can clip or sound harsh' })) : null,
+          slider(e, 'speed', 0.7, 1.2, 0.01, 'Speed'),
+          grp('Language', lang), grp('Read numbers ⓘ', norm), grp('Format', fmt),
+          num(e, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px', title: 'Same seed + same text + same settings ≈ same take. Empty = random.' }),
+          num(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit.' }));
+      } else if (eng === 'voxcpm') {
+        const o = v.voxCpm;
+        kids.push(num(o, 'cfgValue', 'CFG', { step: 0.1 }), num(o, 'inferenceTimesteps', 'Timesteps', { min: 1 }),
+          grp('Normalize', switchEl(o.normalize, (x) => set(o, 'normalize', x), '')), grp('Retry bad cases', switchEl(o.retryBadcase, (x) => set(o, 'retryBadcase', x), '')),
+          num(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
+      } else {
+        const o = v.omniVoice;
+        kids.push(num(o, 'numStep', 'Steps', { min: 1 }), num(o, 'speed', 'Speed', { step: 0.05 }), num(o, 'guidanceScale', 'Guidance', { step: 0.1 }),
+          num(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
+      }
+    }
+    const needs = () => proj.lines.filter((l) => !l.excl && !l.gone && ['Pending', 'Failed', 'Stale'].includes(l.status)).reduce((a, l) => a + l.spoken.length, 0);
+    clear(vbar).append(...kids, h('div.spacer'), creditsEl || (creditsEl = creditsButton(needs, 'This project')));
+  }
+
   // ---------------------------------------------------------------- tags (ElevenLabs audio tags, as in Phase 2)
   const saveSpoken = debounce((l, value) => { if (value !== l.spoken) upd(l, 'spoken', value); }, 600);
   function tagClick(t, remove) {
@@ -580,7 +652,7 @@ export async function revoiceView(id) {
   function renderTagbar() {
     clear(tagbar);
     if (proj.voiceChanger) {
-      tagbar.append(h('span.lbl', 'Voice Changer'), h('span.dim', 'The current recording decides the delivery, so audio tags are not used. The spoken text only feeds the .lip.'));
+      tagbar.append(h('span.lbl', 'Voice Changer'), h('span.dim', 'The current recording decides the delivery, so audio tags are not used. The spoken text only feeds the .lip.'), h('div.spacer'), folderButton());
       return;
     }
     const engines = new Set(proj.speakers.filter((sp) => sp.voiceId && !sp.skip).map((sp) => sp.engine || 'elevenlabs'));
@@ -612,7 +684,16 @@ export async function revoiceView(id) {
         originalNote: 'Searches the in-game subtitle, the actor notes from the plugin and the emotion name (Anger, Fear, Happy…). Separate several with commas.',
         apply: applyTags,
       }) }, 'Add a [tag] to all shown…'),
-      engines.size && !engines.has('elevenlabs') ? h('span.dim', 'Your speakers use local engines, which ignore audio tags.') : null);
+      engines.size && !engines.has('elevenlabs') ? h('span.dim', 'Your speakers use local engines, which ignore audio tags.') : null,
+      h('div.spacer'), folderButton());
+  }
+  function folderButton() {
+    const btn = h('button.btn.sm.ghost', { title: 'Open this project\'s folders in Explorer' }, icon('folder', { size: 14 }), ' Open folder ▾');
+    btn.addEventListener('click', () => popupMenu(btn, [
+      proj.outputFolder ? { label: 'Output folder (export)', sub: proj.outputFolder, onclick: () => rpc('open.path', { path: proj.outputFolder }).catch(fail) } : null,
+      { label: 'Takes folder', sub: 'Every take of this project', onclick: () => rpc('revoice.openFolder', { id }).catch(fail) },
+    ].filter(Boolean)));
+    return btn;
   }
 
   async function upd(l, action, value) {
@@ -792,7 +873,7 @@ export async function revoiceView(id) {
     const split = h('div.split' + (showInsp ? '' : '.no-insp'));
     split.append(left, insp);
     if (!elevenModels) loadVoices();
-    clear(vbar).append(...voiceSettingRows());
+    renderVbar();
     body.append(vbar, filters, tagbar, split, actions);
     renderFilters();
     renderTagbar();

@@ -93,10 +93,11 @@ async function credits() {
         h('div', 'No xEdit and no collecting topic files by hand. Drop in a mod\'s plugins and ', h('b', 'Phase 1'), ' pulls out every player line, checks it against DBVO\'s rules and writes the DBVO Fix plugin that takes care of the formatting. ',
           h('b', 'Phase 2'), ' voices the lines back to back (text-to-speech or the Voice Changer, with audio tags, takes and lip sync) and builds the .fuz files itself, so you never open Yakitori to fuz your player lines. ',
           h('b', 'Phase 3'), ' moves it all into a FOMOD installer that is easy to keep working on. You can export at any stage, and skip the FOMOD altogether if you wish.'),
-        h('div', h('b', 'NPC Revoice'), ' has no match in the modding community. Point it at any mod, or the base game, and it finds every line a character speaks, works out who says what (helped by UESP\'s quotes), lets you give each character a voice of your choosing and writes the files exactly where the game looks for them. That is how a whole follower is revoiced, as in Aela Revoiced, or how an NPC gets a voice type all of their own.'))),
+        h('div', h('b', 'NPC Revoice'), ' has no match in the modding community. Point it at any mod, or the base game, and it finds every line a character speaks, works out who says what (helped by UESP\'s quotes), lets you give each character a voice of your choosing and writes the files exactly where the game looks for them. That is how a whole follower is revoiced, as in Aela Revoiced, or how an NPC gets a voice type all of their own.'),
+        h('div', h('b', 'WAV to LIP'), ' makes lip sync from the audio alone. Accurate .lip files normally need a written transcript of every line; the usual LIP tools ask you for the text of each file. WAV to LIP lets Whisper listen to the WAV files and write the transcript itself, then FaceFXWrapper makes the .lip, in bulk: drop in whole folders and every WAV gets its matching .lip.'))),
 
     section('Shout outs', null,
-      h('ul.credits-list', { style: { margin: '6px 0', paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '8px' } },
+      h('ul.credits-list.dim', { style: { margin: '6px 0', paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '8px' } },
         h('li', 'The mod authors of the many wonderful mods whose characters DBVO Studio helps give a voice.'),
         h('li', link(nx('2716809'), 'isophe'), ', whose DBVO2 Tool served as a great crutch for handling all the WAV files before DBVO Studio existed.'),
         h('li', 'I built DBVO Studio with ', link('https://claude.ai/', 'Claude'), ' (Anthropic), which wrote the code to my designs, testing and feedback. (AI-Assisted Tag)'),

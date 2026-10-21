@@ -34,6 +34,11 @@ const SECTION = { mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches
 export async function render() {
   const section = SECTION[app.route.view] || 'mods';
   document.querySelectorAll('[data-section]').forEach((b) => b.classList.toggle('active', b.dataset.section === section));
+  // An Other Tools page shows its name in the top bar, after the three phases.
+  const tool = { wavlip: ['WAV to LIP', 'wavlip'], revoices: ['NPC Revoice', 'revoices'], revoice: ['NPC Revoice', 'revoices'] }[app.route.view];
+  const tc = document.getElementById('tool-crumb');
+  tc.classList.toggle('hidden', !tool);
+  if (tool) { tc.textContent = tool[0]; tc.onclick = () => go(tool[1]); }
   clear(main);
   main.append(h('div.empty', 'Loading…'));
   try {
@@ -62,7 +67,7 @@ export async function render() {
   }
 }
 
-document.querySelectorAll('.crumb').forEach((b) => b.addEventListener('click', () => go(b.dataset.section)));
+document.querySelectorAll('.crumb[data-section]').forEach((b) => b.addEventListener('click', () => go(b.dataset.section)));
 document.querySelector('[data-section="settings"]').addEventListener('click', () => go('settings'));
 const toolsBtn = document.getElementById('tools-btn');
 toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [

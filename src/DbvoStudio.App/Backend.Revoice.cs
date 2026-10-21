@@ -289,6 +289,12 @@ public sealed partial class Backend
                 var wav = await RevoiceService.DecodeAsync(s.Files, VoiceFileIndex.Make(src, S(p, "inner")), Tools(), CancellationToken.None);
                 return "data:audio/wav;base64," + Convert.ToBase64String(wav);
             }
+            case "revoice.openFolder":
+            {
+                var dir = Path.Combine(_lib.RevoiceFolder(S(p, "id")), "takes");
+                OpenPath(Directory.Exists(dir) ? dir : _lib.RevoiceFolder(S(p, "id")));
+                return true;
+            }
             case "revoice.openTakeFolder":
             {
                 var proj = LoadRv(S(p, "id"));

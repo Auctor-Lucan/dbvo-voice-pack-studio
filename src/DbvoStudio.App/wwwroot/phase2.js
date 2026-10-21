@@ -5,7 +5,7 @@ import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret } from './tagtoo
 
 const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Text changed since take' };
 
-const LANGS = [['', 'Auto'], ['en', 'en · English'], ['de', 'de · German'], ['fr', 'fr · French'], ['es', 'es · Spanish'], ['it', 'it · Italian'],
+export const LANGS = [['', 'Auto'], ['en', 'en · English'], ['de', 'de · German'], ['fr', 'fr · French'], ['es', 'es · Spanish'], ['it', 'it · Italian'],
   ['pt', 'pt · Portuguese'], ['pl', 'pl · Polish'], ['ru', 'ru · Russian'], ['ja', 'ja · Japanese'], ['zh', 'zh · Chinese'], ['ko', 'ko · Korean'],
   ['nl', 'nl · Dutch'], ['sv', 'sv · Swedish'], ['cs', 'cs · Czech'], ['tr', 'tr · Turkish'], ['uk', 'uk · Ukrainian'], ['hu', 'hu · Hungarian']];
 
@@ -36,6 +36,51 @@ export function voiceChip(name, color) {
 }
 
 // ------------------------------------------------------------------ list (DBVO Patches, or Voice Changer patches)
+
+// ---- ElevenLabs credits (cached for a minute across pages)
+/** The ElevenLabs credits button (ring + popover). needs(): characters the current page still needs, label: what needs them. */
+export function creditsButton(needs, label = 'This patch') {
+  const ring = h('span.row', ringIcon(1, { size: 15 }));
+  const btn = h('button.btn.sm.credits-btn', { title: '' }, ring, h('b', '…'), h('span.faint', 'credits'));
+  let data = null, err = null, pop = null, hideT = 0;
+  const fill = (c) => {
+    data = c;
+    const left = Math.max(0, c.characterLimit - c.characterCount);
+    btn.children[1].textContent = left.toLocaleString();
+    clear(ring).append(ringIcon(c.characterLimit ? left / c.characterLimit : 0, { size: 15 }));
+  };
+  const body = () => {
+    if (err) return [h('div', 'Could not read the credits'), h('div.faint', 'Check the API key in Global Settings.')];
+    if (!data) return [h('div.faint', 'Loading…')];
+    const c = data;
+    const left = Math.max(0, c.characterLimit - c.characterCount);
+    const pct = c.characterLimit ? Math.round((100 * left) / c.characterLimit) : 0;
+    const pend = needs();
+    return [
+      h('div.row', ringIcon(c.characterLimit ? left / c.characterLimit : 0, { size: 34 }), h('div', h('div', h('b', left.toLocaleString()), ` credits left (${pct}%)`),
+        h('div.faint', `${c.characterCount.toLocaleString()} of ${c.characterLimit.toLocaleString()} used · ${c.tier}`))),
+      c.nextReset ? h('div.faint', 'Resets ' + new Date(c.nextReset * 1000).toLocaleString()) : null,
+      h('div', `${label} still needs ≈ ${pend.toLocaleString()}`, h('div.faint', pend > left ? 'More than you have left this period' : 'Fits in what you have left')),
+      h('div.row', h('div.spacer'), h('button.btn.sm.ghost', { onclick: async () => { creditsCache = null; try { fill(await loadCredits(true)); err = null; } catch (e) { err = e; } if (pop) clear(pop).append(...body()); } }, '⟳ Refresh')),
+    ];
+  };
+  const close = () => { clearTimeout(hideT); hideT = setTimeout(() => { if (pop) { pop.remove(); pop = null; } }, 180); };
+  const open = () => {
+    clearTimeout(hideT);
+    if (pop) return;
+    const r = btn.getBoundingClientRect();
+    pop = h('div.credits-pop', { style: { top: `${r.bottom + 6}px`, right: `${Math.max(8, window.innerWidth - r.right)}px` } }, ...body());
+    pop.addEventListener('mouseenter', () => clearTimeout(hideT));
+    pop.addEventListener('mouseleave', close);
+    document.body.append(pop);
+  };
+  btn.addEventListener('mouseenter', open);
+  btn.addEventListener('mouseleave', close);
+  btn.addEventListener('focus', open);
+  btn.addEventListener('blur', close);
+  loadCredits().then((c) => { fill(c); if (pop) clear(pop).append(...body()); }).catch((e) => { err = e; btn.children[1].textContent = '—'; });
+  return btn;
+}
 
 export async function patchesView(kind = 'tts') {
   const s = await refreshState();
@@ -473,51 +518,7 @@ export async function patchView(id) {
         numIn(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit; the app slows down automatically on "too many requests".' }));
     }
     if (locked) tb.append(h('span.badge.b-toolong', { title: 'Unlock in Global Settings → Voice packs' }, '🔒 locked'));
-    if (eng === 'elevenlabs' || eng === 'sts') tb.append(h('div.spacer'), creditsEl || (creditsEl = creditsButton()));
-  }
-
-  // ---- ElevenLabs credits (cached for a minute across pages)
-  function creditsButton() {
-    const ring = h('span.row', ringIcon(1, { size: 15 }));
-    const btn = h('button.btn.sm.credits-btn', { title: '' }, ring, h('b', '…'), h('span.faint', 'credits'));
-    let data = null, err = null, pop = null, hideT = 0;
-    const fill = (c) => {
-      data = c;
-      const left = Math.max(0, c.characterLimit - c.characterCount);
-      btn.children[1].textContent = left.toLocaleString();
-      clear(ring).append(ringIcon(c.characterLimit ? left / c.characterLimit : 0, { size: 15 }));
-    };
-    const body = () => {
-      if (err) return [h('div', 'Could not read the credits'), h('div.faint', 'Check the API key in Global Settings.')];
-      if (!data) return [h('div.faint', 'Loading…')];
-      const c = data;
-      const left = Math.max(0, c.characterLimit - c.characterCount);
-      const pct = c.characterLimit ? Math.round((100 * left) / c.characterLimit) : 0;
-      const pend = patch.lines.filter(pendingLine).reduce((a, l) => a + l.spoken.length, 0);
-      return [
-        h('div.row', ringIcon(c.characterLimit ? left / c.characterLimit : 0, { size: 34 }), h('div', h('div', h('b', left.toLocaleString()), ` credits left (${pct}%)`),
-          h('div.faint', `${c.characterCount.toLocaleString()} of ${c.characterLimit.toLocaleString()} used · ${c.tier}`))),
-        c.nextReset ? h('div.faint', 'Resets ' + new Date(c.nextReset * 1000).toLocaleString()) : null,
-        h('div', `This patch still needs ≈ ${pend.toLocaleString()}`, h('div.faint', pend > left ? 'More than you have left this period' : 'Fits in what you have left')),
-        h('div.row', h('div.spacer'), h('button.btn.sm.ghost', { onclick: async () => { creditsCache = null; try { fill(await loadCredits(true)); err = null; } catch (e) { err = e; } if (pop) clear(pop).append(...body()); } }, '⟳ Refresh')),
-      ];
-    };
-    const close = () => { clearTimeout(hideT); hideT = setTimeout(() => { if (pop) { pop.remove(); pop = null; } }, 180); };
-    const open = () => {
-      clearTimeout(hideT);
-      if (pop) return;
-      const r = btn.getBoundingClientRect();
-      pop = h('div.credits-pop', { style: { top: `${r.bottom + 6}px`, right: `${Math.max(8, window.innerWidth - r.right)}px` } }, ...body());
-      pop.addEventListener('mouseenter', () => clearTimeout(hideT));
-      pop.addEventListener('mouseleave', close);
-      document.body.append(pop);
-    };
-    btn.addEventListener('mouseenter', open);
-    btn.addEventListener('mouseleave', close);
-    btn.addEventListener('focus', open);
-    btn.addEventListener('blur', close);
-    loadCredits().then((c) => { fill(c); if (pop) clear(pop).append(...body()); }).catch((e) => { err = e; btn.children[1].textContent = '—'; });
-    return btn;
+    if (eng === 'elevenlabs' || eng === 'sts') tb.append(h('div.spacer'), creditsEl || (creditsEl = creditsButton(() => patch.lines.filter(pendingLine).reduce((a, l) => a + l.spoken.length, 0))));
   }
 
   function folderButton() {

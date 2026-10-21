@@ -49,6 +49,7 @@ a:hover { text-decoration: underline; }
 .crumb:hover { color: var(--text); background: var(--panel); }
 .crumb.active { color: var(--text); background: var(--raised); box-shadow: inset 3px 0 0 var(--accent); border-radius: 0 var(--radius) var(--radius) 0; }
 .crumb.active .num { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
+.tool-crumb { margin-left: 18px; }
 .crumb-sep { color: var(--accent); font-size: 18px; font-weight: 700; padding: 0 2px; }
 .top-btn { background: none; border: 1px solid transparent; color: var(--dim); padding: 6px 12px; border-radius: var(--radius); cursor: pointer; font-weight: 600; }
 .top-btn:hover { color: var(--text); background: var(--panel); border-color: var(--line); }
