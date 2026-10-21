@@ -104,6 +104,13 @@ public sealed partial class Backend
                 using var c = LocalClient(S(p, "engine"));
                 return await c.HealthAsync();
             }
+            case "credits.notices":
+            {
+                var f = Path.Combine(AppContext.BaseDirectory, "THIRD-PARTY-NOTICES.txt");
+                if (!File.Exists(f)) throw new InvalidOperationException("THIRD-PARTY-NOTICES.txt is missing from the app folder.");
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(f) { UseShellExecute = true });
+                return true;
+            }
             case "reference.info":
             {
                 var u = DbvoStudio.Core.Reference.UespReference.Shared;

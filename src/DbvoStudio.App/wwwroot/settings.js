@@ -76,15 +76,59 @@ export async function settingsView(tab, selectedId) {
 async function credits() {
   const u = await rpc('reference.info', {}).catch(() => null);
   const day = (t) => (t ? new Date(t).toLocaleDateString() : '?');
-  return section('Credits', null,
-    h('div.srow', h('div.lbl', 'UESP', h('small', 'The Unofficial Elder Scrolls Pages')),
-      h('div.col', { style: { gap: '6px' } },
+  const row = (name, sub, ...body) => h('div.srow', { style: { alignItems: 'start' } }, h('div.lbl', name, sub ? h('small', sub) : null), h('div.col', { style: { gap: '6px' } }, ...body));
+  const lic = (...x) => h('div.faint', ...x);
+  return h('div.col', { style: { gap: '18px' } },
+    section('Credits', null,
+      h('div', { style: { padding: '4px 0 10px' } }, 'DBVO Voice Pack Studio by Auctor Lucan, for Dragonborn Voice Over (DBVO). It stands on the work of the people and projects below; thank you all.'),
+      row('UESP', 'The Unofficial Elder Scrolls Pages',
         h('div', 'NPC voice types, quoted dialogue and book authors used by NPC Revoice come from ', link('https://en.uesp.net/', 'UESP — en.uesp.net'),
           '. All credit for this information goes to the UESP editors and community; it was collected by Auctor Lucan.'),
-        u ? h('div.faint', `${u.pages.toLocaleString()} Skyrim pages (revisions ${day(u.revisionsFrom)} – ${day(u.revisionsTo)}) → ${u.npcs.toLocaleString()} NPCs, ${u.quotes.toLocaleString()} quotes, ${u.books.toLocaleString()} books.`) : h('div.faint', 'Reference data not found in this build.'),
-        h('div.faint', 'UESP text is licensed under ', link('https://creativecommons.org/licenses/by-sa/2.5/', 'CC BY-SA 2.5'),
+        u ? lic(`${u.pages.toLocaleString()} Skyrim pages (revisions ${day(u.revisionsFrom)} – ${day(u.revisionsTo)}) → ${u.npcs.toLocaleString()} NPCs, ${u.quotes.toLocaleString()} quotes, ${u.books.toLocaleString()} books.`) : lic('Reference data not found in this build.'),
+        lic('UESP text is licensed under ', link('https://creativecommons.org/licenses/by-sa/2.5/', 'CC BY-SA 2.5'),
           '; the derived data in this app is shared under the same license. Each entry links back to its UESP article (', link('https://en.uesp.net/wiki/UESPWiki:Copyrights', 'UESP copyright policy'), ').'),
-        h('div.faint', 'Used for base-game lines only: when several NPCs share a voice type, a UESP quote of the exact line by one of them picks the speaker (shown as "UESP quote", certainty Probable).'))));
+        lic('Used for base-game lines only: when several NPCs share a voice type, a UESP quote of the exact line by one of them picks the speaker (shown as "UESP quote", certainty Probable).'))),
+
+    section('Included with DBVO Studio', null,
+      h('div.faint', { style: { padding: '4px 0 6px' } }, 'These components ship with the app, unmodified. Each keeps its own license; the full texts are in THIRD-PARTY-NOTICES.txt and in each tool\'s folder.'),
+      row('FFmpeg', 'Tools\\ffmpeg\\ffmpeg.exe',
+        h('div', 'Converts audio (sample rate, format, loudness) and decodes .fuz / .xwm audio for playback.'),
+        lic('LGPL build from ', link('https://github.com/BtbN/FFmpeg-Builds', 'BtbN/FFmpeg-Builds'), '. License: ', link('https://www.gnu.org/licenses/lgpl-3.0.html', 'GNU LGPL v3'),
+          ' (Tools\\ffmpeg\\LICENSE.txt). Source code: ', link('https://ffmpeg.org/download.html', 'ffmpeg.org'), ' (exact build in Tools\\ffmpeg\\SOURCE.txt).')),
+      row('7-Zip', 'Tools\\7-Zip\\7z.exe, 7z.dll',
+        h('div', 'Reads .7z mod archives and packs .7z FOMOD archives.'),
+        lic('7-Zip 24.07, Copyright © 1999–2024 Igor Pavlov, ', link('https://www.7-zip.org/', '7-zip.org'), '. License: GNU LGPL with BSD 3-clause and unRAR restrictions (Tools\\7-Zip\\License.txt). Source code: ',
+          link('https://www.7-zip.org/download.html', '7-zip.org/download'), '.')),
+      row('Whisper', 'Whisper.net · whisper.cpp',
+        h('div', 'Speech recognition for WAV to LIP and for matching orphaned voice files.'),
+        lic(link('https://github.com/sandrohanea/whisper.net', 'Whisper.net'), ' and ', link('https://github.com/ggml-org/whisper.cpp', 'whisper.cpp / ggml'),
+          ', MIT License. The models are not included: they are downloaded on first use from Hugging Face (OpenAI Whisper weights, MIT License).')),
+      row('K4os LZ4', 'K4os.Compression.LZ4',
+        h('div', 'Reads Skyrim Special Edition .bsa archives.'),
+        lic(link('https://github.com/MiloszKrajewski/K4os.Compression.LZ4', 'MiloszKrajewski/K4os.Compression.LZ4'), ', MIT License.')),
+      row('FOMOD schema', 'ModuleConfig.xsd',
+        h('div', 'Validates the FOMOD installers built in Phase 3.'),
+        lic('Copyright © 2017 Daniel Nunes, MIT License.')),
+      row('Microsoft', '.NET · WebView2',
+        h('div', 'The app runtime and the window the interface runs in.'),
+        lic(link('https://github.com/dotnet/runtime', '.NET runtime'), ' and System.Security.Cryptography.ProtectedData, MIT License. ',
+          link('https://www.nuget.org/packages/Microsoft.Web.WebView2', 'Microsoft Edge WebView2 SDK'), ', Microsoft license (redistributable).')),
+      h('div.row', { style: { paddingTop: '8px' } }, h('button.btn.sm', { title: 'Open the license file that ships with the app', onclick: () => rpc('credits.notices').catch(fail) }, 'Open THIRD-PARTY-NOTICES.txt'))),
+
+    section('Not included — each user gets these', null,
+      h('div.faint', { style: { padding: '4px 0 6px' } }, 'Their licenses don\'t allow passing them on, so DBVO Studio finds them on your PC or you point to them in Global Settings → Tools. Click ⓘ for how to get each one.'),
+      row(h('span', 'FaceFXWrapper ', needInfo('facefx')), 'by Nukem9',
+        h('div', 'Makes the .lip (lip-sync) files.'),
+        lic('MIT License, but it contains Creation Kit code and Bethesda resources. ', link('https://www.nexusmods.com/skyrimspecialedition/mods/20061', 'Nexus Mods'), ' · ', link('https://github.com/Nukem9/FaceFXWrapper', 'GitHub'), '.')),
+      row(h('span', 'FonixData.cdf ', needInfo('fonix')), 'Bethesda',
+        h('div', 'The speech data FaceFXWrapper needs.'),
+        lic('Part of the Skyrim Special Edition ', link('https://store.steampowered.com/app/1946180/', 'Creation Kit'), ' (free on Steam for owners of the game).')),
+      row(h('span', 'xWMAEncode.exe ', needInfo('xwma')), 'Microsoft',
+        h('div', 'Converts audio to xWMA for .fuz files.'),
+        lic('From the Microsoft DirectX SDK; installed with the Skyrim Special Edition Creation Kit (Tools\\Audio).'))),
+
+    section('Thanks', null,
+      h('div', { style: { padding: '4px 0' } }, 'Bethesda Game Studios for Skyrim and the Creation Kit; the DBVO authors and the voice pack makers whose packs, formats and conventions this tool follows; and the Skyrim modding community.')));
 }
 
 async function saveSettings(patchObj) {
