@@ -5,7 +5,7 @@ The following components are included with DBVO Voice Pack Studio. Each keeps it
 
 ffmpeg (Tools\ffmpeg\ffmpeg.exe)
   FFmpeg, LGPL build from https://github.com/BtbN/FFmpeg-Builds (unmodified).
-  License: GNU Lesser General Public License v2.1 or later - see Tools\ffmpeg\LICENSE.txt.
+  License: GNU Lesser General Public License (version 3 for the included build) - see Tools\ffmpeg\LICENSE.txt.
   Source code: https://ffmpeg.org/download.html (exact build: see Tools\ffmpeg\SOURCE.txt).
   Used to convert audio (sample rate, format, loudness) and to decode .fuz / .xwm audio for playback.
 
