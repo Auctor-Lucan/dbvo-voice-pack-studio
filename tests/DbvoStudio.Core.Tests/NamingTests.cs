@@ -123,3 +123,17 @@ public class PlayerNameDefaultTests
         finally { DbvoStudio.Core.Projects.Phase1Line.PlayerNamesVoicedByDefault = false; }
     }
 }
+
+public class FuzTemplateTests
+{
+    [Theory]
+    [InlineData("", "C:\\FOMOD\\Vamp - SDA", "Sound\\DBVO\\{packId}")]
+    [InlineData("C:\\FOMOD\\Vamp - SDA", "C:\\FOMOD\\Vamp - SDA", "Sound\\DBVO\\{packId}")]
+    [InlineData("C:\\FOMOD\\Vamp - SDA\\Sound\\DBVO\\{packId}", "C:\\FOMOD\\Vamp - SDA", "Sound\\DBVO\\{packId}")]
+    [InlineData("Vamp - {mod}", "C:\\FOMOD", "Vamp - {mod}\\Sound\\DBVO\\{packId}")]
+    [InlineData("Vamp - {mod}\\Sound\\DBVO\\{packId}", "C:\\FOMOD", "Vamp - {mod}\\Sound\\DBVO\\{packId}")]
+    [InlineData("\\Sound\\DBVO\\Vampira\\", "C:\\FOMOD", "Sound\\DBVO\\Vampira")]
+    [InlineData("D:\\Elsewhere", "C:\\FOMOD", "Sound\\DBVO\\{packId}")]
+    public void Fuz_sub_folder_is_relative_and_ends_in_sound_dbvo(string template, string root, string expected)
+        => Assert.Equal(expected, DbvoStudio.Core.Projects.Phase2Service.NormalizeFuzTemplate(template, root));
+}

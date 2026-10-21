@@ -53,9 +53,35 @@ public sealed class Phase2Service
     public string FinalRoot(DbvoPatch p, VoicePack v) => p.FinalRoot;
 
     /// <summary>Sub-folder for .fuz files under the final folder, e.g. Sound\DBVO\{packId}.</summary>
-    public string FuzTemplate(DbvoPatch p, VoicePack v) =>
-        !string.IsNullOrWhiteSpace(p.FuzTemplate) ? p.FuzTemplate
-        : !string.IsNullOrWhiteSpace(v.Destinations.FuzTemplate) ? v.Destinations.FuzTemplate : @"Sound\DBVO\{packId}";
+    public string FuzTemplate(DbvoPatch p, VoicePack v) => ResolveFuzTemplate(p, v);
+
+    public const string DefaultFuzTemplate = @"Sound\DBVO\{packId}";
+
+    /// <summary>The patch's .fuz sub-folder (or the voice pack's), made valid: see <see cref="NormalizeFuzTemplate"/>.</summary>
+    public static string ResolveFuzTemplate(DbvoPatch p, VoicePack v) =>
+        NormalizeFuzTemplate(!string.IsNullOrWhiteSpace(p.FuzTemplate) ? p.FuzTemplate : v.Destinations.FuzTemplate, p.FinalRoot, v.Destinations.FinalRoot);
+
+    /// <summary>
+    /// A .fuz sub-folder is relative to the final folder and ends in DBVO's own Sound\DBVO\&lt;voice pack ID&gt; folder.
+    /// Empty becomes Sound\DBVO\{packId}; a full path that starts with the final folder loses that part
+    /// (otherwise the final folder was doubled, or the Sound\DBVO part was missing); a folder without a
+    /// Sound\ part gets \Sound\DBVO\{packId} added ("Vamp - {mod}" → "Vamp - {mod}\Sound\DBVO\{packId}").
+    /// </summary>
+    public static string NormalizeFuzTemplate(string? template, params string?[] finalRoots)
+    {
+        var t = (template ?? "").Trim().Replace('/', '\\');
+        if (Path.IsPathRooted(t) || (t.Length > 1 && t[1] == ':'))
+        {
+            string? root = finalRoots.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r!.Trim().Replace('/', '\\').TrimEnd('\\'))
+                .FirstOrDefault(r => t.StartsWith(r + "\\", StringComparison.OrdinalIgnoreCase) || t.Equals(r, StringComparison.OrdinalIgnoreCase));
+            t = root != null ? t[root.Length..] : "";
+        }
+        t = t.Trim('\\', ' ');
+        if (t.Length == 0) return DefaultFuzTemplate;
+        var parts = t.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        if (!parts.Any(x => x.Equals("Sound", StringComparison.OrdinalIgnoreCase))) t += "\\" + DefaultFuzTemplate;
+        return t;
+    }
 
     /// <summary>Expand a folder template: {mod}, {packId}, {voicePack}, {patch}.</summary>
     public static string ExpandTemplate(string template, string modName, VoicePack v, DbvoPatch p) =>

@@ -114,8 +114,7 @@ public sealed class FomodService
     /// <summary>The folder of one mod inside a patch's final folder: the part of the .fuz template above Sound\.</summary>
     public static string ModContentFolder(DbvoPatch patch, VoicePack voice, Mod mod)
     {
-        var tpl = !string.IsNullOrWhiteSpace(patch.FuzTemplate) ? patch.FuzTemplate
-            : !string.IsNullOrWhiteSpace(voice.Destinations.FuzTemplate) ? voice.Destinations.FuzTemplate : @"Sound\DBVO\{packId}";
+        var tpl = Phase2Service.ResolveFuzTemplate(patch, voice);
         var expanded = Phase2Service.ExpandTemplate(tpl, mod.Name, voice, patch).Replace('/', '\\');
         int i = expanded.IndexOf(@"Sound\", StringComparison.OrdinalIgnoreCase);
         var prefix = i < 0 ? "" : expanded[..i].TrimEnd('\\');

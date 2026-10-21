@@ -1029,11 +1029,24 @@ export async function patchView(id) {
     const wl = folder(patch.wavLipFolder, 'WAV + LIP folder', 'C:\\DBVO Dev\\Vampira - Lucien\\RawWav');
     const fx = folder(patch.fixFolder, 'DBVO Fix folder', 'C:\\DBVO Dev\\Vampira - Lucien\\Fix');
     const fr = folder(patch.finalRoot, 'Final folder', 'C:\\DBVO Vampira FOMOD\\04 Followers');
-    const tpl = h('input', { type: 'text', value: patch.fuzTemplate, placeholder: voice.destinations.fuzTemplate || 'Sound\\DBVO\\{packId}' });
+    // Same rules as the app uses when writing: relative to the final folder, ending in Sound\DBVO\<voice pack ID>.
+    const normTpl = (t) => {
+      let v = (t || '').trim().replace(/\//g, '\\');
+      if (/^[a-z]:|^\\\\/i.test(v)) {
+        const root = fr.i.value.trim().replace(/\//g, '\\').replace(/\\+$/, '');
+        v = root && (v.toLowerCase() === root.toLowerCase() || v.toLowerCase().startsWith(root.toLowerCase() + '\\')) ? v.slice(root.length) : '';
+      }
+      v = v.replace(/^[\\\s]+|[\\\s]+$/g, '');
+      if (!v) return 'Sound\\DBVO\\{packId}';
+      if (!v.split('\\').some((x) => x.toLowerCase() === 'sound')) v += '\\Sound\\DBVO\\{packId}';
+      return v;
+    };
+    const tpl = h('input', { type: 'text', value: normTpl(patch.fuzTemplate), placeholder: 'Sound\\DBVO\\{packId}' });
     tpl.addEventListener('input', renderPreview);
+    tpl.addEventListener('change', () => { const n = normTpl(tpl.value); if (n !== tpl.value.trim()) { tpl.value = n; toast('The .fuz sub-folder is relative to the final folder and ends in Sound\\DBVO\\<voice pack ID>: corrected.'); } renderPreview(); });
     function renderPreview() {
       const root = fr.i.value.trim() || '<final folder>';
-      const sub = expand(tpl.value.trim() || voice.destinations.fuzTemplate || 'Sound\\DBVO\\{packId}');
+      const sub = expand(normTpl(tpl.value));
       const i = sub.toLowerCase().indexOf('sound\\');
       const modFolder = i > 0 ? root + '\\' + sub.slice(0, i).replace(/\\$/, '') : root;
       clear(preview).append(
@@ -1054,7 +1067,7 @@ export async function patchView(id) {
         row('WAV + LIP folder', 'Your copy of the takes as .wav + .lip', wl.el),
         row('DBVO Fix folder', 'Your copy of the Fix plugin + topic file', fx.el),
         row('Final folder', 'The FOMOD root (or a page of it)', fr.el),
-        row('.fuz sub-folder', '{mod} {packId} {voicePack} {patch}', tpl),
+        row('.fuz sub-folder', 'Inside the final folder, e.g. Sound\\DBVO\\{packId}. {packId} = the voice pack ID (' + (voice.packId || 'not set') + ')', tpl),
         row('Result', null, preview),
         row('Overwrite', 'Off: existing files are skipped',
           h('div.row', { style: { gap: '18px' } }, switchEl(owWav, (v) => { owWav = v; }, 'WAV + LIP'), switchEl(owFuz, (v) => { owFuz = v; }, '.fuz'))),
@@ -1067,7 +1080,7 @@ export async function patchView(id) {
     try {
       patch = await rpc('patch.saveMeta', {
         id, name: name.value, modIds, referenceIds: [...refOn],
-        wavLipFolder: wl.i.value.trim(), finalRoot: fr.i.value.trim(), fuzTemplate: tpl.value.trim(), fixFolder: fx.i.value.trim(),
+        wavLipFolder: wl.i.value.trim(), finalRoot: fr.i.value.trim(), fuzTemplate: normTpl(tpl.value), fixFolder: fx.i.value.trim(),
         overwriteWavLip: owWav, overwriteFuz: owFuz, sourceFolders: sources,
       });
       if (vc) {

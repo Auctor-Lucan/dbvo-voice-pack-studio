@@ -153,6 +153,8 @@ public sealed partial class Backend
                     var v = p.GetProperty("voice").Deserialize<VoicePack>(JsonOptions)!;
                     if (string.IsNullOrWhiteSpace(v.Name)) throw new InvalidOperationException("Give the voice pack a name.");
                     v.PackId = v.PackId.Trim();
+                    if (!string.IsNullOrWhiteSpace(v.Destinations.FuzTemplate))
+                        v.Destinations.FuzTemplate = Phase2Service.NormalizeFuzTemplate(v.Destinations.FuzTemplate, v.Destinations.FinalRoot);
                     _lib.Save(v);
                     _settings.LastVoicePackId = v.Id;
                     _lib.Save(_settings);
@@ -316,6 +318,7 @@ public sealed partial class Backend
                     patch.WavLipFolder = S(p, "wavLipFolder", patch.WavLipFolder);
                     patch.FinalRoot = S(p, "finalRoot", patch.FinalRoot);
                     patch.FuzTemplate = S(p, "fuzTemplate", patch.FuzTemplate);
+                    patch.FuzTemplate = Phase2Service.NormalizeFuzTemplate(patch.FuzTemplate, patch.FinalRoot, LoadVoice(patch.VoicePackId).Destinations.FinalRoot);
                     patch.FixFolder = S(p, "fixFolder", patch.FixFolder);
                     if (p.TryGetProperty("sourceFolders", out _)) patch.SourceFolders = Strings(p, "sourceFolders");
                     if (p.TryGetProperty("kind", out _)) patch.Kind = S(p, "kind") == "vc" ? "vc" : "tts";
@@ -773,7 +776,8 @@ public sealed partial class Backend
         var mods = _lib.LoadMods();
         return new
         {
-            patch.Id, patch.Name, patch.VoicePackId, patch.ModIds, patch.ReferenceIds, patch.WavLipFolder, patch.FinalRoot, patch.FuzTemplate,
+            patch.Id, patch.Name, patch.VoicePackId, patch.ModIds, patch.ReferenceIds, patch.WavLipFolder, patch.FinalRoot,
+            fuzTemplate = voice == null ? patch.FuzTemplate : Phase2Service.ResolveFuzTemplate(patch, voice),
             patch.OverwriteWavLip, patch.OverwriteFuz, patch.FixFolder, patch.Kind, patch.SourceFolders, patch.LastFuzUtc, patch.TtsForMissing,
             voiceName = voice?.Name ?? "", voiceColor = voice?.Color ?? "",
             category = mods.FirstOrDefault(m => patch.ModIds.Contains(m.Id))?.Category ?? "Misc",
@@ -1080,7 +1084,7 @@ public sealed partial class Backend
         patch.WavLipFolder = Expand(voice.Destinations.WavLipFolder);
         patch.FinalRoot = Expand(voice.Destinations.FinalRoot);
         patch.FixFolder = Expand(voice.Destinations.FixFolder);
-        patch.FuzTemplate = string.IsNullOrWhiteSpace(voice.Destinations.FuzTemplate) ? @"Sound\DBVO\{packId}" : voice.Destinations.FuzTemplate;
+        patch.FuzTemplate = Phase2Service.NormalizeFuzTemplate(voice.Destinations.FuzTemplate, patch.FinalRoot, voice.Destinations.FinalRoot);
         _lib.Save(patch);
         lock (_patches) _patches[patch.Id] = patch;
         new Phase2Service(_lib, Runtime()).Sync(patch, voice, _lib.LoadMods());
