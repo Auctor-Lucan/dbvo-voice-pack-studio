@@ -260,7 +260,7 @@ export async function patchView(id) {
       ? (sel.kept ? 'Kept - click to un-keep. Legacy naming exports one take per line (the one in use).' : 'Keep this take. Legacy naming exports one take per line, so variants need DBVO 2.0 naming.')
       : (sel.kept ? `Kept (${kept} kept) - click to un-keep. Kept takes are exported as DBVO 2.0 variants (2+ → name\\0, 1, …).` : `Keep this take as a variant (${kept} kept). DBVO 2.0 exports every kept take; with none kept, the take in use.`);
     return h('span.row.icon-bar', { style: { gap: '2px' } },
-      h('button.act-btn', { title: regenTitle, disabled: l.excluded || l.omitted || !!app.job || !canGen(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.lineId]); } }, icon('regen')),
+      h('button.act-btn', { title: regenTitle, disabled: l.excluded || l.omitted || !!app.job || !canGen(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.lineId], { autoplay: true }); } }, icon('regen')),
       h('button.act-btn' + (sel && sel.kept ? '.on' : ''), { title: keepTitle, disabled: !sel, onclick: (e) => { e.stopPropagation(); keep(l, sel); } }, icon('star', { filled: !!(sel && sel.kept) })),
       h('button.act-btn', { title: sel ? 'Open this line\'s takes folder' : 'No takes yet', disabled: !l.takes.length, onclick: (e) => { e.stopPropagation(); rpc('patch.openTakeFolder', { id, lineId: l.lineId }).catch(fail); } }, icon('folder')),
       h('button.act-btn.flag-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit (stays until you clear it; "Flagged lines" generates them)', onclick: (e) => { e.stopPropagation(); upd(l, 'mark', !l.marked); } }, icon('flag')),
@@ -327,7 +327,7 @@ export async function patchView(id) {
       h('div.row', h('button.btn.sm', { title: 'Delete every take of this line except the one in use', onclick: async () => {
         try { const r = await rpc('patch.purgeTakes', { id, lineIds: [l.lineId] }); patch = r.patch; reindex(); grid.setRows(visible()); render(); toast(`${r.removed} take(s) deleted.`); } catch (e) { fail(e); }
       } }, 'Keep only the used take'),
-      h('button.btn.sm', { title: 'Make another take of this line', onclick: () => { document.getElementById('modal').classList.add('hidden'); generate('selected', [l.lineId]); } }, vc ? 'Convert again' : 'New take'))]);
+      h('button.btn.sm', { title: 'Make another take of this line', onclick: () => { document.getElementById('modal').classList.add('hidden'); generate('selected', [l.lineId], { autoplay: true }); } }, vc ? 'Convert again' : 'New take'))]);
   }
 
   async function purge(ids) {
@@ -542,9 +542,67 @@ export async function patchView(id) {
   }
   const saveSpoken = debounce((l, value) => { if (value !== l.spoken) upd(l, 'spoken', value); }, 600);
 
-  async function applyTags(tags, mode, ids) {
+  // "Add a [tag] to all shown…": add or remove tags on the lines in the current filter, optionally only where conditions match.
+  async function bulkTagDialog() {
+    let mode = 'add';
+    const pool = grid.rows.filter((l) => !l.omitted && !l.excluded);
+    const plugins = [...new Set(pool.flatMap((l) => l.sources.map((x) => x.plugin)))];
+    const tagsIn = h('input', { type: 'text', placeholder: '[whispers]' });
+    const list = (v) => v.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const strip = (t) => t.replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
+    const opt = (label, input, after, note) => {
+      const cb = h('input', { type: 'checkbox' });
+      if (input) input.addEventListener('input', () => { cb.checked = input.value.trim().length > 0; update(); });
+      cb.addEventListener('change', update);
+      return { cb, el: h('label.tag-opt', cb, h('span.tag-opt-label', label), input || null, after ? h('span.tag-opt-after', after) : null, note ? h('div.tag-opt-note', note) : null) };
+    };
+    const spokenIn = h('input', { type: 'text', placeholder: 'I will kill you.' });
+    const origIn = h('input', { type: 'text', placeholder: '(Intimidate), (Brawl)' });
+    const longIn = h('input', { type: 'number', min: 0, style: { width: '70px' } });
+    const shortIn = h('input', { type: 'number', min: 0, style: { width: '70px' } });
+    const o1 = opt('', spokenIn, 'in SPOKEN TEXT');
+    const o2 = opt('', origIn, `in ORIGINAL MOD LINE (${plugins.join(', ') || 'plugin'})`, '(Parenthesis) cues such as (Intimidate) are removed from topic files, so look for them here. Separate several with commas.');
+    const o3 = opt('', longIn, 'characters. Shorter lines will not be tagged.');
+    const o4 = opt('', shortIn, 'characters. Longer lines will not be tagged.');
+    const o5 = opt('Replace current initial tag. If unchecked, the tag will be placed after existing tag.', null, null);
+    const count = h('div.faint');
+    const verb = () => (mode === 'add' ? 'Add' : 'Remove');
+    const labels = () => {
+      o1.el.querySelector('.tag-opt-label').textContent = `${verb()} tag if detected:`;
+      o2.el.querySelector('.tag-opt-label').textContent = `${verb()} tag if detected:`;
+      o3.el.querySelector('.tag-opt-label').textContent = `${verb()} tag if longer than:`;
+      o4.el.querySelector('.tag-opt-label').textContent = `${verb()} tag if shorter than:`;
+      o5.el.style.display = mode === 'add' ? '' : 'none';
+    };
+    const matches = () => pool.filter((l) => {
+      const sp = strip(l.spoken).toLowerCase();
+      if (o1.cb.checked && list(spokenIn.value).length && !list(spokenIn.value).some((x) => sp.includes(strip(x)))) return false;
+      if (o2.cb.checked && list(origIn.value).length && !list(origIn.value).some((x) => (l.originalLine || '').toLowerCase().includes(x))) return false;
+      if (o3.cb.checked && longIn.value !== '' && !(strip(l.spoken).length > Number(longIn.value))) return false;
+      if (o4.cb.checked && shortIn.value !== '' && !(strip(l.spoken).length < Number(shortIn.value))) return false;
+      return true;
+    });
+    function update() {
+      const n = matches().length;
+      count.textContent = mode === 'add' ? `Added to ${n} of ${pool.length} line(s) in the current filter.` : `Removed from ${n} of ${pool.length} line(s) in the current filter (where they have it).`;
+    }
+    const modeSel = segmented([['add', 'Add'], ['remove', 'Remove']], mode, (v) => { mode = v; labels(); update(); });
+    labels(); update();
+    const ok = await modal(h('span.row', modeSel, h('span', 'a tag to every line shown')), [
+      h('div.col', h('div.field-label', 'Tags'), tagsIn), count,
+      h('div.tag-opts', o1.el, o2.el, o3.el, o4.el, o5.el),
+    ], [{ label: 'Cancel', value: false }, { label: 'OK', primary: true, value: true }], { wide: true });
+    if (!ok) return;
+    const tags = (tagsIn.value.match(/\[[^\]]+\]|[^\s\[\],]+/g) || []);
+    if (!tags.length) { toast('Type a tag first, e.g. [whispers].', true); return; }
+    const ids = matches().map((l) => l.lineId);
+    if (!ids.length) { toast('No line in the current filter matches.', true); return; }
+    applyTags(tags, mode, ids, mode === 'add' ? (o5.cb.checked ? 'replace' : 'after') : '');
+  }
+
+  async function applyTags(tags, mode, ids, placement = '') {
     try {
-      const r = await rpc('line2.bulkTags', { id, lineIds: ids, tags, mode });
+      const r = await rpc('line2.bulkTags', { id, lineIds: ids, tags, mode, placement });
       patch = r.patch;
       reindex();
       grid.setRows(visible());
@@ -594,10 +652,7 @@ export async function patchView(id) {
       voice.tags.map(chip),
       custom,
       h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
-      h('button.btn.sm.ghost', { title: 'Add a [tag] to every line in the current filter…', onclick: async () => {
-        const r = await prompt('Add a tag to every line shown', [{ name: 't', label: 'Tags', placeholder: '[whispers]', help: `Added to the start of ${grid.rows.filter((l) => !l.omitted).length} line(s) in the current filter.` }]);
-        if (r && r.t.trim()) applyTags(r.t.match(/\[[^\]]+\]|[^\s\[\]]+/g), 'add', grid.rows.filter((l) => !l.omitted).map((l) => l.lineId));
-      } }, 'Add a [tag] to all shown…'),
+      h('button.btn.sm.ghost', { title: 'Add a [tag] to every line in the current filter…', onclick: () => bulkTagDialog() }, 'Add a [tag] to all shown…'),
       h('div.spacer'),
       folderButton());
   }
@@ -706,7 +761,7 @@ export async function patchView(id) {
           vc || engine() !== 'elevenlabs' ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.omitted, onclick: () => autotag([l.lineId]) }, 'AI Auto Tag'),
           l.spokenEdited ? h('button.btn.sm.ghost', { title: 'Put the in-game line back as the spoken text', onclick: () => upd(l, 'resetSpoken') }, '↺ Restore in-game line') : null,
           h('div.spacer'),
-          h('button.btn.sm.primary', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running' : !canGen(l) ? 'No source file for this line (text-to-speech for such lines is off)' : 'Make a new take of this line', disabled: l.omitted || !!app.job || !canGen(l), onclick: () => generate('selected', [l.lineId]) }, l.takes.length ? 'New take' : vc ? 'Convert' : 'Generate'))),
+          h('button.btn.sm.primary', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running' : !canGen(l) ? 'No source file for this line (text-to-speech for such lines is off)' : 'Make a new take of this line', disabled: l.omitted || !!app.job || !canGen(l), onclick: () => generate('selected', [l.lineId], { autoplay: true }) }, l.takes.length ? 'New take' : vc ? 'Convert' : 'Generate'))),
       l.tagSuggestion ? h('div.box', h('div.field-label', 'AI suggestion'), h('div', diffAdded(l.spoken, l.tagSuggestion)),
         h('div.row', { style: { marginTop: '6px' } }, h('button.btn.sm.primary', { title: 'Keep the suggested tags', onclick: () => upd(l, 'acceptTags') }, 'Accept'), h('button.btn.sm', { title: 'Go back to the text before tagging', onclick: () => upd(l, 'rejectTags') }, 'Undo'))) : null,
       l.omittedBy ? switchEl(l.overrideOmit, (v) => upd(l, 'overrideOmit', v), `Generate anyway (it is in "${l.omittedBy}")`) : null,
@@ -778,7 +833,10 @@ export async function patchView(id) {
     } catch (e) { fail(e); }
   }
 
-  async function generate(mode, lineIds) {
+  // Single-line generation (row ↻, panel, takes window) plays the new take when it is ready; batches never do.
+  let autoPlay = null; // { lineId, takes }
+  async function generate(mode, lineIds, { autoplay = false } = {}) {
+    autoPlay = null;
     try {
       const est = await rpc('patch.estimate', { id, mode, lineIds });
       if (!est.count) { toast(vc ? 'Nothing to convert.' : 'Nothing to generate.'); return; }
@@ -786,6 +844,7 @@ export async function patchView(id) {
       const confirmBatch = (app.state.settings.ui || {}).confirmBatch !== 'false';
       if (est.count === 1 || !confirmBatch) {
         if (!est.voiceId) { toast('Pick a voice in the toolbar first.', true); return; }
+        if (autoplay && lineIds && lineIds.length === 1) { const l0 = index.get(lineIds[0]); autoPlay = { lineId: lineIds[0], takes: l0 ? l0.takes.length : 0 }; }
         await rpc('patch.generate', { id, mode, lineIds });
         renderActions();
         return;
@@ -955,43 +1014,55 @@ export async function patchView(id) {
     await refreshState();
     const s = app.state;
     const name = h('input', { type: 'text', value: patch.name });
-    const modBoxes = s.mods.map((m) => ({ m, box: h('input', { type: 'checkbox', checked: patch.modIds.includes(m.id) }) }));
     const refOn = new Set(patch.referenceIds);
     const sources = [...(patch.sourceFolders || [])];
     let owWav = patch.overwriteWavLip, owFuz = patch.overwriteFuz;
+    const modName = Object.values(patch.modNames || {})[0] || patch.name;
+    const expand = (t) => (t || '').replace(/\{mod\}/gi, modName).replace(/\{packId\}/gi, voice.packId || 'packId').replace(/\{voicePack\}/gi, voice.name).replace(/\{patch\}/gi, name.value || patch.name);
+    const preview = h('div.opt-preview.mono');
     const folder = (val, title, ph) => {
       const i = h('input', { type: 'text', value: val || '', placeholder: ph });
-      return { i, el: h('div.path-input', i, h('button.btn.sm', { onclick: async () => { const f = await rpc('pick.folder', { title }); if (f) i.value = f; } }, 'Browse')) };
+      i.addEventListener('input', renderPreview);
+      return { i, el: h('div.path-input', i, h('button.btn.sm', { onclick: async () => { const f = await rpc('pick.folder', { title }); if (f) { i.value = f; renderPreview(); } } }, 'Browse')) };
     };
-    const wl = folder(patch.wavLipFolder, 'WAV + LIP folder', 'e.g. D:\\DBVO\\Vampira\\Lucien\\WAV');
-    const fx = folder(patch.fixFolder, 'DBVO Fix plugin + topic file folder', 'e.g. D:\\DBVO\\Vampira\\Lucien\\Fix');
-    const fr = folder(patch.finalRoot, 'Final folder', 'e.g. D:\\DBVO Vampira FOMOD');
+    const wl = folder(patch.wavLipFolder, 'WAV + LIP folder', 'C:\\DBVO Dev\\Vampira - Lucien\\RawWav');
+    const fx = folder(patch.fixFolder, 'DBVO Fix folder', 'C:\\DBVO Dev\\Vampira - Lucien\\Fix');
+    const fr = folder(patch.finalRoot, 'Final folder', 'C:\\DBVO Vampira FOMOD\\04 Followers');
     const tpl = h('input', { type: 'text', value: patch.fuzTemplate, placeholder: voice.destinations.fuzTemplate || 'Sound\\DBVO\\{packId}' });
+    tpl.addEventListener('input', renderPreview);
+    function renderPreview() {
+      const root = fr.i.value.trim() || '<final folder>';
+      const sub = expand(tpl.value.trim() || voice.destinations.fuzTemplate || 'Sound\\DBVO\\{packId}');
+      const i = sub.toLowerCase().indexOf('sound\\');
+      const modFolder = i > 0 ? root + '\\' + sub.slice(0, i).replace(/\\$/, '') : root;
+      clear(preview).append(
+        h('div', h('span.faint', '.fuz files → '), `${root}\\${sub}\\`),
+        h('div', h('span.faint', 'DBVO Fix plugins → '), `${modFolder}\\`),
+        h('div', h('span.faint', 'Working copies → '), `${wl.i.value.trim() || '<WAV + LIP folder>'}\\ (WAV + LIP),  ${fx.i.value.trim() || '<DBVO Fix folder>'}\\ (Fix plugin + topic file)`));
+    }
     const srcList = h('div.col');
     const renderSrc = () => clear(srcList).append(sources.length ? sources.map((f, i) => h('div.row', h('span.mono.grow.ellipsis', f), h('button.icon-btn', { onclick: () => { sources.splice(i, 1); renderSrc(); } }, '×'))) : h('div.faint', 'No folder yet.'));
     renderSrc();
+    renderPreview();
+    const row = (label, hint, ...field) => h('div.opt-row', h('div.opt-label', label, hint ? h('small', hint) : null), h('div.col', { style: { gap: '4px', minWidth: 0 } }, ...field));
     const ok = await modal(h('span.row', 'Folders & options — ', voiceChip(voice.name + ' voice pack', voice.color)), [
-      h('div.col', h('div.field-label', 'Name'), name),
-      vc ? h('div.col', h('div.field-label', 'Voice Changer source folders (another voice pack\'s WAV / .fuz files for this mod)'), srcList,
-        h('button.btn.sm', { style: { alignSelf: 'flex-start' }, onclick: async () => { const f = await rpc('pick.folder', { title: 'Folder with the source WAV files' }); if (f) { sources.push(f); renderSrc(); } } }, '+ Add folder'),
-        h('div.faint', 'Searched with sub-folders; matched by Legacy and DBVO 2.0 names.')) : null,
-      h('div.col', h('div.field-label', 'WAV + LIP folder'), wl.el, h('div.faint', 'Export copies the chosen takes here as .wav + .lip.')),
-      h('div.col', h('div.field-label', 'DBVO Fix plugin + topic file folder'), fx.el, h('div.faint', 'Your working copy of the DBVO Fix plugins and the topic file, kept apart from the WAV + LIP files. Written by Export and Build .fuz.')),
-      h('div.col', h('div.field-label', 'Final folder'), fr.el, h('div.faint', 'The release (FOMOD) folder. .fuz files go into the sub-folder below; the DBVO Fix plugins go next to each mod\'s Sound folder, ready for Phase 3.')),
-      h('div.col', h('div.field-label', '.fuz sub-folder inside the final folder'), tpl, h('div.faint', 'Placeholders: {packId} {voicePack} {mod} {patch}, e.g. Vamp - {mod}\\Sound\\DBVO\\{packId}.')),
-      h('div.col', h('div.field-label', 'Overwrite'),
-        switchEl(owWav, (v) => { owWav = v; }, 'Overwrite WAV + LIP files already in the folder'),
-        switchEl(owFuz, (v) => { owFuz = v; }, 'Overwrite .fuz files already in the final folder'),
-        h('div.faint', 'Off: existing files are skipped ("Skipped" in the report).')),
-      h('div.col', h('div.field-label', 'Omit lines users already have'),
-        h('div.faint', 'Lines found in these topic files are left out ("Omitted"). Tick only packs every user of this patch has, such as the base game pack. Never tick optional mods.'),
-        s.references.length ? h('div.col', s.references.map((r) => switchEl(refOn.has(r.id), (v) => { if (v) refOn.add(r.id); else refOn.delete(r.id); }, `${r.name}  ·  ${r.lineCount} lines`)))
-          : h('div.faint', 'No reference topic files yet — add them in Global Settings → Omit references.')),
-      h('div.col', h('div.field-label', 'Mods in this patch'), h('div.box', { style: { maxHeight: '160px', overflow: 'auto' } }, modBoxes.map(({ m, box }) => h('label.row', box, m.name, h('span.faint', m.category))))),
-    ], [{ label: 'Cancel', value: false }, { label: 'Save', primary: true, value: true }]);
+      h('div.opt-grid',
+        row('Patch name', null, name),
+        vc ? row('Voice Changer sources', 'Another voice pack\'s WAV / .fuz for this mod', srcList,
+          h('button.btn.sm', { style: { alignSelf: 'flex-start' }, onclick: async () => { const f = await rpc('pick.folder', { title: 'Folder with the source WAV files' }); if (f) { sources.push(f); renderSrc(); } } }, '+ Add folder')) : null,
+        row('WAV + LIP folder', 'Your copy of the takes as .wav + .lip', wl.el),
+        row('DBVO Fix folder', 'Your copy of the Fix plugin + topic file', fx.el),
+        row('Final folder', 'The FOMOD root (or a page of it)', fr.el),
+        row('.fuz sub-folder', '{mod} {packId} {voicePack} {patch}', tpl),
+        row('Result', null, preview),
+        row('Overwrite', 'Off: existing files are skipped',
+          h('div.row', { style: { gap: '18px' } }, switchEl(owWav, (v) => { owWav = v; }, 'WAV + LIP'), switchEl(owFuz, (v) => { owFuz = v; }, '.fuz'))),
+        row('Omit lines users have', 'Only packs every user installs',
+          s.references.length ? h('div.col', { style: { gap: '4px' } }, s.references.map((r) => switchEl(refOn.has(r.id), (v) => { if (v) refOn.add(r.id); else refOn.delete(r.id); }, `${r.name}  ·  ${r.lineCount} lines`)))
+            : h('div.faint', 'None yet: Global Settings → Omit references.'))),
+    ], [{ label: 'Cancel', value: false }, { label: 'Save', primary: true, value: true }], { wide: true });
     if (!ok) return;
-    const modIds = modBoxes.filter((x) => x.box.checked).map((x) => x.m.id);
-    if (!modIds.length) { toast('A patch needs at least one mod.', true); return; }
+    const modIds = patch.modIds;
     try {
       patch = await rpc('patch.saveMeta', {
         id, name: name.value, modIds, referenceIds: [...refOn],
@@ -1028,7 +1099,11 @@ export async function patchView(id) {
   }
 
   // live updates from generation
-  on('line2', (d) => { if (d.patchId === id && document.body.contains(view)) replaceLine(d.line); });
+  on('line2', (d) => {
+    if (d.patchId !== id || !document.body.contains(view)) return;
+    replaceLine(d.line);
+    if (autoPlay && d.line.lineId === autoPlay.lineId && d.line.takes.length > autoPlay.takes && d.line.selectedTakeId) { autoPlay = null; play(d.line); }
+  });
   let jobSeen = false;
   document.addEventListener('job-progress', () => { if (!jobSeen && document.body.contains(view)) { jobSeen = true; grid.paint(true); renderActions(); } });
   document.addEventListener('job-done', async (e) => {

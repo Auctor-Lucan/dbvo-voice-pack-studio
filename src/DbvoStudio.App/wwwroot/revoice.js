@@ -371,7 +371,7 @@ export async function revoiceView(id) {
       { id: 'take', title: 'Take', width: 64, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s). Click to play, switch or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } }, l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—')) },
       { id: 'act', title: '', width: 116, resizable: false, render: (l) => h('span.row.icon-bar', { style: { gap: '2px' } },
-        h('button.act-btn', { title: genBlock(l) || 'Regenerate (a new take; older takes stay)', disabled: !!genBlock(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.id]); } }, icon('regen')),
+        h('button.act-btn', { title: genBlock(l) || 'Regenerate (a new take; older takes stay)', disabled: !!genBlock(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.id], { autoplay: true }); } }, icon('regen')),
         h('button.act-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit', onclick: (e) => { e.stopPropagation(); upd(l, 'mark'); } }, icon('flag')),
         h('button.act-btn', { title: l.sel ? 'Play the new take (or double-click the row)' : 'No take yet: generate the line first', disabled: !l.sel, onclick: (e) => { e.stopPropagation(); play(l); } }, icon('play'))) },
     ],
@@ -470,7 +470,7 @@ export async function revoiceView(id) {
           l.spokenEdited ? h('button.btn.sm.ghost', { title: 'Use the subtitle as the spoken text again', onclick: () => upd(l, 'resetSpoken') }, '↺ Restore subtitle') : null,
           h('div.spacer'),
           h('button.btn.sm', { title: l.excl ? 'Bring the line back' : 'Leave this line out of generation and export', onclick: () => upd(l, l.excl ? 'include' : 'exclude') }, l.excl ? 'Include' : 'Exclude'),
-          h('button.btn.sm.primary', { title: genBlock(l) || 'Make a new take of this line', disabled: !!genBlock(l), onclick: () => generate('selected', [l.id]) }, l.takes.length ? 'New take' : 'Generate'))),
+          h('button.btn.sm.primary', { title: genBlock(l) || 'Make a new take of this line', disabled: !!genBlock(l), onclick: () => generate('selected', [l.id], { autoplay: true }) }, l.takes.length ? 'New take' : 'Generate'))),
       l.takes.length ? h('div', h('div.field-label', 'Takes'), h('div.col', l.takes.slice().reverse().map((t) => h('div.take' + (t.id === l.sel ? '.sel' : ''),
         h('button.icon-btn.big', { title: 'Play this take', onclick: () => play(l, t) }, '▶'),
         h('div.grow', h('div', '#' + t.slot + (t.id === l.sel ? ' · used for export' : '')), h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.engine || ''} ${t.model || ''}`)),
@@ -560,7 +560,10 @@ export async function revoiceView(id) {
         h('button.btn.sm', { title: 'Play the file the game uses now', disabled: !l.original, onclick: () => playOriginal(l) }, '▶ Current file'))]);
   }
 
-  async function generate(mode, lineIds) {
+  let autoPlay = null; // single-line generation plays the new take; batches never do
+  async function generate(mode, lineIds, { autoplay = false } = {}) {
+    autoPlay = null;
+    if (autoplay && lineIds && lineIds.length === 1) { const l0 = index.get(lineIds[0]); autoPlay = { lineId: lineIds[0], takes: l0 ? l0.takes.length : 0 }; }
     try {
       const est = await rpc('revoice.estimate', { id, mode, lineIds });
       if (est.unassigned.length && !est.count) { toast('Pick a voice for: ' + est.unassigned.slice(0, 4).join(', ') + (est.unassigned.length > 4 ? '…' : '') + ' (Speakers tab).', true); return; }
@@ -680,7 +683,11 @@ export async function revoiceView(id) {
     renderActions();
   }
 
-  on('revoiceLine', (d) => { if (d.projectId === id && document.body.contains(view)) replaceLine(d.line); });
+  on('revoiceLine', (d) => {
+    if (d.projectId !== id || !document.body.contains(view)) return;
+    replaceLine(d.line);
+    if (autoPlay && d.line.id === autoPlay.lineId && d.line.takes.length > autoPlay.takes && d.line.sel) { autoPlay = null; play(d.line); }
+  });
   let jobSeen = false;
   document.addEventListener('job-progress', () => { if (!jobSeen && document.body.contains(view)) { jobSeen = true; renderHead(); if (tab === 'lines') { grid.paint(true); renderActions(); } } });
   document.addEventListener('job-done', async (e) => {

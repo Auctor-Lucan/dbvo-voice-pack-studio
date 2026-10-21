@@ -124,6 +124,22 @@ public static partial class SpokenText
         return string.Join(" ", add) + " " + text.TrimStart();
     }
 
+    /// <summary>
+    /// Add tags at the start of the line, after the tags it already starts with ("[angry] [whispers] text"),
+    /// or in place of them when <paramref name="replaceLeading"/> is set ("[whispers] text").
+    /// </summary>
+    public static string AddTagsAfterLeading(string text, IEnumerable<string> tags, bool replaceLeading)
+    {
+        var m = Regex.Match(text, @"^\s*((?:\[[^\]]+\]\s*)*)");
+        var leading = TagRegex().Matches(m.Groups[1].Value).Select(x => x.Value).ToList();
+        var rest = text[m.Length..].TrimStart();
+        var keep = replaceLeading ? new List<string>() : leading;
+        var inLine = TagRegex().Matches(rest).Select(x => x.Value).Concat(keep).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var add = tags.Select(NormalizeTag).Where(t => t.Length > 2 && !inLine.Contains(t)).ToList();
+        if (add.Count == 0 && (!replaceLeading || leading.Count == 0)) return text;
+        return string.Join(" ", keep.Concat(add).Append(rest).Where(x => x.Length > 0));
+    }
+
     /// <summary>Remove the given tags from anywhere in the text.</summary>
     public static string RemoveTags(string text, IEnumerable<string> tags)
     {

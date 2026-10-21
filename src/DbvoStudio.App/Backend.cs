@@ -863,11 +863,14 @@ public sealed partial class Backend
         var ids = p.TryGetProperty("lineIds", out var li) && li.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds").ToHashSet() : null;
         var tags = Strings(p, "tags");
         bool remove = S(p, "mode") == "remove";
+        var placement = S(p, "placement"); // "" = before everything (tag chips), "after" = after the line's leading tags, "replace" = instead of them
         int n = 0;
         foreach (var line in patch.Lines.Where(l => !l.IsOmitted && (ids == null || ids.Contains(l.LineId))))
         {
             var before = line.Spoken;
-            line.Spoken = remove ? SpokenText.RemoveTags(line.Spoken, tags) : SpokenText.AddPrefixTags(line.Spoken, tags);
+            line.Spoken = remove ? SpokenText.RemoveTags(line.Spoken, tags)
+                : placement.Length > 0 ? SpokenText.AddTagsAfterLeading(line.Spoken, tags, placement == "replace")
+                : SpokenText.AddPrefixTags(line.Spoken, tags);
             if (line.Spoken != before)
             {
                 n++;

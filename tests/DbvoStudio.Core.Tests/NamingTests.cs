@@ -89,3 +89,15 @@ public class TopicFileWriteTests
         Assert.Equal(2, DbvoStudio.Core.Topics.TopicFile.Read(path).Count);
     }
 }
+
+public class TagPlacementTests
+{
+    [Theory]
+    [InlineData("[angry] I will kill you.", false, "[angry] [whispers] I will kill you.")]
+    [InlineData("[angry] I will kill you.", true, "[whispers] I will kill you.")]
+    [InlineData("I will kill you.", false, "[whispers] I will kill you.")]
+    [InlineData("[whispers] I will kill you.", false, "[whispers] I will kill you.")]
+    [InlineData("[angry][sad] Go.", true, "[whispers] Go.")]
+    public void Tags_go_after_or_instead_of_the_leading_tags(string text, bool replace, string expected)
+        => Assert.Equal(expected, DbvoStudio.Core.Naming.SpokenText.AddTagsAfterLeading(text, new[] { "[whispers]" }, replace));
+}
