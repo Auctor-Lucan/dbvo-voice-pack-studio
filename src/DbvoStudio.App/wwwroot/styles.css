@@ -44,25 +44,26 @@ a:hover { text-decoration: underline; }
 #top { background: var(--deep); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 6px; padding: 0 14px; height: 52px; flex-shrink: 0; }
 .brand { display: flex; gap: 10px; align-items: center; padding: 0 14px 0 0; margin-right: 6px; border-right: 1px solid var(--line); height: 32px; }
 .crumbs { display: flex; align-items: center; gap: 2px; }
-.crumb { background: none; border: 0; color: var(--dim); font-size: 15px; font-weight: 600; padding: 7px 12px; border-radius: var(--radius); cursor: pointer; display: flex; gap: 8px; align-items: center; }
+.crumb { white-space: nowrap; flex-shrink: 0; background: none; border: 0; color: var(--dim); font-size: 15px; font-weight: 600; padding: 7px 12px; border-radius: var(--radius); cursor: pointer; display: flex; gap: 8px; align-items: center; }
 .crumb .num { font-size: 11px; font-weight: 700; color: var(--faint); border: 1px solid var(--line); border-radius: 50%; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; }
 .crumb:hover { color: var(--text); background: var(--panel); }
 .crumb.active { color: var(--text); background: var(--raised); box-shadow: inset 3px 0 0 var(--accent); border-radius: 0 var(--radius) var(--radius) 0; }
 .crumb.active .num { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
 .tool-crumb { margin-left: 18px; }
 .crumb-sep { color: var(--accent); font-size: 18px; font-weight: 700; padding: 0 2px; }
-.top-btn { background: none; border: 1px solid transparent; color: var(--dim); padding: 6px 12px; border-radius: var(--radius); cursor: pointer; font-weight: 600; }
+.top-btn { white-space: nowrap; flex-shrink: 0; background: none; border: 1px solid transparent; color: var(--dim); padding: 6px 12px; border-radius: var(--radius); cursor: pointer; font-weight: 600; }
 .top-btn:hover { color: var(--text); background: var(--panel); border-color: var(--line); }
 .top-btn.active { color: var(--text); background: var(--raised); border-color: var(--line); }
 .logo { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(90deg, transparent 8%, var(--accent) 8% 16%, transparent 16% 30%, var(--accent) 30% 38%, transparent 38% 46%, var(--accent) 46% 54%, transparent 54% 62%, var(--accent) 62% 70%, transparent 70% 84%, var(--accent) 84% 92%, transparent 92%), var(--panel); -webkit-mask: radial-gradient(circle at 50% 50%, #000 70%, transparent 71%); }
-.brand-name { font-weight: 650; letter-spacing: .2px; }
+.brand-name { font-weight: 650; letter-spacing: .2px; white-space: nowrap; }
 .brand-sub { color: var(--faint); font-size: 11px; }
 .nav-item { text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: var(--radius); color: var(--dim); cursor: pointer; display: flex; gap: 10px; align-items: center; width: 100%; }
 .nav-item:hover { background: var(--panel); color: var(--text); }
 .nav-item.active { background: var(--raised); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
 .n-ico { width: 18px; text-align: center; color: var(--faint); }
 .nav-fill { flex: 1; }
-.job { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 8px; display: flex; align-items: center; gap: 8px; width: 330px; }
+/* the job indicator gives way first, so the top bar never wraps on narrower windows */
+.job { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 8px; display: flex; align-items: center; gap: 8px; width: 330px; min-width: 150px; flex-shrink: 1; }
 .job .bar { flex: 1; min-width: 60px; }
 .job-label { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bar { height: 6px; background: var(--raised); border-radius: 3px; overflow: hidden; }

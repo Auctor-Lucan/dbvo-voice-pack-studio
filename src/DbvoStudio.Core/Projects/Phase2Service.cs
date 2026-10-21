@@ -837,7 +837,8 @@ public sealed class Phase2Service
                 int tooLong = active.Count(l => l.Kind == LineKind.TooLong && !l.UserEdited);
                 if (tooLong > 0) list.Add($"{p.FileName}: {tooLong} TOO LONG WILL CTD line(s) were not fixed in {p.FixFileName}.");
             }
-            int broken = active.Count(l => l.Kind == LineKind.Broken && !l.Reviewed);
+            // the same rows Phase 1 flags as not reviewed (a player-name line is not one of them)
+            int broken = Phase1Service.UnreviewedFlags(p).Count(l => l.Kind == LineKind.Broken);
             if (broken > 0) list.Add($"{p.FileName}: {broken} BROKEN LINE row(s) were never reviewed.");
         }
         return list;

@@ -199,14 +199,16 @@ public sealed class FomodService
                 VoicePackName = voice.Name, VoicePackId = voice.PackId,
             },
         };
+        // "DBVO Vampira" + " DBVO Voice Pack" would say DBVO twice
+        var packTitle = voice.Name.Contains("DBVO", StringComparison.OrdinalIgnoreCase) ? $"{voice.Name} Voice Pack" : $"{voice.Name} DBVO Voice Pack";
         var core = new FomodOption
         {
-            Name = $"{voice.Name} DBVO Voice Pack (Required)",
+            Name = $"{packTitle} (Required)",
             Description = "Always installed: the DBVO voice pack file that makes this voice selectable in DBVO's MCM.",
             Mode = DetectMode.Required,
             CarriesJson = true,
         };
-        p.Steps.Add(new FomodStep { Name = "Core", Groups = { new FomodGroup { Name = $"{voice.Name} DBVO Voice Pack", Type = "SelectAll", Options = { core } } } });
+        p.Steps.Add(new FomodStep { Name = "Core", Groups = { new FomodGroup { Name = packTitle, Type = "SelectAll", Options = { core } } } });
         return p;
     }
 

@@ -63,7 +63,8 @@ export function h(tag, attrs, ...children) {
     if (t === '.') el.classList.add(v);
     else el.id = v;
   });
-  if (attrs && (typeof attrs !== 'object' || attrs instanceof Node || Array.isArray(attrs))) {
+  // a number (also 0) or string as the second argument is a child, not attributes
+  if (typeof attrs === 'number' || (attrs && (typeof attrs !== 'object' || attrs instanceof Node || Array.isArray(attrs)))) {
     children.unshift(attrs);
     attrs = null;
   }
@@ -85,7 +86,7 @@ export function h(tag, attrs, ...children) {
 }
 
 export function clear(el) {
-  while (el.firstChild) el.removeChild(el.firstChild);
+  el.replaceChildren(); // one step: a blur handler that re-renders while children are removed cannot break it
   return el;
 }
 
@@ -412,7 +413,7 @@ export class VGrid {
     if (e.key === 'ArrowDown') i = Math.min(keys.length - 1, i + 1);
     else if (e.key === 'ArrowUp') i = Math.max(0, i - 1);
     else if (e.key === ' ' && this.focusKey != null) { e.preventDefault(); this.toggle(this.focusKey); return; }
-    else if (e.key === 'a' && e.ctrlKey) { e.preventDefault(); this.selectAll(true); return; }
+    else if ((e.key === 'a' || e.key === 'A') && e.ctrlKey) { e.preventDefault(); this.selectAll(true); return; } // also with Caps Lock on
     else return;
     e.preventDefault();
     if (keys[i] != null) {
@@ -476,8 +477,9 @@ export function popupMenu(anchor, items) {
   const r = anchor.getBoundingClientRect();
   const m = h('div.menu', items.map((it) => h('button', { onclick: () => { m.remove(); it.onclick(); } }, h('div', it.label), it.sub ? h('div.menu-sub', it.sub) : null)));
   document.body.append(m);
-  const mh = m.getBoundingClientRect().height;
-  m.style.left = Math.min(r.left, window.innerWidth - 260) + 'px';
+  const { height: mh, width: mw } = m.getBoundingClientRect();
+  // keep the whole menu on screen (a button at the right edge opens it leftwards)
+  m.style.left = Math.max(8, Math.min(r.left, window.innerWidth - mw - 8)) + 'px';
   m.style.top = (r.bottom + mh + 6 > window.innerHeight ? r.top - mh - 6 : r.bottom + 6) + 'px';
   setTimeout(() => document.addEventListener('mousedown', function close(e) { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('mousedown', close); } }), 0);
   return m;
