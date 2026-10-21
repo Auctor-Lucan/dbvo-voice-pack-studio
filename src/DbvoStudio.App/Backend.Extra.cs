@@ -94,6 +94,15 @@ public sealed partial class Backend
                 using var c = LocalClient(S(p, "engine"));
                 return await c.HealthAsync();
             }
+            case "reference.info":
+            {
+                var u = DbvoStudio.Core.Reference.UespReference.Shared;
+                return u == null ? null : new
+                {
+                    u.Source.Name, u.Source.Url, u.Source.License, u.Source.LicenseUrl, u.Source.Pages, u.Source.RevisionsFrom, u.Source.RevisionsTo,
+                    npcs = u.Npcs.Count, quotes = u.Quotes.Count, books = u.Books.Count,
+                };
+            }
             case "engine.voices":
             {
                 using var c = LocalClient(S(p, "engine"));

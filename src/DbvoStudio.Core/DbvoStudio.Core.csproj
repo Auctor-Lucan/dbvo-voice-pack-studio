@@ -12,6 +12,9 @@
   <ItemGroup>
     <EmbeddedResource Include="Fomod\ModuleConfig.xsd" LogicalName="DbvoStudio.Core.Fomod.ModuleConfig.xsd" />
     <None Include="Fomod\ModuleConfig.xsd.LICENSE.txt" />
+    <EmbeddedResource Include="Reference\uesp-skyrim.json.gz" LogicalName="DbvoStudio.Core.Reference.uesp-skyrim.json.gz" />
+    <None Include="Reference\README.md" />
+    <None Include="Reference\extract_uesp.py" />
   </ItemGroup>
 
   <ItemGroup>

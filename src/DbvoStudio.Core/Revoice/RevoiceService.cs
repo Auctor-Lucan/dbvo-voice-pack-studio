@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Reference;
 using System.Security.Cryptography;
 using System.Text;
 using DbvoStudio.Core.Archives;
@@ -222,6 +223,7 @@ public sealed class RevoiceService
             return line;
         }
 
+        var uesp = UespReference.Shared;
         // Voice type -> NPCs that use it (directly or through templates), built once.
         Dictionary<FormKey, List<NpcInfo>>? users = null;
         List<NpcInfo> UsersOf(FormKey vt)
@@ -255,7 +257,7 @@ public sealed class RevoiceService
         }
         // Who says a line of one voice type: the conditions' NPC, else the only named character with that voice type,
         // else the only one from this mod or this quest. Falls back to the voice type with the likely NPCs listed.
-        (string Key, string Name, string? Guess) ResolveSpeaker(InfoRecord info, FormKey? vt, string vtFolder, List<FormKey> npcs)
+        (string Key, string Name, string? Guess) ResolveSpeaker(InfoRecord info, FormKey? vt, string vtFolder, List<FormKey> npcs, string text)
         {
             if (vt is not { } v) return ("vt:" + vtFolder.ToLowerInvariant(), vtFolder, null);
             if (npcs.Count == 1)
@@ -267,6 +269,20 @@ public sealed class RevoiceService
             string? via = npcs.Count > 1 ? "named in the conditions" : "only NPC with this voice type";
             List<IGrouping<string, NpcInfo>> Named(IEnumerable<NpcInfo> xs) => xs.Where(x => x.Name.Length > 0).GroupBy(Norm).ToList();
             var named = Named(cand);
+            // Base-game lines: UESP quotes this exact line by one NPC with this voice type.
+            if (named.Count != 1 && uesp != null && UespReference.BaseGamePlugins.Contains(info.Key.Plugin))
+            {
+                var hits = uesp.Speakers(text).Where(u => u.VoiceType.Equals(vtFolder, StringComparison.OrdinalIgnoreCase)).ToList();
+                var match = hits.Select(u => u.BaseId.Length > 0 && u.Plugin.Length > 0 && d.Npcs.TryGetValue(new FormKey(u.Plugin.ToLowerInvariant(), Convert.ToUInt32(u.BaseId, 16)), out var ni) ? ni : null)
+                    .Where(x => x != null).Select(x => x!).ToList();
+                if (match.Count == 0) match = cand.Where(x => hits.Any(u => Norm(x) == u.Name.Trim().ToLowerInvariant())).ToList();
+                var one = match.GroupBy(x => x.Name.Length > 0 ? Norm(x) : x.Key.ToString()).ToList();
+                if (one.Count == 1)
+                {
+                    var n = one[0].First();
+                    return ("npc:" + Canon(n, v), n.Display, "UESP quote (en.uesp.net)");
+                }
+            }
             if (named.Count > 1)
             {
                 var qa = d.Topics.TryGetValue(info.Topic, out var t) ? QuestActors(t.Quest) : new();
@@ -306,7 +322,7 @@ public sealed class RevoiceService
                 {
                     var vtk = vtKey.Length > 0 ? ParseKey(vtKey) : (FormKey?)null;
                     var npcs = vtk == null ? new List<FormKey>() : sp.Npcs.Where(n => d.VoiceTypesOf(n).Contains(vtk.Value)).ToList();
-                    var (key, name, guess) = ResolveSpeaker(info, vtk, vtFolder, npcs);
+                    var (key, name, guess) = ResolveSpeaker(info, vtk, vtFolder, npcs, r.Text);
                     var line = Make(info, r, vtFolder, vtKey, stem, sp, key, name, null);
                     if (guess != null)
                     {

@@ -10,6 +10,7 @@ const TABS = [
   ['pronunciation', 'Pronunciation'],
   ['references', 'Omit references'],
   ['categories', 'Categories'],
+  ['credits', 'Credits'],
   ['library', 'Library'],
 ];
 
@@ -50,7 +51,7 @@ export async function settingsView(tab, selectedId) {
     store.set('settingsTab', t);
     renderSub();
     clear(body);
-    const render = { general, voices, pronunciation, references, categories, library }[tab];
+    const render = { general, voices, pronunciation, references, categories, library, credits }[tab];
     try { body.append(await render(voiceSel, () => show(tab), (vid) => { voiceSel = vid; renderSub(); })); } catch (e) { fail(e); }
   };
   function renderSub() {
@@ -70,6 +71,20 @@ export async function settingsView(tab, selectedId) {
   if (tab === 'voices' && !voiceSel) voiceSel = (app.state.voicePacks[0] || {}).id || 'new';
   await show(tab, voiceSel);
   return view;
+}
+
+async function credits() {
+  const u = await rpc('reference.info', {}).catch(() => null);
+  const day = (t) => (t ? new Date(t).toLocaleDateString() : '?');
+  return section('Credits', null,
+    h('div.srow', h('div.lbl', 'UESP', h('small', 'The Unofficial Elder Scrolls Pages')),
+      h('div.col', { style: { gap: '6px' } },
+        h('div', 'NPC voice types, quoted dialogue and book authors used by NPC Revoice come from ', link('https://en.uesp.net/', 'UESP — en.uesp.net'),
+          '. All credit for this information goes to the UESP editors and community; it was collected by Auctor Lucan.'),
+        u ? h('div.faint', `${u.pages.toLocaleString()} Skyrim pages (revisions ${day(u.revisionsFrom)} – ${day(u.revisionsTo)}) → ${u.npcs.toLocaleString()} NPCs, ${u.quotes.toLocaleString()} quotes, ${u.books.toLocaleString()} books.`) : h('div.faint', 'Reference data not found in this build.'),
+        h('div.faint', 'UESP text is licensed under ', link('https://creativecommons.org/licenses/by-sa/2.5/', 'CC BY-SA 2.5'),
+          '; the derived data in this app is shared under the same license. Each entry links back to its UESP article (', link('https://en.uesp.net/wiki/UESPWiki:Copyrights', 'UESP copyright policy'), ').'),
+        h('div.faint', 'Used for base-game lines only: when several NPCs share a voice type, a UESP quote of the exact line by one of them picks the speaker (shown as "UESP quote", certainty Probable).'))));
 }
 
 async function saveSettings(patchObj) {

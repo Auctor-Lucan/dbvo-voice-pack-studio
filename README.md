@@ -27,3 +27,11 @@ Requires the .NET 10 SDK.
 ```
 dotnet test tests/DbvoStudio.Core.Tests
 ```
+
+## Credits
+
+NPC voice types, quoted dialogue and book authors in `src/DbvoStudio.Core/Reference/uesp-skyrim.json.gz` come from
+**[UESP — The Unofficial Elder Scrolls Pages](https://en.uesp.net/)**, collected by Auctor Lucan from 17,519 UESP Skyrim
+pages. All credit for this information goes to the UESP editors and community. UESP text is licensed under
+[CC BY-SA 2.5](https://creativecommons.org/licenses/by-sa/2.5/); the derived data file is shared under the same license.
+See [`src/DbvoStudio.Core/Reference/README.md`](src/DbvoStudio.Core/Reference/README.md).
