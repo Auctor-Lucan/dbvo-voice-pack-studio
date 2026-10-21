@@ -35,7 +35,7 @@ export async function render() {
   const section = SECTION[app.route.view] || 'mods';
   document.querySelectorAll('[data-section]').forEach((b) => b.classList.toggle('active', b.dataset.section === section));
   // An Other Tools page shows its name in the top bar, after the three phases.
-  const tool = { wavlip: ['WAV to LIP', 'wavlip'], revoices: ['NPC Revoice', 'revoices'], revoice: ['NPC Revoice', 'revoices'] }[app.route.view];
+  const tool = { wavlip: ['WAV to LIP Tool', 'wavlip'], revoices: ['NPC Revoice Tool', 'revoices'], revoice: ['NPC Revoice Tool', 'revoices'] }[app.route.view];
   const tc = document.getElementById('tool-crumb');
   tc.classList.toggle('hidden', !tool);
   if (tool) { tc.textContent = tool[0]; tc.onclick = () => go(tool[1]); }

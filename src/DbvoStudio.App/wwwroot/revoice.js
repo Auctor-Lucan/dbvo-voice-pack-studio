@@ -478,7 +478,8 @@ export async function revoiceView(id) {
   }
   function renderFilters() {
     const c = counts();
-    const chip = (k, label, tip) => h('button.chip' + (filter === k ? '.on' : ''), { title: tip, onclick: () => { filter = k; renderFilters(); grid.setRows(visible()); } }, label, ' ', h('span.n', String(c[k])));
+    // Like Phase 2: a filter only shows when it has lines (All and the active one always show).
+    const chip = (k, label, tip) => (k === 'all' || filter === k || c[k] ? h('button.chip' + (filter === k ? '.on' : ''), { title: tip, onclick: () => { filter = k; renderFilters(); grid.setRows(visible()); } }, label, ' ', h('span.n', String(c[k]))) : null);
     const q = h('input', { type: 'text', placeholder: 'Search text, file, speaker, quest…', value: search, title: 'Filter the list' });
     q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 200));
     clear(filters).append(
