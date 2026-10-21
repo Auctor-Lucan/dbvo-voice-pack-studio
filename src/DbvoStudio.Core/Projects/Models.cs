@@ -199,7 +199,6 @@ public sealed class VoicePack
     public bool SettingsLocked { get; set; }
     public bool Loudnorm { get; set; }
     public double GainDb { get; set; }
-    public bool AliasParsing { get; set; }
     public bool OverwriteWavLip { get; set; }
     public bool OverwriteFuz { get; set; }
     public VoxCpmSettings VoxCpm { get; set; } = new();

@@ -105,9 +105,6 @@ public sealed class DbvoJsonSettings
     public bool Enabled { get; set; } = true;
     public string VoicePackName { get; set; } = "";
     public string VoicePackId { get; set; } = "";
-    /// <summary>Null = not written (DBVO's default).</summary>
-    public bool? DisableAliasParsing { get; set; }
-    public bool? ForceLocalizedParsing { get; set; }
 }
 
 /// <summary>A FOMOD installer project (Phase 3).</summary>

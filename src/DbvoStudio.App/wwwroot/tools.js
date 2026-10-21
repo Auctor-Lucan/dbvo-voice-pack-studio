@@ -14,7 +14,7 @@ export async function wavLipView() {
   const selected = new Set();
 
   const view = h('div.view');
-  view.append(h('div.view-head', h('h1', 'WAV to LIP'), h('span.sub', 'Drop WAV files → Whisper transcription → Skyrim .lip generation. Each .lip is saved next to its WAV.')));
+  view.append(h('div.view-head', h('h1', 'WAV to LIP Tool'), h('span.sub', 'Drop WAV files → Whisper transcription → Skyrim .lip generation. Each .lip is saved next to its WAV.')));
   const tool = h('div.tool');
   view.append(tool);
 

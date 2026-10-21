@@ -283,8 +283,13 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* card grids (Mods, DBVO Patches, FOMODs) */
-.cards2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 10px 12px 12px; }
-@media (min-width: 2100px) { .cards2 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.cards2 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 10px 12px 12px; }
+@media (max-width: 1250px) { .cards2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Project cards, three side by side (NPC Revoice projects) */
+.rows3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 10px 12px 12px; }
+@media (max-width: 1250px) { .rows3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.rows3 .prow, .rows3 .prow:first-child { border: 1px solid var(--line); background: var(--raised); padding: 10px 12px; gap: 8px; }
+.rows3 .prow:hover { border-color: var(--accent); }
 .pcard { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12.5px; }
 .pcard:hover { border-color: color-mix(in srgb, var(--dim) 55%, transparent); background: color-mix(in srgb, var(--panel) 50%, var(--bg)); }
 .pcard.dragging { opacity: .4; }

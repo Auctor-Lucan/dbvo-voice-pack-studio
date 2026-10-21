@@ -260,7 +260,7 @@ public sealed partial class Backend
                         var v = _lib.LoadVoicePacks().FirstOrDefault(x => x.Id == proj.VoicePackId);
                         if (v != null)
                         {
-                            proj.Json = new DbvoJsonSettings { VoicePackName = v.Name, VoicePackId = v.PackId, DisableAliasParsing = v.AliasParsing ? null : true };
+                            proj.Json = new DbvoJsonSettings { VoicePackName = v.Name, VoicePackId = v.PackId };
                             proj.ReleaseFolder = v.Destinations.ReleaseFolder;
                         }
                     }

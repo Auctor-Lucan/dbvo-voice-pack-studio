@@ -14,7 +14,7 @@ export async function revoiceListView() {
   const list = await rpc('revoice.list');
   const view = h('div.view');
   view.append(h('div.view-head',
-    h('h1', 'NPC Revoice'),
+    h('h1', 'NPC Revoice Tool'),
     h('span.sub', 'Other Tools · replace NPC voice files in any mod or the base game, line by line, with voices from your ElevenLabs account or local servers. No plugin needed unless you give an NPC a new voice type.'),
     h('div.spacer'),
     h('button.btn.primary', { title: 'Start a revoice project: drop a mod\'s plugin and its voice archive or folder', onclick: create }, '+ New revoice')));
@@ -31,9 +31,9 @@ export async function revoiceListView() {
     return view;
   }
   body.append(h('div.cat', h('div.cat-head', h('h3', 'Revoice projects'), h('span.faint', list.length)),
-    h('div.rows1', list.map((x) => h('div.prow', { title: 'Open this project', onclick: () => go('revoice', { id: x.id }) },
-      h('div.row', h('span.title.ellipsis.grow', x.name), x.newVoiceTypes ? h('span.badge.b-player', { title: 'Has new voice types (SkyPatcher + FLM)' }, `${x.newVoiceTypes} new voice type(s)`) : null,
-        h('span.faint.ellipsis', { style: { maxWidth: '45%' } }, x.targets.join(', ') || 'no plugins yet')),
+    h('div.rows3', list.map((x) => h('div.prow', { title: 'Open this project', onclick: () => go('revoice', { id: x.id }) },
+      h('div.row', h('span.title.ellipsis.grow', x.name), x.newVoiceTypes ? h('span.badge.b-player', { title: 'Has new voice types (SkyPatcher + FLM)' }, `${x.newVoiceTypes} new voice type(s)`) : null),
+      h('div.faint.ellipsis', { title: x.targets.join(', ') }, x.targets.join(', ') || 'no plugins yet'),
       h('div.prow-stats',
         h('div.grow', h('div.bar' + (x.lines && x.generated >= x.lines ? '.ok' : ''), h('div.bar-fill', { style: { width: (x.lines ? (100 * x.generated) / x.lines : 0) + '%' } }))),
         h('span.mono', `${x.generated} / ${x.lines}`),

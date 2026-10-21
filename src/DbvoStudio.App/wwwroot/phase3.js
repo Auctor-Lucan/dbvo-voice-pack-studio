@@ -297,15 +297,10 @@ export async function fomodView(id) {
 
   function jsonPanel() {
     const j = proj.json;
-    const tri = (key, label, help) => srow(label, help, segmented([['', 'Not written (DBVO default)'], ['true', 'true'], ['false', 'false']], j[key] == null ? '' : String(j[key]), (x) => { j[key] = x === '' ? null : x === 'true'; changed(); renderEditor(); }));
     const carriers = proj.steps.flatMap((s) => s.groups.flatMap((g) => g.options.filter((o) => o.carriesJson).map((o) => ({ s, g, o }))));
     const preview = h('div.box.mono', { style: { whiteSpace: 'pre' } });
     const upd = () => {
       const o = { voice_pack_name: j.voicePackName, voice_pack_id: j.voicePackId };
-      const ov = {};
-      if (j.disableAliasParsing != null) ov.disable_alias_parsing = j.disableAliasParsing;
-      if (j.forceLocalizedParsing != null) ov.force_localized_parsing = j.forceLocalizedParsing;
-      if (Object.keys(ov).length) o.override = ov;
       preview.textContent = JSON.stringify(o, null, 2);
     };
     upd();
@@ -314,8 +309,6 @@ export async function fomodView(id) {
         h('p', 'Location in the game\'s Data folder: ', h('span.mono', dto.jsonPath), ' (', dto.naming === 'Legacy' ? 'Legacy / DBVO 1' : 'DBVO 2.0', ', from the voice pack\'s naming).')),
       srow('voice_pack_name', 'Shown in DBVO\'s menu.', txt(j, 'voicePackName', { after: upd })),
       srow('voice_pack_id', 'Must match the folder under Sound\\DBVO\\.', txt(j, 'voicePackId', { after: upd })),
-      tri('disableAliasParsing', 'override.disable_alias_parsing', 'true stops DBVO from parsing <Alias> names (its alias parsing is buggy in game).'),
-      tri('forceLocalizedParsing', 'override.force_localized_parsing', 'Rarely needed.'),
       srow('Carried by', null, carriers.length ? h('div.col', carriers.map(({ s, g, o }) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); select(o.id); } }, `${s.name} › ${g.name} › ${o.name}`)))
         : h('span.badge.b-broken', 'No option carries it — tick "Carries the DBVO JSON" on a Required option')),
       srow('Preview', null, preview)));

@@ -101,11 +101,8 @@ public sealed class FomodService
 
     public static string JsonText(DbvoJsonSettings j)
     {
+        // The standard voice pack file: just the name shown in DBVO's menu and the ID (the Sound\DBVO\ folder).
         var o = new Dictionary<string, object> { ["voice_pack_name"] = j.VoicePackName, ["voice_pack_id"] = j.VoicePackId };
-        var ov = new Dictionary<string, object>();
-        if (j.DisableAliasParsing != null) ov["disable_alias_parsing"] = j.DisableAliasParsing.Value;
-        if (j.ForceLocalizedParsing != null) ov["force_localized_parsing"] = j.ForceLocalizedParsing.Value;
-        if (ov.Count > 0) o["override"] = ov;
         return JsonSerializer.Serialize(o, new JsonSerializerOptions { WriteIndented = true });
     }
 
@@ -200,7 +197,6 @@ public sealed class FomodService
             Json = new DbvoJsonSettings
             {
                 VoicePackName = voice.Name, VoicePackId = voice.PackId,
-                DisableAliasParsing = voice.AliasParsing ? null : true,
             },
         };
         var core = new FomodOption

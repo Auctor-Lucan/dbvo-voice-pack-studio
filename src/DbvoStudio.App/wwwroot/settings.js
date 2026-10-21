@@ -315,7 +315,7 @@ const NEW_VOICE = () => ({
   sts: { voiceId: '', voiceName: '', modelId: 'eleven_multilingual_sts_v2', stability: 0.5, similarity: 0.75, style: 0, speakerBoost: false, seed: null, removeBackgroundNoise: false, outputFormat: 'mp3_44100_128', concurrency: 5 },
   tags: ['[whispers]', '[sighs]', '[laughs]', '[sarcastic]', '[curious]', '[excited]'],
   pronunciations: [], destinations: { wavLipFolder: '', finalRoot: '', fixFolder: '', fuzTemplate: 'Sound\\DBVO\\{packId}', releaseFolder: '' },
-  defaultReferenceIds: [], settingsLocked: false, loudnorm: false, gainDb: 0, aliasParsing: false, overwriteWavLip: false, overwriteFuz: false, trimTailMs: 15, fadeOutMs: 10,
+  defaultReferenceIds: [], settingsLocked: false, loudnorm: false, gainDb: 0, overwriteWavLip: false, overwriteFuz: false, trimTailMs: 15, fadeOutMs: 10,
 });
 
 async function voices(selectedId, rerender, onSelect) {
@@ -428,7 +428,6 @@ async function voices(selectedId, rerender, onSelect) {
         srow('Loudness normalization', 'EBU R128, −16 LUFS. Off keeps the original DBVO Voice Pack Maker level.', switchEl(v.loudnorm, (x) => { v.loudnorm = x; persistSoon(); })),
         srow('Gain', null, h('div.row', txt(v, 'gainDb', { type: 'number', width: '80px' }), h('span.dim', 'dB')))),
       section('Behaviour', null,
-        srow('Alias parsing', 'DBVO voice pack JSON setting (written in Phase 3). Off writes disable_alias_parsing; rarely needed and buggy in game.', switchEl(v.aliasParsing, (x) => { v.aliasParsing = x; persistSoon(); })),
         srow('Lock engine settings', 'Prevents accidental changes in the Phase 2 toolbar.', switchEl(v.settingsLocked, (x) => { v.settingsLocked = x; persistSoon(); })),
         packs.some((x) => x.id === v.id) ? srow('Delete', null, h('button.btn.danger.sm', { onclick: async () => {
           if (!(await confirmBox('Delete voice pack?', `Delete "${v.name}"? DBVO Patches using it stop working.`, 'Delete', true))) return;

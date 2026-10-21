@@ -71,8 +71,8 @@ document.querySelectorAll('.crumb[data-section]').forEach((b) => b.addEventListe
 document.querySelector('[data-section="settings"]').addEventListener('click', () => go('settings'));
 const toolsBtn = document.getElementById('tools-btn');
 toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [
-  { label: 'WAV to LIP', sub: 'Whisper listens to WAV files and makes matching .lip files', onclick: () => go('wavlip') },
-  { label: 'NPC Revoice', sub: 'Replace NPC voice files in any mod', onclick: () => go('revoices') },
+  { label: 'WAV to LIP Tool', sub: 'Whisper listens to WAV files and makes matching .lip files', onclick: () => go('wavlip') },
+  { label: 'NPC Revoice Tool', sub: 'Replace NPC voice files in any mod', onclick: () => go('revoices') },
 ]));
 
 // ---- background jobs (generation, .fuz, FOMOD, WAV to LIP)
