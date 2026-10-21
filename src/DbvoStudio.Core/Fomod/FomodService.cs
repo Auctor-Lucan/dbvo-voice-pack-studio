@@ -127,11 +127,27 @@ public sealed class FomodService
         var folder = ModContentFolder(patch, voice, mod);
         var files = new List<FomodFile>
         {
-            new() { Kind = "folder", Source = MakeRelative(p, Path.Combine(folder, "Sound")), Destination = "Sound" },
+            new() { Kind = "folder", Source = MakeRelative(p, Path.Combine(folder, "Sound")), Destination = "Sound", Linked = true },
         };
         foreach (var plugin in mod.Plugins.Where(x => x.NeedsFixPlugin))
-            files.Add(new FomodFile { Kind = "file", Source = MakeRelative(p, Path.Combine(folder, plugin.FixFileName)), Destination = plugin.FixFileName });
+            files.Add(new FomodFile { Kind = "file", Source = MakeRelative(p, Path.Combine(folder, plugin.FixFileName)), Destination = plugin.FixFileName, Linked = true });
         return files;
+    }
+
+    /// <summary>
+    /// Replace the files an option got from its DBVO Patch with fresh ones, keeping files the user added.
+    /// Files from before the Linked flag are recognised by their destination: Sound, or a DBVO Fix plugin name.
+    /// </summary>
+    public static void Relink(FomodOption o, List<FomodFile> fresh, Mod mod)
+    {
+        bool IsFix(string dest) =>
+            dest.EndsWith(".esp", StringComparison.OrdinalIgnoreCase)
+            && (dest.StartsWith(FixPluginWriterPrefix, StringComparison.OrdinalIgnoreCase)
+                || mod.Plugins.Any(pl => dest.Equals(pl.FixFileName, StringComparison.OrdinalIgnoreCase)));
+        o.Files.RemoveAll(f => f.Linked
+                               || (f.Kind == "folder" && f.Destination.Equals("Sound", StringComparison.OrdinalIgnoreCase) && o.PatchId != null)
+                               || (f.Kind == "file" && IsFix(f.Destination)));
+        o.Files.InsertRange(0, fresh.Where(f => !o.Files.Any(x => x.Destination.Equals(f.Destination, StringComparison.OrdinalIgnoreCase))));
     }
 
     /// <summary>A new option for one mod of a DBVO Patch, detecting the mod's own plugins.</summary>
@@ -152,22 +168,22 @@ public sealed class FomodService
         };
     }
 
-    /// <summary>Refresh the files of every linked option from its DBVO Patch (folders may have changed).</summary>
-    public void RefreshLinked(FomodProject p, IReadOnlyList<DbvoPatch> patches, IReadOnlyList<VoicePack> voices, IReadOnlyList<Mod> mods)
+    /// <summary>
+    /// Refresh the files of every linked option from its DBVO Patch (folders may have changed). Returns the options
+    /// whose patch was deleted or no longer has their mod: they are left as they are.
+    /// </summary>
+    public List<string> RefreshLinked(FomodProject p, IReadOnlyList<DbvoPatch> patches, IReadOnlyList<VoicePack> voices, IReadOnlyList<Mod> mods)
     {
+        var orphans = new List<string>();
         foreach (var o in p.AllOptions().Where(o => o.PatchId != null && o.ModId != null))
         {
             var patch = patches.FirstOrDefault(x => x.Id == o.PatchId);
             var mod = mods.FirstOrDefault(x => x.Id == o.ModId);
             var voice = patch == null ? null : voices.FirstOrDefault(v => v.Id == patch.VoicePackId);
-            if (patch == null || mod == null || voice == null) continue;
-            var fresh = FilesFor(p, patch, voice, mod);
-            // keep the user's extra files; replace the linked Sound folder and fix plugins
-            var linkedDest = fresh.Select(f => f.Destination).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            o.Files.RemoveAll(f => f.Destination.Equals("Sound", StringComparison.OrdinalIgnoreCase)
-                                   || (f.Kind == "file" && f.Destination.StartsWith(FixPluginWriterPrefix, StringComparison.OrdinalIgnoreCase)));
-            o.Files.InsertRange(0, fresh.Where(f => !o.Files.Any(x => x.Destination.Equals(f.Destination, StringComparison.OrdinalIgnoreCase))));
+            if (patch == null || mod == null || voice == null || !patch.ModIds.Contains(mod.Id)) { orphans.Add(o.Name); continue; }
+            Relink(o, FilesFor(p, patch, voice, mod), mod);
         }
+        return orphans;
     }
 
     private const string FixPluginWriterPrefix = "DBVO Fix - ";
@@ -284,6 +300,15 @@ public sealed class FomodService
                     }
                 }
             }
+        }
+        var patches = _lib.LoadPatches();
+        var allMods = _lib.LoadMods();
+        foreach (var o in p.AllOptions().Where(o => o.PatchId != null && o.ModId != null))
+        {
+            var patch = patches.FirstOrDefault(x => x.Id == o.PatchId);
+            if (patch == null) Add("warning", o.Name, "Its DBVO Patch was deleted: the option is no longer updated. Remove it, or keep it as a plain option.", o.Id);
+            else if (!patch.ModIds.Contains(o.ModId!) || !allMods.Any(m => m.Id == o.ModId))
+                Add("warning", o.Name, $"Its mod is no longer in the DBVO Patch \"{patch.Name}\": the option is no longer updated.", o.Id);
         }
         foreach (var f in p.RequiredInstallFiles)
         {

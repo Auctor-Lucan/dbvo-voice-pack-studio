@@ -190,7 +190,9 @@ public sealed class RevoiceService
         {
             string pf = d.PluginFolder(info);
             string id = LineId(pf, vtFolder, stem);
-            var line = old.TryGetValue(id, out var o) ? o : new RevoiceLine { LineId = id };
+            bool known = old.TryGetValue(id, out var o);
+            var line = known ? o! : new RevoiceLine { LineId = id };
+            var prevText = line.OriginalLine;
             line.Info = info.Key.ToString();
             line.Response = r.Number;
             line.PluginFolder = pf;
@@ -202,13 +204,31 @@ public sealed class RevoiceService
             line.FinalLine = r.Text;
             line.OriginalLine = r.Text;
             if (!line.SpokenEdited || string.IsNullOrEmpty(line.Spoken)) line.Spoken = r.Text;
+            // The mod changed the line: a take of the old words is no longer right, even if the spoken text was edited.
+            if (known && prevText.Length > 0 && prevText != r.Text && line.SelectedTake != null && line.Status == Phase2Status.Generated)
+            {
+                line.Status = Phase2Status.Stale;
+                rep.TextChanged++;
+            }
+            else line.RefreshStale();
             if (p.EmotionTags && line.Takes.Count == 0 && !line.SpokenEdited && line.TagSuggestion == null && EmotionTagFor(r.Emotion, r.EmotionValue) is { } tag)
                 line.TagSuggestion = tag + " " + r.Text;
             line.Emotion = r.Emotion;
             line.EmotionValue = r.EmotionValue;
             line.Notes = r.Notes;
-            line.SpeakerKey = speakerKey;
-            line.SpeakerName = speakerName;
+            // A line that already has takes keeps the speaker they were made for; a different speaker found now
+            // waits for the user (apply or keep), so one character doesn't end up with two voices unnoticed.
+            if (known && line.Takes.Count > 0 && line.SpeakerKey.Length > 0 && line.SpeakerKey != speakerKey)
+            {
+                if (line.SpeakerPinned) { line.NewSpeakerKey = null; line.NewSpeakerName = null; }
+                else { line.NewSpeakerKey = speakerKey; line.NewSpeakerName = speakerName; rep.SpeakerChanges++; }
+            }
+            else
+            {
+                line.SpeakerKey = speakerKey;
+                line.SpeakerName = speakerName;
+                line.NewSpeakerKey = null; line.NewSpeakerName = null;
+            }
             line.Npcs = string.Join(", ", sp.Npcs.Select(d.Describe).Distinct().OrderBy(x => x).Take(8)) + (sp.Npcs.Count > 8 ? $" +{sp.Npcs.Count - 8}" : "");
             line.Certainty = sp.Certainty.ToString();
             line.Via = sp.Via;

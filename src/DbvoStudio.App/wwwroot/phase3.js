@@ -446,7 +446,11 @@ export async function fomodView(id) {
   }
 
   async function refreshLinked() {
-    try { dto = await rpc('fomod.refresh', { project: proj }); proj = dto.project; renderAll(); toast('Linked options updated.'); } catch (e) { fail(e); }
+    try {
+      const r = await rpc('fomod.refresh', { project: proj });
+      dto = r.project; proj = dto.project; renderAll();
+      toast(r.orphans && r.orphans.length ? `Linked options updated. Not linked any more (left as they are): ${r.orphans.join(', ')}` : 'Linked options updated.');
+    } catch (e) { fail(e); }
   }
 
   async function validate() {
@@ -522,11 +526,23 @@ export async function fomodView(id) {
     } catch (e) { fail(e); }
   }
 
-  document.addEventListener('job-done', (e) => {
-    if (!document.body.contains(view) || e.detail.kind !== 'fomod') return;
-    if (e.detail.project) { proj.lastBuildUtc = e.detail.project.lastBuildUtc; proj.lastArchive = e.detail.project.lastArchive; }
+  const onJobDone = (e) => {
+    if (!document.body.contains(view)) { document.removeEventListener('job-done', onJobDone); return; }
+    if (e.detail.kind !== 'fomod') return;
+    const built = e.detail.project;
+    if (built) {
+      // The build refreshed the linked options and saved its copy: take its files and build info into this copy
+      // (which may have edits made during the build) and save that, so neither is lost.
+      proj.lastBuildUtc = built.lastBuildUtc; proj.lastArchive = built.lastArchive;
+      const fresh = new Map();
+      for (const st of built.steps || []) for (const g of st.groups || []) for (const o of g.options || []) fresh.set(o.id, o);
+      for (const st of proj.steps) for (const g of st.groups) for (const o of g.options) { const f = fresh.get(o.id); if (f && o.patchId) o.files = f.files; }
+      changed();
+      renderTree(); renderEditor();
+    }
     renderHead();
-  });
+  };
+  document.addEventListener('job-done', onJobDone);
 
   function renderAll() { renderHead(); renderTree(); renderEditor(); }
   renderAll();

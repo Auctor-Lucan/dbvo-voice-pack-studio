@@ -422,8 +422,18 @@ public class Phase2Line
     public string? UndoSpoken { get; set; }
     /// <summary>File name (without extension) for takes when it is not derived from the line (NPC Revoice: the game's voice file name).</summary>
     public string? FileStem { get; set; }
+    /// <summary>The user deleted this line's last take: don't adopt WAV + LIP or .fuz from the export folders again.</summary>
+    public bool NoAdopt { get; set; }
 
     [JsonIgnore] public Take? SelectedTake => Takes.FirstOrDefault(t => t.Id == SelectedTakeId);
+
+    /// <summary>After the spoken text or the selected take changed: Generated when the take says the current text, else Stale.</summary>
+    public void RefreshStale()
+    {
+        if (SelectedTake is not { } t || Status is not (Phase2Status.Generated or Phase2Status.Stale)) return;
+        Status = t.SpokenText == Spoken ? Phase2Status.Generated : Phase2Status.Stale;
+    }
+
     [JsonIgnore] public bool IsOmitted => OmittedBy != null && !OverrideOmit;
     /// <summary>The words differ from the in-game line (tags, spacing and leading markers ignored): shown in blue.</summary>
     [JsonIgnore] public bool SpokenDiffersFromFinal => !string.Equals(SpokenText.StripTags(Spoken), SpokenText.StripTags(SpokenText.DefaultFor(FinalLine)), StringComparison.Ordinal);
@@ -459,6 +469,8 @@ public sealed class DbvoPatch
     /// <summary>When .fuz files were last built, and how many.</summary>
     public DateTime? LastFuzUtc { get; set; }
     public List<Phase2Line> Lines { get; set; } = new();
+    /// <summary>Lines no longer in Phase 1 that have takes: kept (hidden) so the takes come back if the line returns.</summary>
+    public List<Phase2Line> Parked { get; set; } = new();
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
 }

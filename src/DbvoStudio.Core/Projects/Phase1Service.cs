@@ -90,6 +90,7 @@ public sealed class Phase1Service
 
         var existing = mod.Plugins.FirstOrDefault(p => string.Equals(p.FileName, plugin.FileName, StringComparison.OrdinalIgnoreCase));
         var mp = existing ?? new ModPlugin { FileName = plugin.FileName };
+        var oldMasters = mp.Masters.ToList();
         mp.StoredFile = stored;
         mp.Masters = plugin.Masters.ToList();
         mp.Localized = plugin.IsLocalized;
@@ -102,7 +103,7 @@ public sealed class Phase1Service
             mp.Notices.Add($"This plugin is localized and {(unresolved < 0 ? "its strings files were not found" : unresolved + " strings could not be read")}. Add its .STRINGS files.");
 
         var lines = extraction.Lines.Select(x => NewLine(x.FormId, x.Field, x.EditorId, x.Original, x.Kind, x.Suggested, x.HiddenByPrompts, x.Order)).ToList();
-        Merge(mod, mp, existing, lines, report);
+        Merge(mod, mp, existing, lines, report, oldMasters);
         return report;
     }
 
@@ -131,19 +132,27 @@ public sealed class Phase1Service
     }
 
     /// <summary>Merge freshly read lines into a plugin's rows: keep decisions on unchanged lines, flag changed ones.</summary>
-    private void Merge(Mod mod, ModPlugin mp, ModPlugin? existing, List<Phase1Line> lines, ImportReport report)
+    private void Merge(Mod mod, ModPlugin mp, ModPlugin? existing, List<Phase1Line> lines, ImportReport report, IReadOnlyList<string>? oldMasters = null)
     {
-        var old = mp.Lines.GroupBy(l => l.Key).ToDictionary(g => g.Key, g => g.First());
+        // Plugins: match lines by the record's owner and its ID within that owner, not by the raw FormID. The raw
+        // FormID starts with the owner's position in the master list, which changes when an update adds, removes
+        // or reorders masters. Topic files have no masters (their IDs are hashes) and match by the raw ID.
+        bool byOwner = oldMasters != null && !mp.IsTopicFile;
+        string KeyOf(Phase1Line l, IReadOnlyList<string> masters) => byOwner ? StableKey(l.FormId, l.Field, masters, mp.FileName) : l.Key;
+        var old = mp.Lines.GroupBy(l => KeyOf(l, oldMasters ?? mp.Masters)).ToDictionary(g => g.Key, g => g.First());
         var fresh = new List<Phase1Line>();
         foreach (var nl in lines)
         {
-            if (old.TryGetValue(nl.Key, out var prev))
+            var k = KeyOf(nl, mp.Masters);
+            if (old.TryGetValue(k, out var prev))
             {
-                old.Remove(nl.Key);
+                old.Remove(k);
                 if (prev.Original == nl.Original)
                 {
                     // Unchanged in the mod: keep every user decision.
                     nl.Final = prev.Final;
+                    nl.VoiceApproved = prev.VoiceApproved;
+                    nl.FixApproved = prev.FixApproved;
                     nl.UserEdited = prev.UserEdited;
                     nl.Reviewed = prev.Reviewed;
                     nl.IncludeAnyway = prev.IncludeAnyway;
@@ -171,10 +180,13 @@ public sealed class Phase1Service
             }
             fresh.Add(nl);
         }
+        var taken = fresh.Select(l => l.Key).ToHashSet();
         foreach (var gone in old.Values)
         {
             if (gone.Status != Phase1Status.Removed) report.Removed++;
             gone.Status = Phase1Status.Removed;
+            if (byOwner) gone.FormId = Remap(gone.FormId, oldMasters!, mp.Masters, mp.FileName);
+            if (!taken.Add(gone.Key)) continue; // its ID now belongs to another record
             fresh.Add(gone);
         }
         mp.Lines = fresh;
@@ -184,6 +196,24 @@ public sealed class Phase1Service
             report.Added = fresh.Count;
         }
         _lib.Save(mod);
+    }
+
+    /// <summary>"owner:local-id:field" for a FormID read with the given master list.</summary>
+    public static string StableKey(uint formId, LineField field, IReadOnlyList<string> masters, string self)
+    {
+        int idx = (int)(formId >> 24);
+        var owner = idx < masters.Count ? masters[idx] : self;
+        return $"{owner.ToLowerInvariant()}:{formId & 0xFFFFFF:X6}:{(field == LineField.TopicText ? "FULL" : "RNAM")}";
+    }
+
+    /// <summary>A FormID read with one master list, rewritten for another (unchanged when its owner is no longer a master).</summary>
+    public static uint Remap(uint formId, IReadOnlyList<string> from, IReadOnlyList<string> to, string self)
+    {
+        int idx = (int)(formId >> 24);
+        var owner = idx < from.Count ? from[idx] : self;
+        int ni = owner.Equals(self, StringComparison.OrdinalIgnoreCase) ? to.Count : -1;
+        for (int i = 0; ni < 0 && i < to.Count; i++) if (to[i].Equals(owner, StringComparison.OrdinalIgnoreCase)) ni = i;
+        return ni < 0 ? formId : ((uint)ni << 24) | (formId & 0xFFFFFF);
     }
 
     /// <summary>
@@ -347,15 +377,29 @@ public sealed class Phase1Service
     public static List<string> ExistingFixPlugins(Mod mod, string folder) =>
         mod.Plugins.Where(p => p.NeedsFixPlugin).Select(p => Path.Combine(folder, p.FixFileName)).Where(File.Exists).ToList();
 
-    public List<string> WriteOutputs(Mod mod, ModPlugin p, IEnumerable<string> fixFolders, string topicFolder, bool keepExistingFix = false)
+    /// <param name="removeStaleFix">
+    /// When the plugin no longer needs a DBVO Fix plugin (every edit was undone), delete an earlier one in these
+    /// folders, so the old edits don't stay in the game (not with <paramref name="keepExistingFix"/>).
+    /// </param>
+    public List<string> WriteOutputs(Mod mod, ModPlugin p, IEnumerable<string> fixFolders, string topicFolder, bool keepExistingFix = false, bool removeStaleFix = false)
     {
         var written = new List<string>();
         var topicPath = Path.Combine(topicFolder, TopicFileName(p));
         TopicFile.Write(topicPath, TopicLines(p));
         written.Add(topicPath);
 
-        var edits = FixEdits(p);
-        if (edits.Count == 0) return written;
+        var edits = p.IsTopicFile ? new List<LineEdit>() : FixEdits(p);
+        if (edits.Count == 0)
+        {
+            if (removeStaleFix && !keepExistingFix && !p.IsTopicFile)
+                foreach (var folder in fixFolders.Where(f => !string.IsNullOrWhiteSpace(f)).Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    var stale = Path.Combine(folder, p.FixFileName);
+                    if (!File.Exists(stale)) continue;
+                    try { File.Delete(stale); written.Add("Removed (no edits left): " + stale); } catch { }
+                }
+            return written;
+        }
         var plugin = PluginFile.Read(p.StoredFile);
         if (plugin.IsLocalized)
         {

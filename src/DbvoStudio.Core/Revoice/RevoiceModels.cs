@@ -76,6 +76,11 @@ public sealed class RevoiceLine : Phase2Line
     public string? OriginalMatch { get; set; }
     /// <summary>No longer found on the last scan (kept because it has takes).</summary>
     public bool Gone { get; set; }
+    /// <summary>A rescan found another speaker for a line that already has takes: kept as it was until the user applies it.</summary>
+    public string? NewSpeakerKey { get; set; }
+    public string? NewSpeakerName { get; set; }
+    /// <summary>The user chose to keep this line's speaker: rescans don't propose another one.</summary>
+    public bool SpeakerPinned { get; set; }
 
     [JsonIgnore] public string RelativePath => System.IO.Path.Combine("Sound", "Voice", PluginFolder, VoiceType, (FileStem ?? "") + ".fuz");
 }
@@ -94,6 +99,10 @@ public sealed class RevoiceScanReport
     public List<string> MissingStrings { get; set; } = new();
     public List<string> Errors { get; set; } = new();
     public List<string> MasterCosts { get; set; } = new();
+    /// <summary>Lines with takes whose speaker the rescan would change (kept until the user decides).</summary>
+    public int SpeakerChanges { get; set; }
+    /// <summary>Lines whose in-game text changed since their take: marked "changed since take".</summary>
+    public int TextChanged { get; set; }
     public DateTime ScannedUtc { get; set; }
 }
 

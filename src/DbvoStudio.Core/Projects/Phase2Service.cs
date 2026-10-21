@@ -14,6 +14,8 @@ public sealed class SyncReport
     public int Total { get; set; }
     public int Added { get; set; }
     public int Removed { get; set; }
+    /// <summary>Removed lines whose takes are kept (hidden) in case the line comes back.</summary>
+    public int Parked { get; set; }
     public int Omitted { get; set; }
     public int Stale { get; set; }
     /// <summary>Lines that got a take from WAV + LIP files already in the patch's WAV + LIP folder.</summary>
@@ -114,7 +116,8 @@ public sealed class Phase2Service
     {
         var report = new SyncReport();
         var refKeys = ReferenceKeys(patch.ReferenceIds, voice.Naming);
-        var old = patch.Lines.GroupBy(l => l.Key).ToDictionary(g => g.Key, g => g.First());
+        // Parked lines (left Phase 1 earlier, with takes) come back with their takes when the line returns.
+        var old = patch.Lines.Concat(patch.Parked).GroupBy(l => l.Key).ToDictionary(g => g.Key, g => g.First());
         var result = new Dictionary<string, Phase2Line>();
 
         foreach (var mod in mods.Where(m => patch.ModIds.Contains(m.Id)))
@@ -166,7 +169,12 @@ public sealed class Phase2Service
                 report.Stale++;
             }
         }
-        report.Removed = old.Keys.Count(k => !result.ContainsKey(k));
+        report.Removed = patch.Lines.Count(l => !result.ContainsKey(l.Key));
+        // Lines that left Phase 1 keep their takes out of sight: toggling a line off in Phase 1 (or editing it and
+        // changing it back) must not lose them.
+        patch.Parked = old.Values.Where(l => !result.ContainsKey(l.Key) && l.Takes.Count > 0).ToList();
+        foreach (var l in patch.Parked) l.Sources.Clear();
+        report.Parked = patch.Lines.Count(l => !result.ContainsKey(l.Key) && l.Takes.Count > 0);
         patch.Lines = result.Values.ToList();
         report.Total = patch.Lines.Count;
         if (patch.Kind == "vc") MatchSources(patch);
@@ -195,7 +203,7 @@ public sealed class Phase2Service
         foreach (var f in Directory.EnumerateFiles(patch.WavLipFolder, "*.wav", SearchOption.AllDirectories)) wavs.TryAdd(Path.GetFileNameWithoutExtension(f), f);
         if (wavs.Count == 0) return 0;
         int n = 0;
-        foreach (var line in patch.Lines.Where(l => l.Takes.Count == 0))
+        foreach (var line in patch.Lines.Where(l => l.Takes.Count == 0 && !l.NoAdopt))
         {
             string? wav = null;
             foreach (var stem in Stems(line, voice)) if (wavs.TryGetValue(stem, out wav)) break;
@@ -241,7 +249,7 @@ public sealed class Phase2Service
         var fuz = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var d in folders)
             foreach (var f in Directory.EnumerateFiles(d, "*.fuz")) fuz.TryAdd(Path.GetFileNameWithoutExtension(f), f);
-        foreach (var line in patch.Lines.Where(l => l.Takes.Count == 0 && !l.IsOmitted))
+        foreach (var line in patch.Lines.Where(l => l.Takes.Count == 0 && !l.IsOmitted && !l.NoAdopt))
             foreach (var stem in Stems(line, voice))
                 if (fuz.TryGetValue(stem, out var f)) { list.Add((line, f)); break; }
         return list;
@@ -380,7 +388,7 @@ public sealed class Phase2Service
         var saveLock = stateGate ?? new SemaphoreSlim(1, 1);
         var convertGate = new SemaphoreSlim(Math.Max(2, Environment.ProcessorCount / 2));
 
-        async Task<EngineAudio> Synthesize(Phase2Line line, CancellationToken c)
+        async Task<EngineAudio> Synthesize(Phase2Line line, string spoken, CancellationToken c)
         {
             switch (engine)
             {
@@ -402,19 +410,19 @@ public sealed class Phase2Service
                 }
                 case LocalEngineClient.VoxCpm:
                 {
-                    var text = ApplyPronunciations(SpokenText.StripTags(line.Spoken), pronunciations, "local");
+                    var text = ApplyPronunciations(SpokenText.StripTags(spoken), pronunciations, "local");
                     var audio = await limiter.RunAsync(x => local!.VoxCpmAsync(text, voice.VoxCpm, x), ex => ex is HttpRequestException, ct: c);
                     return new EngineAudio(audio, "wav", new TakeSettings { Engine = "voxcpm", VoiceId = voice.VoxCpm.Voice, ModelId = "voxcpm", Stability = voice.VoxCpm.CfgValue, OutputFormat = "wav" });
                 }
                 case LocalEngineClient.OmniVoice:
                 {
-                    var text = ApplyPronunciations(SpokenText.StripTags(line.Spoken), pronunciations, "local");
+                    var text = ApplyPronunciations(SpokenText.StripTags(spoken), pronunciations, "local");
                     var audio = await limiter.RunAsync(x => local!.OmniVoiceAsync(text, voice.OmniVoice, x), ex => ex is HttpRequestException, ct: c);
                     return new EngineAudio(audio, "wav", new TakeSettings { Engine = "omnivoice", VoiceId = voice.OmniVoice.Voice, ModelId = voice.OmniVoice.Model, Speed = voice.OmniVoice.Speed, OutputFormat = "wav" });
                 }
                 default:
                 {
-                    var text = ApplyPronunciations(line.Spoken, pronunciations, es.ModelId);
+                    var text = ApplyPronunciations(spoken, pronunciations, es.ModelId);
                     var req = new TtsRequest
                     {
                         VoiceId = es.VoiceId,
@@ -444,9 +452,11 @@ public sealed class Phase2Service
             line.Status = Phase2Status.Generating;
             line.LastError = null;
             Take? newTake = null;
+            // The text as it is now: an edit made while this line generates must leave the new take marked as changed.
+            var spoken = line.Spoken;
             try
             {
-                var got = await Synthesize(line, ct);
+                var got = await Synthesize(line, spoken, ct);
                 await convertGate.WaitAsync(ct);
                 try
                 {
@@ -471,12 +481,12 @@ public sealed class Phase2Service
                     w.Write(wav);
 
                     var lip = work.File("a.lip");
-                    await tools.MakeLipAsync(wav, work.File("r.wav"), lip, SpokenText.StripTags(line.Spoken), ct);
+                    await tools.MakeLipAsync(wav, work.File("r.wav"), lip, SpokenText.StripTags(spoken), ct);
 
                     var take = new Take
                     {
                         Slot = line.Takes.Count == 0 ? 1 : line.Takes.ToList().Max(t => t.Slot) + 1,
-                        SpokenText = line.Spoken,
+                        SpokenText = spoken,
                         DurationSeconds = w.DurationSeconds,
                         Settings = got.Settings,
                     };
@@ -515,6 +525,7 @@ public sealed class Phase2Service
                         line.Takes.Add(newTake);
                         line.SelectedTakeId = newTake.Id;
                         line.Status = Phase2Status.Generated;
+                        line.RefreshStale();
                     }
                     if (save != null) save(); else _lib.Save(patch);
                     if (onLineDone != null) await onLineDone(line);
@@ -570,7 +581,7 @@ public sealed class Phase2Service
         int n = 0;
         foreach (var line in patch.Lines.Where(l => only == null || only.Contains(l.LineId)))
         {
-            foreach (var t in line.Takes.Where(t => t.Id != line.SelectedTakeId).ToList())
+            foreach (var t in line.Takes.Where(t => t.Id != line.SelectedTakeId && !t.Kept).ToList())
             {
                 var dir = Path.GetDirectoryName(Path.Combine(_lib.PatchFolder(patch.Id), t.WavPath));
                 try { if (dir != null && Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }

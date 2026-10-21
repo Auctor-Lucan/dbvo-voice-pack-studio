@@ -13,6 +13,8 @@ public sealed class FomodFile
     public int Priority { get; set; }
     public bool? AlwaysInstall { get; set; }
     public bool? InstallIfUsable { get; set; }
+    /// <summary>Filled in from a DBVO Patch (its Sound folder or a DBVO Fix plugin): replaced when the option is refreshed.</summary>
+    public bool Linked { get; set; }
 }
 
 /// <summary>

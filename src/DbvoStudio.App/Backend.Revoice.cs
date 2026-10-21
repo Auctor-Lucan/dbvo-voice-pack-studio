@@ -288,6 +288,30 @@ public sealed partial class Backend
                 var wav = await RevoiceService.DecodeAsync(s.Files, VoiceFileIndex.Make(src, S(p, "inner")), Tools(), CancellationToken.None);
                 return "data:audio/wav;base64," + Convert.ToBase64String(wav);
             }
+            case "revoice.speakerChanges":
+                return await Locked(() =>
+                {
+                    var proj = LoadRv(S(p, "id"));
+                    bool apply = S(p, "decision") == "apply";
+                    int n = 0;
+                    foreach (var l in proj.Lines.Where(x => x.NewSpeakerKey != null))
+                    {
+                        if (apply)
+                        {
+                            l.SpeakerKey = l.NewSpeakerKey!;
+                            l.SpeakerName = l.NewSpeakerName ?? l.NewSpeakerKey!;
+                            if (!proj.Speakers.ContainsKey(l.SpeakerKey)) proj.Speakers[l.SpeakerKey] = new SpeakerAssignment();
+                            // Its takes were made with the old speaker's voice.
+                            if (l.SelectedTake != null && l.Status == Phase2Status.Generated) l.Status = Phase2Status.Stale;
+                        }
+                        else l.SpeakerPinned = true;
+                        l.NewSpeakerKey = null; l.NewSpeakerName = null;
+                        n++;
+                    }
+                    if (proj.LastScan != null) proj.LastScan.SpeakerChanges = 0;
+                    _lib.Save(proj);
+                    return new { changed = n, project = RvDto(proj) };
+                });
             case "revoice.orphansApply":
                 return await Locked(() =>
                 {
@@ -397,7 +421,7 @@ public sealed partial class Backend
         id = l.LineId, l.Info, resp = l.Response, pf = l.PluginFolder, vt = l.VoiceType, stem = l.FileStem, text = l.FinalLine, spoken = l.Spoken,
         l.SpokenEdited, tag = l.TagSuggestion, speaker = l.SpeakerKey, speakerName = l.SpeakerName, l.Npcs, cert = l.Certainty, l.Via,
         emo = ResponseInfo.EmotionNames.ElementAtOrDefault(l.Emotion) ?? "Neutral", emoV = l.EmotionValue, l.Notes, l.Quest, l.Topic, l.Plugin,
-        l.Original, excl = l.Excluded, undo = l.UndoSpoken != null, plan = l.PlanId, status = l.Status.ToString(), err = l.LastError, sel = l.SelectedTakeId, l.Marked, l.Gone,
+        l.Original, excl = l.Excluded, undo = l.UndoSpoken != null, plan = l.PlanId, status = l.Status.ToString(), err = l.LastError, sel = l.SelectedTakeId, l.Marked, l.Gone, newSpeaker = l.NewSpeakerName,
         takes = l.Takes.Select(t => new { t.Id, t.Slot, t.CreatedUtc, t.SpokenText, engine = t.Settings.Engine, model = t.Settings.ModelId, wav = t.WavPath.Replace('\\', '/'), t.DurationSeconds }),
     };
 
@@ -428,11 +452,11 @@ public sealed partial class Backend
                 l.UndoSpoken = null;
                 l.Spoken = S(p, "value");
                 l.SpokenEdited = l.Spoken != l.FinalLine;
-                if (l.SelectedTake != null && l.Status == Phase2Status.Generated && l.SelectedTake.SpokenText != l.Spoken) l.Status = Phase2Status.Stale;
+                l.RefreshStale();
                 break;
-            case "resetSpoken": l.UndoSpoken = l.Spoken; l.Spoken = l.FinalLine; l.SpokenEdited = false; break;
-            case "undoReset": if (l.UndoSpoken != null) { l.Spoken = l.UndoSpoken; l.SpokenEdited = l.Spoken != l.FinalLine; } l.UndoSpoken = null; break;
-            case "acceptTags": if (l.TagSuggestion != null) { l.Spoken = l.TagSuggestion; l.SpokenEdited = true; l.TagSuggestion = null; } break;
+            case "resetSpoken": l.UndoSpoken = l.Spoken; l.Spoken = l.FinalLine; l.SpokenEdited = false; l.RefreshStale(); break;
+            case "undoReset": if (l.UndoSpoken != null) { l.Spoken = l.UndoSpoken; l.SpokenEdited = l.Spoken != l.FinalLine; } l.UndoSpoken = null; l.RefreshStale(); break;
+            case "acceptTags": if (l.TagSuggestion != null) { l.Spoken = l.TagSuggestion; l.SpokenEdited = true; l.TagSuggestion = null; } l.RefreshStale(); break;
             case "rejectTags": l.TagSuggestion = null; break;
             case "exclude": l.Excluded = true; break;
             case "include": l.Excluded = false; break;
@@ -440,7 +464,7 @@ public sealed partial class Backend
             case "markOn": l.Marked = true; break;
             case "markOff": l.Marked = false; break;
             case "selectTake":
-                if (l.Takes.Any(t => t.Id == S(p, "value"))) { l.SelectedTakeId = S(p, "value"); l.Status = Phase2Status.Generated; }
+                if (l.Takes.Any(t => t.Id == S(p, "value"))) { l.SelectedTakeId = S(p, "value"); l.Status = Phase2Status.Generated; l.RefreshStale(); }
                 break;
             case "deleteTake":
             {
@@ -451,6 +475,7 @@ public sealed partial class Backend
                 l.Takes.Remove(t);
                 if (l.SelectedTakeId == t.Id) l.SelectedTakeId = l.Takes.LastOrDefault()?.Id;
                 l.Status = l.SelectedTakeId != null ? Phase2Status.Generated : Phase2Status.Pending;
+                l.RefreshStale();
                 break;
             }
             case "keepUsedTake":
@@ -644,7 +669,7 @@ public sealed partial class Backend
             var temp = new List<string>();
             try
             {
-                _lib.Backup("before-revoice-" + proj.Name, _settings.BackupsToKeep);
+                _lib.Backup("before-revoice-" + proj.Name, _settings.BackupsToKeep, routine: true);
                 var svc = new Phase2Service(_lib, Runtime());
                 int total = groups.Sum(g => g.Count()), offset = 0;
                 var session = proj.VoiceChanger ? RvSession(proj) : null;

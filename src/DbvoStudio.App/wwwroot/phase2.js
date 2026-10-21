@@ -10,7 +10,7 @@ const LANGS = [['', 'Auto'], ['en', 'en · English'], ['de', 'de · German'], ['
 
 const ENGINES = [['elevenlabs', 'ElevenLabs'], ['voxcpm', 'VoxCPM (local)'], ['omnivoice', 'OmniVoice (local)']];
 
-const pct = (p) => { const n = p.total - p.omitted; return n ? Math.round((100 * p.generated) / n) : 0; };
+const pct = (p) => { const n = p.total - p.omitted - (p.excluded || 0); return n ? Math.round((100 * p.generated) / n) : 0; };
 
 /** Ten voice pack colours that sit well on the dark blue-grey theme. */
 export const VOICE_COLORS = [
@@ -65,7 +65,7 @@ export async function patchesView(kind = 'tts') {
   let dragId = null;
 
   const card = (p) => {
-    const n = p.total - p.omitted;
+    const n = p.total - p.omitted - (p.excluded || 0);
     const vc = p.kind === 'vc';
     const warn = p.warnings && p.warnings.length;
     // Two compact lines: name + labels, then progress and what is left.
@@ -324,7 +324,7 @@ export async function patchView(id) {
     };
     render();
     await modal(`Takes · ${l.finalLine}`, [list,
-      h('div.row', h('button.btn.sm', { title: 'Delete every take of this line except the one in use', onclick: async () => {
+      h('div.row', h('button.btn.sm', { title: 'Delete every take of this line except the one in use and kept ones', onclick: async () => {
         try { const r = await rpc('patch.purgeTakes', { id, lineIds: [l.lineId] }); patch = r.patch; reindex(); grid.setRows(visible()); render(); toast(`${r.removed} take(s) deleted.`); } catch (e) { fail(e); }
       } }, 'Keep only the used take'),
       h('button.btn.sm', { title: 'Make another take of this line', onclick: () => { document.getElementById('modal').classList.add('hidden'); generate('selected', [l.lineId], { autoplay: true }); } }, vc ? 'Convert again' : 'New take'))]);
@@ -688,8 +688,8 @@ export async function patchView(id) {
     return {
       all: L.length,
       pending: L.filter(pendingLine).length,
-      generated: L.filter((l) => l.status === 'Generated' && !l.stale).length,
-      failed: L.filter((l) => l.status === 'Failed').length,
+      generated: L.filter((l) => l.status === 'Generated' && !l.stale && !l.omitted && !l.excluded).length,
+      failed: L.filter((l) => l.status === 'Failed' && !l.omitted && !l.excluded).length,
       stale: L.filter((l) => l.stale || l.status === 'Stale').length,
       omitted: L.filter((l) => l.omitted).length,
       marked: L.filter((l) => l.marked).length,
@@ -802,8 +802,8 @@ export async function patchView(id) {
     ].filter(Boolean)));
     const takesBtn = h('button.btn', { disabled: busy, title: 'Clean up takes you no longer need' }, 'Takes ▾');
     takesBtn.addEventListener('click', () => popupMenu(takesBtn, [
-      { label: `Keep only the used take · ticked lines (${sel.length})`, sub: 'Deletes the other takes and their files', onclick: () => sel.length ? purge(sel) : toast('Tick rows first.', true) },
-      { label: 'Keep only the used take · all lines', sub: 'Deletes every take that is not in use', onclick: () => purge(null) },
+      { label: `Keep only the used take · ticked lines (${sel.length})`, sub: 'Deletes the other takes and their files (kept ★ takes stay)', onclick: () => sel.length ? purge(sel) : toast('Tick rows first.', true) },
+      { label: 'Keep only the used take · all lines', sub: 'Deletes every take that is not in use or kept ★', onclick: () => purge(null) },
     ]));
     clear(actions).append(
       h('span.stat', h('b', c.generated), ` / ${c.active} ${vc ? 'converted' : 'generated'}`, c.omitted ? ` · ${c.omitted} omitted` : '', c.excluded ? ` · ${c.excluded} excluded` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} changed since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
@@ -993,7 +993,7 @@ export async function patchView(id) {
       renderCounts();
       renderActions();
       const rep = r.report;
-      toast(`${rep.total} lines · ${rep.added} new · ${rep.removed} removed · ${rep.omitted} omitted${rep.stale ? ` · ${rep.stale} changed since take` : ''}`);
+      toast(`${rep.total} lines · ${rep.added} new · ${rep.removed} removed${rep.parked ? ` (takes of ${rep.parked} kept in case they come back)` : ''} · ${rep.omitted} omitted${rep.stale ? ` · ${rep.stale} changed since take` : ''}`);
     } catch (e) { fail(e); }
   }
 

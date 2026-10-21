@@ -281,7 +281,7 @@ public sealed partial class Backend
                             var existing = proj.AllOptions().FirstOrDefault(o => o.PatchId == patch.Id && o.ModId == mod.Id);
                             if (existing != null)
                             {
-                                existing.Files = svc.FilesFor(proj, patch, voice, mod);
+                                FomodService.Relink(existing, svc.FilesFor(proj, patch, voice, mod), mod);
                                 updated++;
                                 continue;
                             }
@@ -299,9 +299,9 @@ public sealed partial class Backend
                 return await Locked(() =>
                 {
                     var proj = p.GetProperty("project").Deserialize<FomodProject>(JsonOptions)!;
-                    new FomodService(_lib, Runtime()).RefreshLinked(proj, _lib.LoadPatches(), _lib.LoadVoicePacks(), _lib.LoadMods());
+                    var orphans = new FomodService(_lib, Runtime()).RefreshLinked(proj, _lib.LoadPatches(), _lib.LoadVoicePacks(), _lib.LoadMods());
                     _lib.Save(proj);
-                    return FomodDto(proj);
+                    return new { project = FomodDto(proj), orphans };
                 });
             case "fomod.validate":
             {
@@ -380,9 +380,10 @@ public sealed partial class Backend
             modNames = its.Select(m => m.Name).ToList(),
             category = its.FirstOrDefault()?.Category ?? "Misc",
             total = x.Lines.Count,
-            generated = x.Lines.Count(l => l.SelectedTakeId != null && !l.IsOmitted),
-            failed = x.Lines.Count(l => l.Status == Phase2Status.Failed),
+            generated = x.Lines.Count(l => l.SelectedTakeId != null && !l.IsOmitted && !l.Excluded),
+            failed = x.Lines.Count(l => l.Status == Phase2Status.Failed && !l.IsOmitted && !l.Excluded),
             omitted = x.Lines.Count(l => l.IsOmitted),
+            excluded = x.Lines.Count(l => l.Excluded && !l.IsOmitted),
             unreviewed = its.Sum(m => m.Plugins.Sum(pl => Phase1Service.UnreviewedFlags(pl).Count)),
             charsLeft = pending.Where(l => x.Kind != "vc" || l.SourceWav == null).Sum(l => l.Spoken.Length),
             secondsLeft = x.Kind == "vc" ? pending.Count(l => l.SourceWav != null) : 0,
@@ -520,12 +521,13 @@ public sealed partial class Backend
             {
                 var voice = _lib.LoadVoicePacks().FirstOrDefault(v => v.Id == proj.VoicePackId);
                 var svc = new FomodService(_lib, Runtime());
-                svc.RefreshLinked(proj, _lib.LoadPatches(), _lib.LoadVoicePacks(), _lib.LoadMods());
-                var errors = svc.Validate(proj).Where(i => i.Level == "error" && !i.Message.StartsWith("Missing", StringComparison.Ordinal)).ToList();
+                var orphans = svc.RefreshLinked(proj, _lib.LoadPatches(), _lib.LoadVoicePacks(), _lib.LoadMods());
+                var errors = svc.Validate(proj).Where(i => i.Level == "error").ToList();
                 if (errors.Count > 0) throw new InvalidOperationException("Fix these first: " + string.Join(" · ", errors.Take(5).Select(e => $"{e.Where}: {e.Message}")));
-                _lib.Backup("before-fomod-build", _settings.BackupsToKeep);
+                _lib.Backup("before-fomod-build", _settings.BackupsToKeep, routine: true);
                 var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "fomod", g.Done, g.Total, g.Failed, g.Current, g.Message }));
                 var res = await svc.BuildAsync(proj, voice?.Naming ?? NamingMode.Legacy, package, progress, ct);
+                foreach (var o in orphans) res.Warnings.Add($"\"{o}\" is no longer linked to a DBVO Patch (deleted, or its mod was removed): built as it was.");
                 await _gate.WaitAsync();
                 try { _lib.Save(proj); } finally { _gate.Release(); }
                 Emit("jobDone", new { kind = "fomod", ok = true, report = res, project = proj });

@@ -116,20 +116,35 @@ public sealed class Library
 
     // ---------- backups ----------
     /// <summary>Zip every JSON file (not audio) into backups\. Keeps the newest <paramref name="keep"/>.</summary>
-    public string Backup(string reason, int keep = 30)
+    /// <summary>
+    /// Zip every project file into backups\. Routine backups (before a generate or build) are rotated on their own
+    /// and made at most every <paramref name="routineMinutes"/> minutes, so they never push out the backups made
+    /// before an import or a delete.
+    /// </summary>
+    public string? Backup(string reason, int keep = 30, bool routine = false, int routineMinutes = 10)
     {
         string safe = string.Concat(reason.Select(c => char.IsLetterOrDigit(c) ? c : '-')).Trim('-');
         if (safe.Length > 40) safe = safe[..40];
-        var path = Path.Combine(Root, "backups", $"{DateTime.Now:yyyyMMdd-HHmmss}-{safe}.zip");
+        var dir = Path.Combine(Root, "backups");
+        Directory.CreateDirectory(dir);
+        static bool IsRoutine(string f) => Path.GetFileName(f).Contains("-auto-", StringComparison.Ordinal);
+        if (routine)
+        {
+            var last = Directory.EnumerateFiles(dir, "*.zip").Where(IsRoutine).Select(File.GetLastWriteTimeUtc).DefaultIfEmpty(DateTime.MinValue).Max();
+            if (DateTime.UtcNow - last < TimeSpan.FromMinutes(routineMinutes)) return null;
+        }
+        var stamp = $"{DateTime.Now:yyyyMMdd-HHmmss}{(routine ? "-auto" : "")}-{safe}";
+        var path = Path.Combine(dir, stamp + ".zip");
+        for (int i = 2; File.Exists(path); i++) path = Path.Combine(dir, $"{stamp}-{i}.zip");
         using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
         {
             foreach (var f in Directory.EnumerateFiles(Root, "*.json", SearchOption.AllDirectories))
             {
-                if (f.StartsWith(Path.Combine(Root, "backups"), StringComparison.OrdinalIgnoreCase)) continue;
+                if (f.StartsWith(dir, StringComparison.OrdinalIgnoreCase)) continue;
                 zip.CreateEntryFromFile(f, Path.GetRelativePath(Root, f), CompressionLevel.Fastest);
             }
         }
-        var old = Directory.EnumerateFiles(Path.Combine(Root, "backups"), "*.zip").OrderByDescending(f => f).Skip(Math.Max(1, keep));
+        var old = Directory.EnumerateFiles(dir, "*.zip").Where(f => IsRoutine(f) == routine).OrderByDescending(f => Path.GetFileName(f), StringComparer.Ordinal).Skip(Math.Max(1, keep));
         foreach (var o in old) { try { File.Delete(o); } catch { } }
         return path;
     }

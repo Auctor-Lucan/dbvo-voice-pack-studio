@@ -540,7 +540,10 @@ public sealed partial class Backend
         string? Find(params string[] names) => dirs.SelectMany(d => names.Select(n => Path.Combine(d, n))).FirstOrDefault(File.Exists);
         void Fill(Func<string> get, Action<string> set, params string[] names)
         {
-            if (File.Exists(get())) return;
+            var cur = get();
+            if (File.Exists(cur)) return;
+            // A path on a drive that isn't there right now (an unplugged USB drive) is left alone.
+            if (!string.IsNullOrWhiteSpace(cur) && Path.IsPathRooted(cur) && Path.GetPathRoot(cur) is { Length: > 0 } root && !Directory.Exists(root)) return;
             var f = Find(names);
             if (f != null) { set(f); changed = true; }
         }
@@ -848,16 +851,18 @@ public sealed partial class Backend
                 line.Spoken = S(p, "value");
                 line.SpokenEdited = line.Spoken != SpokenText.DefaultFor(line.FinalLine);
                 line.TagSuggestion = null;
-                if (line.SelectedTake != null && line.Status == Phase2Status.Generated && line.SelectedTake.SpokenText != line.Spoken) line.Status = Phase2Status.Stale;
+                line.RefreshStale();
                 break;
             case "resetSpoken":
                 line.UndoSpoken = line.Spoken;
                 line.Spoken = SpokenText.DefaultFor(line.FinalLine);
                 line.SpokenEdited = false;
+                line.RefreshStale();
                 break;
             case "undoReset":
                 if (line.UndoSpoken != null) { line.Spoken = line.UndoSpoken; line.SpokenEdited = line.Spoken != SpokenText.DefaultFor(line.FinalLine); }
                 line.UndoSpoken = null;
+                line.RefreshStale();
                 break;
             case "exclude": line.Excluded = true; break;
             case "include": line.Excluded = false; break;
@@ -868,8 +873,12 @@ public sealed partial class Backend
                 }
                 break;
             case "selectTake":
-                line.SelectedTakeId = S(p, "value");
-                line.Status = Phase2Status.Generated;
+                if (line.Takes.Any(x => x.Id == S(p, "value")))
+                {
+                    line.SelectedTakeId = S(p, "value");
+                    line.Status = Phase2Status.Generated;
+                    line.RefreshStale();
+                }
                 break;
             case "deleteTake":
                 var t = line.Takes.FirstOrDefault(x => x.Id == S(p, "value"));
@@ -879,7 +888,8 @@ public sealed partial class Backend
                     var dir = Path.GetDirectoryName(Path.Combine(_lib.PatchFolder(patch.Id), t.WavPath));
                     try { if (dir != null && Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
                     if (line.SelectedTakeId == t.Id) line.SelectedTakeId = line.Takes.LastOrDefault()?.Id;
-                    if (line.Takes.Count == 0) line.Status = line.IsOmitted ? Phase2Status.Omitted : Phase2Status.Pending;
+                    if (line.Takes.Count == 0) { line.Status = line.IsOmitted ? Phase2Status.Omitted : Phase2Status.Pending; line.NoAdopt = true; }
+                    else line.RefreshStale();
                 }
                 break;
             case "overrideOmit":
@@ -890,6 +900,7 @@ public sealed partial class Backend
             case "acceptTags":
                 if (line.TagSuggestion != null) { line.Spoken = line.TagSuggestion; line.SpokenEdited = true; }
                 line.TagSuggestion = null;
+                line.RefreshStale();
                 break;
             case "rejectTags":
                 line.TagSuggestion = null;
@@ -922,7 +933,7 @@ public sealed partial class Backend
             {
                 n++;
                 line.SpokenEdited = true;
-                if (line.SelectedTake != null && line.Status == Phase2Status.Generated) line.Status = Phase2Status.Stale;
+                line.RefreshStale();
             }
         }
         _lib.Save(patch);
@@ -1003,7 +1014,7 @@ public sealed partial class Backend
             {
                 var patch = LoadPatch(id);
                 var voice = LoadVoice(patch.VoicePackId);
-                _lib.Backup("before-generate-" + patch.Name, _settings.BackupsToKeep);
+                _lib.Backup("before-generate-" + patch.Name, _settings.BackupsToKeep, routine: true);
                 var lines = SelectLines(patch, p);
                 var svc = new Phase2Service(_lib, Runtime());
                 var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "generate", g.Done, g.Total, g.Failed, g.Current, g.Message }));
@@ -1107,12 +1118,12 @@ public sealed partial class Backend
             foreach (var pl in mod.Plugins)
             {
                 if (!string.IsNullOrWhiteSpace(patch.FixFolder))
-                    written.AddRange(svc1.WriteOutputs(mod, pl, new[] { patch.FixFolder }, patch.FixFolder));
+                    written.AddRange(svc1.WriteOutputs(mod, pl, new[] { patch.FixFolder }, patch.FixFolder, removeStaleFix: true));
                 if (!string.IsNullOrWhiteSpace(patch.FinalRoot))
                 {
                     var final = Core.Fomod.FomodService.ModContentFolder(patch, voice, mod);
                     if (!final.Equals(patch.FixFolder, StringComparison.OrdinalIgnoreCase))
-                        written.AddRange(svc1.WriteOutputs(mod, pl, new[] { final }, final, keepExistingFinalFix && !patch.OverwriteFix));
+                        written.AddRange(svc1.WriteOutputs(mod, pl, new[] { final }, final, keepExistingFinalFix && !patch.OverwriteFix, removeStaleFix: true));
                 }
             }
         }

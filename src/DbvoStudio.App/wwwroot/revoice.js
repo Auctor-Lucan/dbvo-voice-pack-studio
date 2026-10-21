@@ -156,6 +156,8 @@ export async function revoiceView(id) {
         h('span.faint', 'scanned ' + new Date(ls.scannedUtc).toLocaleString())),
       ls.orphans ? h('div.banner.info', { style: { margin: 0 } }, h('span', h('b', `${ls.orphans} voice file(s) in the mod's sources match no line`), ' — usually a merged, compacted (ESL) or renamed plugin changed their FormIDs. Link them to their lines so they play as the current file and can feed the Voice Changer.'),
         h('div.spacer'), h('button.btn.sm', { title: 'Match orphaned files to silent lines by name, then by Whisper transcription', onclick: orphansModal }, 'Match orphaned files…')) : null,
+      speakerChangesBanner(),
+      ls.textChanged ? h('div.banner.info', { style: { margin: 0 } }, h('span', h('b', `${ls.textChanged} line(s) changed in the mod since their take`), ' — they are marked "changed since take" and come up again under To do.')) : null,
       ls.masterCosts.length ? h('div.banner.warn', { style: { margin: 0 } }, h('div', h('b', 'Missing masters'), h('ul', ls.masterCosts.map((x) => h('li', x))), h('div.faint', 'Drop them in to fix it, or set the base game folder for vanilla masters.'))) : null,
       ls.missingStrings.length ? h('div.banner.warn', { style: { margin: 0 } }, 'No strings for localized plugin(s): ' + ls.missingStrings.join(', ') + '. Their text is empty. Add the plugin\'s Strings folder or the archive that holds its strings.') : null,
       ls.errors.length ? h('div.banner.bad', { style: { margin: 0 } }, h('ul', ls.errors.map((x) => h('li', x)))) : null)
@@ -206,6 +208,22 @@ export async function revoiceView(id) {
   async function setSource(src, o) { try { proj = await rpc('revoice.source', { id, sourceId: src.id, ...o }); reindex(); renderAll(); } catch (e) { fail(e); } }
 
   // ---------------------------------------------------------------- orphaned files
+  function speakerChangesBanner() {
+    const changed = proj.lines.filter((l) => l.newSpeaker);
+    if (!changed.length) return null;
+    const ex = [...new Set(changed.map((l) => `${l.speakerName} → ${l.newSpeaker}`))];
+    const decide = async (decision) => {
+      try { const r = await rpc('revoice.speakerChanges', { id, decision }); proj = r.project; reindex(); renderAll(); toast(decision === 'apply' ? `${r.changed} line(s) moved to their new speaker (marked "changed since take").` : `${r.changed} line(s) keep their speaker.`); } catch (e) { fail(e); }
+    };
+    return h('div.banner.warn', { style: { margin: 0 } },
+      h('div', h('b', `This scan found another speaker for ${changed.length} line(s) that already have takes`),
+        h('div', { style: { marginTop: '4px' } }, ex.slice(0, 5).join(' · ') + (ex.length > 5 ? ` · +${ex.length - 5} more` : '')),
+        h('div.faint', 'They keep their current speaker (and voice) until you choose. Moving them marks their takes as changed, so they can be made again with the new speaker\'s voice.')),
+      h('div.spacer'),
+      h('button.btn.sm', { title: 'Keep the speaker these lines have now (later scans won\'t ask again for them)', onclick: () => decide('keep') }, 'Keep current'),
+      h('button.btn.sm.primary', { title: 'Move these lines to the speaker the scan found', onclick: () => decide('apply') }, 'Use new speakers'));
+  }
+
   async function orphansModal() {
     let data;
     try { data = await rpc('revoice.orphans', { id }); } catch (e) { fail(e); return; }
