@@ -419,7 +419,8 @@ export async function fomodView(id) {
   // ---- actions
   async function addPatches() {
     await refreshState();
-    const patches = app.state.patches.filter((p) => (p.kind || 'tts') === 'tts' && (!proj.voicePackId || p.voicePackId === proj.voicePackId));
+    // Every patch of this voice pack, Voice Changer on or off: both build .fuz files into the final folder.
+    const patches = app.state.patches.filter((p) => !proj.voicePackId || p.voicePackId === proj.voicePackId);
     if (!patches.length) { toast('No DBVO Patches for this voice pack yet.', true); return; }
     const linked = new Set(proj.steps.flatMap((s) => s.groups.flatMap((g) => g.options.map((o) => o.patchId))).filter(Boolean));
     const boxes = patches.map((p) => ({ p, box: h('input', { type: 'checkbox', checked: !linked.has(p.id) }) }));
