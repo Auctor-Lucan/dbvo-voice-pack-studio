@@ -1,4 +1,4 @@
-# DBVO Voice Pack Studio
+# DBVO Studio
 
 A Windows tool that takes Skyrim plugins all the way to a released Dragonborn Voice Over (DBVO) voice pack.
 

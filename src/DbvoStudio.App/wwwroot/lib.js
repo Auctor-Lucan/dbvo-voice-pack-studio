@@ -32,7 +32,7 @@ if (webview) {
 
 /** Call a host method. */
 export function rpc(method, params = {}) {
-  if (!webview) return Promise.reject(new Error('Not running inside DBVO Voice Pack Studio.'));
+  if (!webview) return Promise.reject(new Error('Not running inside DBVO Studio.'));
   const id = nextId++;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });

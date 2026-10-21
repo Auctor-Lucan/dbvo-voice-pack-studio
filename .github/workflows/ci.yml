@@ -32,7 +32,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Publish
-        run: dotnet publish src/DbvoStudio.App/DbvoStudio.App.csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=false -o publish/DBVO-Voice-Pack-Studio
+        run: dotnet publish src/DbvoStudio.App/DbvoStudio.App.csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=false -o publish/DBVO-Studio
       - name: Bundle ffmpeg (LGPL build)
         shell: pwsh
         env:
@@ -47,7 +47,7 @@ jobs:
           Invoke-WebRequest $asset.browser_download_url -OutFile ffmpeg.zip
           Expand-Archive ffmpeg.zip -DestinationPath ffx
           $dir = Get-ChildItem ffx -Directory | Select-Object -First 1
-          $dest = "publish/DBVO-Voice-Pack-Studio/Tools/ffmpeg"
+          $dest = "publish/DBVO-Studio/Tools/ffmpeg"
           New-Item -ItemType Directory -Force $dest | Out-Null
           Copy-Item (Join-Path $dir.FullName "bin/ffmpeg.exe") $dest
           Copy-Item (Join-Path $dir.FullName "LICENSE.txt") $dest
@@ -56,6 +56,6 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: DBVO-Voice-Pack-Studio-win-x64
-          path: publish/DBVO-Voice-Pack-Studio
+          name: DBVO-Studio-win-x64
+          path: publish/DBVO-Studio
           retention-days: 30

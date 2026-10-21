@@ -683,7 +683,7 @@ public sealed class RevoiceService
         var records = plans.Select((x, i) => (x, Id: 0x800u + (uint)i)).ToList();
         byte Flags(NewVoiceTypePlan x) => s != null && s.Dialogue.VoiceTypes.TryGetValue(ParseKey(x.BaseVoiceType), out var v) ? v.Flags : (byte)1;
         var bytes = VoiceTypePluginWriter.Build(records.Select(r => (r.Id, r.x.EditorId, Flags(r.x))).ToList(),
-            "Made with DBVO Voice Pack Studio (NPC Revoice Tool). Voice types are assigned by SkyPatcher and added to form lists by FormList Manipulator.");
+            "Made with DBVO Studio (NPC Revoice Tool). Voice types are assigned by SkyPatcher and added to form lists by FormList Manipulator.");
         var espPath = Path.Combine(p.OutputFolder, plugin);
         Directory.CreateDirectory(p.OutputFolder);
         File.WriteAllBytes(espPath, bytes);

@@ -21,7 +21,7 @@ public partial class App : Application
     private void OnUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         Log("Unhandled: " + e.Exception);
-        MessageBox.Show(e.Exception.Message, "DBVO Voice Pack Studio", MessageBoxButton.OK, MessageBoxImage.Error);
+        MessageBox.Show(e.Exception.Message, "DBVO Studio", MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;
     }
 }

@@ -1,5 +1,5 @@
 """
-faster-whisper helper for DBVO Voice Pack Studio's WAV to LIP tool.
+faster-whisper helper for DBVO Studio's WAV to LIP tool.
 
 Run by the app with the Python of your own faster-whisper environment (for example
 WAV_to_LIP_App\.venv\Scripts\python.exe). It loads the model once with the same settings and

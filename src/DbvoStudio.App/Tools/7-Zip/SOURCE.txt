@@ -1,4 +1,4 @@
 7-Zip 24.07 by Igor Pavlov (https://www.7-zip.org/), console version (7z.exe + 7z.dll), unmodified.
 Licensed under the GNU LGPL (with BSD 3-clause and unRAR license parts): see License.txt.
 Source code: https://www.7-zip.org/download.html
-Used by DBVO Voice Pack Studio to read .7z mod archives and to pack .7z FOMOD archives.
+Used by DBVO Studio to read .7z mod archives and to pack .7z FOMOD archives.

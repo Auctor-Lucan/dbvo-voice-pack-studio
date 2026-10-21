@@ -153,7 +153,7 @@ public static class FixPluginWriter
         BitConverter.GetBytes((uint)recordCount).CopyTo(hedr, 4);
         BitConverter.GetBytes(0x800u).CopyTo(hedr, 8);
         subs.Add(new Subrecord("HEDR", hedr));
-        subs.Add(new Subrecord("CNAM", ZString("DBVO Voice Pack Studio")));
+        subs.Add(new Subrecord("CNAM", ZString("DBVO Studio")));
         foreach (var m in masters)
         {
             subs.Add(new Subrecord("MAST", ZString(m)));

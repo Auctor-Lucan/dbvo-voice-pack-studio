@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>DBVO Voice Pack Studio</AssemblyName>
+    <AssemblyName>DBVO Studio</AssemblyName>
     <RootNamespace>DbvoStudio.App</RootNamespace>
     <Version>0.1.0</Version>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>

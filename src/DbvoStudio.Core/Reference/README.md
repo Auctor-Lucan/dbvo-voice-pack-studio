@@ -4,7 +4,7 @@
 All credit for this information goes to the UESP editors and community.
 
 The data was collected by Auctor Lucan in a corpus of 17,519 UESP Skyrim pages (page revisions from
-2011-09-30 to 2026-09-21) and reduced by `extract_uesp.py` to what DBVO Voice Pack Studio uses.
+2011-09-30 to 2026-09-21) and reduced by `extract_uesp.py` to what DBVO Studio uses.
 
 ## License
 
@@ -13,7 +13,7 @@ UESP text is licensed under the [Creative Commons Attribution-ShareAlike 2.5 Lic
 license (CC BY-SA 2.5). It has been adapted: wiki markup was removed and only the fields below were kept. Every
 NPC and book entry keeps the URL of the UESP article it came from; the page history there lists its authors.
 
-This license covers the data file only, not the source code of DBVO Voice Pack Studio.
+This license covers the data file only, not the source code of DBVO Studio.
 
 ## What it contains
 

@@ -11,7 +11,6 @@ const TABS = [
   ['references', 'Omit references'],
   ['categories', 'Categories'],
   ['credits', 'Credits'],
-  ['library', 'Library'],
 ];
 
 function section(title, extra, ...rows) {
@@ -38,7 +37,9 @@ const link = (url, text) => h('a', { href: '#', onclick: (e) => { e.preventDefau
 
 export async function settingsView(tab, selectedId) {
   await refreshState();
+  if (tab === 'library') tab = 'general';
   tab = TABS.some(([k]) => k === tab) ? tab : store.get('settingsTab', 'general');
+  if (!TABS.some(([k]) => k === tab)) tab = 'general';
   const view = h('div.view');
   const sub = h('div.subnav');
   const body = h('div.view-body');
@@ -51,7 +52,7 @@ export async function settingsView(tab, selectedId) {
     store.set('settingsTab', t);
     renderSub();
     clear(body);
-    const render = { general, voices, pronunciation, references, categories, library, credits }[tab];
+    const render = { general, voices, pronunciation, references, categories, credits }[tab];
     try { body.append(await render(voiceSel, () => show(tab), (vid) => { voiceSel = vid; renderSub(); })); } catch (e) { fail(e); }
   };
   function renderSub() {
@@ -78,16 +79,14 @@ async function credits() {
   const day = (t) => (t ? new Date(t).toLocaleDateString() : '?');
   const row = (name, sub, ...body) => h('div.srow', { style: { alignItems: 'start' } }, h('div.lbl', name, sub ? h('small', sub) : null), h('div.col', { style: { gap: '6px' } }, ...body));
   const lic = (...x) => h('div.faint', ...x);
+  const nx = (user) => 'https://www.nexusmods.com/skyrimspecialedition/users/' + user;
+  const pf = (name) => 'https://www.nexusmods.com/profile/' + name;
   return h('div.col', { style: { gap: '18px' } },
-    section('Credits', null,
-      h('div', { style: { padding: '4px 0 10px' } }, 'DBVO Voice Pack Studio by Auctor Lucan, for Dragonborn Voice Over (DBVO). It stands on the work of the people and projects below; thank you all.'),
-      row('UESP', 'The Unofficial Elder Scrolls Pages',
-        h('div', 'NPC voice types, quoted dialogue and book authors used by NPC Revoice come from ', link('https://en.uesp.net/', 'UESP — en.uesp.net'),
-          '. All credit for this information goes to the UESP editors and community; it was collected by Auctor Lucan.'),
-        u ? lic(`${u.pages.toLocaleString()} Skyrim pages (revisions ${day(u.revisionsFrom)} – ${day(u.revisionsTo)}) → ${u.npcs.toLocaleString()} NPCs, ${u.quotes.toLocaleString()} quotes, ${u.books.toLocaleString()} books.`) : lic('Reference data not found in this build.'),
-        lic('UESP text is licensed under ', link('https://creativecommons.org/licenses/by-sa/2.5/', 'CC BY-SA 2.5'),
-          '; the derived data in this app is shared under the same license. Each entry links back to its UESP article (', link('https://en.uesp.net/wiki/UESPWiki:Copyrights', 'UESP copyright policy'), ').'),
-        lic('Used for base-game lines only: when several NPCs share a voice type, a UESP quote of the exact line by one of them picks the speaker (shown as "UESP quote", certainty Probable).'))),
+    section('DBVO Studio', null,
+      h('div.col', { style: { gap: '8px', padding: '4px 0' } },
+        h('div', h('b', 'DBVO Studio'), ' by Auctor Lucan: one workbench for making ', h('b', 'Dragonborn Voice Over (DBVO)'), ' patches, from a mod\'s plugin to a finished installer.'),
+        h('div', 'Phase 1 reads the plugins and fixes their dialogue for DBVO. Phase 2 voices every line with your voice pack (text-to-speech or the Voice Changer), with takes, audio tags, lip sync and .fuz files. Phase 3 packs it all into a FOMOD installer. Other Tools add WAV to LIP and NPC Revoice, which gives existing NPCs new voices.'),
+        h('div', 'The aim: let anyone give the player, and the characters of their favourite mods, a voice, without the hours of renaming, converting and packing by hand.'))),
 
     section('Included with DBVO Studio', null,
       h('div.faint', { style: { padding: '4px 0 6px' } }, 'These components ship with the app, unmodified. Each keeps its own license; the full texts are in THIRD-PARTY-NOTICES.txt and in each tool\'s folder.'),
@@ -127,8 +126,30 @@ async function credits() {
         h('div', 'Converts audio to xWMA for .fuz files.'),
         lic('From the Microsoft DirectX SDK; installed with the Skyrim Special Edition Creation Kit (Tools\\Audio).'))),
 
-    section('Thanks', null,
-      h('div', { style: { padding: '4px 0' } }, 'Bethesda Game Studios for Skyrim and the Creation Kit; the DBVO authors and the voice pack makers whose packs, formats and conventions this tool follows; and the Skyrim modding community.')));
+    section('Reference data', null,
+      row('UESP', 'The Unofficial Elder Scrolls Pages',
+        h('div', 'NPC voice types, quoted dialogue and book authors used by NPC Revoice come from ', link('https://en.uesp.net/', 'UESP — en.uesp.net'),
+          '. All credit for this information goes to the UESP editors and community; it was collected by Auctor Lucan.'),
+        u ? lic(`${u.pages.toLocaleString()} Skyrim pages (revisions ${day(u.revisionsFrom)} – ${day(u.revisionsTo)}) → ${u.npcs.toLocaleString()} NPCs, ${u.quotes.toLocaleString()} quotes, ${u.books.toLocaleString()} books.`) : lic('Reference data not found in this build.'),
+        lic('UESP text is licensed under ', link('https://creativecommons.org/licenses/by-sa/2.5/', 'CC BY-SA 2.5'),
+          '; the derived data in this app is shared under the same license. Each entry links back to its UESP article (', link('https://en.uesp.net/wiki/UESPWiki:Copyrights', 'UESP copyright policy'), ').'),
+        lic('Used for base-game lines only: when several NPCs share a voice type, a UESP quote of the exact line by one of them picks the speaker (shown as "UESP quote", certainty Probable).')),
+    ),
+
+    section('Shout outs', null,
+      h('ul.credits-list', { style: { margin: '6px 0', paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '8px' } },
+        h('li', 'The mod authors of the many wonderful mods whose characters DBVO Studio helps give a voice.'),
+        h('li', link(nx('2716809'), 'isophe'), ', whose DBVO2 Tool served as a great crutch for handling all the WAV files before DBVO Studio existed.'),
+        h('li', 'I built DBVO Studio with ', link('https://claude.ai/', 'Claude'), ' (Anthropic), which wrote the code to my designs, testing and feedback. (AI-Assisted Tag)'),
+        h('li', link('https://elevenlabs.io/', 'ElevenLabs'), ' for the voices generated in Phase 2. (AI Generation Tag)'),
+        h('li', link('https://www.audacityteam.org/', 'Audacity'), ' for the countless hours of editing and its Macro Manager for reverb and volume fixes.'),
+        h('li', link(nx('32344400'), 'Anbeegod'), ' for feedback and sanity checks! Looking forward to working on FDE Karliah with you next!'),
+        h('li', link(pf('JobiWanUK?gameId=1704'), 'JobiWanUK'), ', ', link(pf('toostruus?gameId=1704'), 'toostruus'), ', ', link(pf('Leet'), 'Leet'), ', ', link(pf('Ormcloakstay'), 'Ormcloakstay'),
+          ' and too many others to mention for advice and inspiration.'),
+        h('li', link(pf('xXFEARTCBXx'), 'xXFEARTCBXx'), ' for the original version of the Vampire voice (the "V1 English" voice model is sadly gone from ElevenLabs).'),
+        h('li', 'To all my DBVO users, and ', link(nx('30219160'), 'MathiewMay'), '\'s whole DBVO community, for your kind feedback and endorsements over the years!'),
+        h('li', 'To all new users who may find DBVO Studio useful!'),
+        h('li', 'Bethesda Game Studios for Skyrim and the Creation Kit.'))));
 }
 
 async function saveSettings(patchObj) {
@@ -218,6 +239,7 @@ async function general(_, rerender) {
   checkEngine('omnivoice');
 
   return h('div',
+    librarySection(),
     section('ElevenLabs', null,
       srow(h('span.row', { style: { gap: '4px' } }, 'API key', needInfo('elevenlabs')), 'Stored encrypted for your Windows user. Click ⓘ for where to get one.', h('div.col',
         h('div.row', apiKey,
@@ -561,21 +583,25 @@ async function categories(_, rerender) {
 
 // ------------------------------------------------------------------ library
 
-async function library(_, rerender) {
+function librarySection() {
   const st = app.state;
   const keep = h('input', { type: 'number', value: st.settings.backupsToKeep, style: { width: '80px' } });
   keep.addEventListener('change', async () => { await saveSettings({ backupsToKeep: Number(keep.value) || 30 }); toast('Saved.'); });
-  return h('div',
-    section('Library', null,
-      srow('Location', 'Holds your projects, takes and backups. A short path such as D:\\DBVO leaves the most room under Windows\' 260-character path limit.',
-        h('div.row', h('span.mono', st.libraryRoot),
-          h('button.btn.sm', { title: 'Open the library folder in Explorer', onclick: () => rpc('library.open') }, 'Open'),
-          h('button.btn.sm', { onclick: async () => {
-            const folder = await rpc('pick.folder', { title: 'New library location (an empty folder, or an existing DBVO Studio library)' });
-            if (!folder) return;
-            if (!(await confirmBox('Change library location?', `An empty folder gets a copy of your current library; a folder that already holds a library is used as it is. The app restarts afterwards.\n\n${folder}`, 'Change and restart'))) return;
-            try { await rpc('library.change', { path: folder }); } catch (e) { fail(e); }
-          } }, 'Change…'))),
-      srow('Backups to keep', 'Made automatically before imports, generation, FOMOD builds and deletes.', h('div.row', keep,
-        h('button.btn.sm', { title: 'Zip all projects and settings into the backups folder now', onclick: async () => { const p = await rpc('backup.now', { reason: 'manual' }); toast('Backup: ' + p); } }, 'Back up now')))));
+  return section('Library', null,
+    h('div.help', { style: { margin: '6px 0 4px' } },
+      h('div', h('b', 'Pick this first. '), 'The library holds your projects, takes and backups. Moving it later means copying every take, so choose its place before you start.'),
+      h('ul', { style: { margin: '6px 0 0', paddingLeft: '18px' } },
+        h('li', h('b', 'Short path: '), 'put it near the top of a drive, e.g. ', h('span.mono', 'D:\\DBVO Studio Library'), '. Windows limits a path to 260 characters and DBVO file names are long.'),
+        h('li', h('b', 'Same drive as your WAV + LIP files: '), 'if you already have folders full of WAV and LIP files, or export to a particular drive, put the library on that drive. DBVO Studio then hardlinks files instead of copying them: the take and its exported copy are one file on disk, so they take no extra space and appear instantly. Across drives every file is copied, using the space twice.'))),
+    srow('Location', 'Your current library.',
+      h('div.row', h('span.mono', st.libraryRoot),
+        h('button.btn.sm', { title: 'Open the library folder in Explorer', onclick: () => rpc('library.open') }, 'Open'),
+        h('button.btn.sm', { onclick: async () => {
+          const folder = await rpc('pick.folder', { title: 'New library location (an empty folder, or an existing DBVO Studio library)' });
+          if (!folder) return;
+          if (!(await confirmBox('Change library location?', `An empty folder gets a copy of your current library; a folder that already holds a library is used as it is. The app restarts afterwards.\n\n${folder}`, 'Change and restart'))) return;
+          try { await rpc('library.change', { path: folder }); } catch (e) { fail(e); }
+        } }, 'Change…'))),
+    srow('Backups to keep', 'Made automatically before imports, deletes, generation and FOMOD builds (generation and build backups at most every 10 minutes, kept separately).', h('div.row', keep,
+      h('button.btn.sm', { title: 'Zip all projects and settings into the backups folder now', onclick: async () => { const p = await rpc('backup.now', { reason: 'manual' }); toast('Backup: ' + p); } }, 'Back up now'))));
 }

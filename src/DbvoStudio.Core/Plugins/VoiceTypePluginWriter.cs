@@ -40,7 +40,7 @@ public static class VoiceTypePluginWriter
         BitConverter.GetBytes((uint)(types.Count + 1)).CopyTo(hedr, 4);
         BitConverter.GetBytes(0x800u + (uint)types.Count).CopyTo(hedr, 8);
         hsubs.Add(new Subrecord("HEDR", hedr));
-        hsubs.Add(new Subrecord("CNAM", FixPluginWriter.ZString("DBVO Voice Pack Studio")));
+        hsubs.Add(new Subrecord("CNAM", FixPluginWriter.ZString("DBVO Studio")));
         hsubs.Add(new Subrecord("SNAM", FixPluginWriter.ZString(description)));
         using (var hd = new MemoryStream())
         {
