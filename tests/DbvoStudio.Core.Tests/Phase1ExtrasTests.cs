@@ -136,14 +136,18 @@ public class ApprovalTests
         new() { FormId = 1, Original = original, Final = final, Kind = Rules.LineKind.Broken, UserEdited = final != null };
 
     [Fact]
-    public void Silent_stage_direction_goes_to_the_plugin_but_needs_a_voice_decision()
+    public void Fixed_stage_direction_is_silent_without_asking()
     {
         var l = Broken("*Sip your drink*.", "(Sip your drink)");
         Assert.True(l.IsStageDirection);
-        Assert.True(l.NeedsVoiceDecision);
-        Assert.True(l.IsFlagged);
+        Assert.False(l.NeedsVoiceDecision); // fixed + going into the DBVO Fix plugin = decided, silent
+        Assert.False(l.IsFlagged);
+        Assert.True(l.IsResolved);
         Assert.Empty(l.TopicLines());
         Assert.True(l.NeedsOverride);
+
+        var untouched = new Phase1Line { FormId = 2, Original = "(Laughs)", Final = "(Laughs)", Kind = Rules.LineKind.Valid };
+        Assert.True(untouched.NeedsVoiceDecision); // an untouched one still asks
 
         l.VoiceApproved = false;
         Assert.False(l.IsFlagged);

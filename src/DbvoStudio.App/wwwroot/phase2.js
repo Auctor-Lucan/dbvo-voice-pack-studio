@@ -1076,7 +1076,7 @@ export async function patchView(id) {
     const renderSrc = () => clear(srcList).append(sources.length ? sources.map((f, i) => h('div.row', h('span.mono.grow.ellipsis', f), h('button.icon-btn', { onclick: () => { sources.splice(i, 1); renderSrc(); } }, '×'))) : h('div.faint', 'No folder yet.'));
     renderSrc();
     renderPreview();
-    const row = (label, hint, ...field) => h('div.opt-row', h('div.opt-label', label, hint ? h('small', hint) : null), h('div.col', { style: { gap: '4px', minWidth: 0 } }, ...field));
+    const row = (label, hint, ...field) => h('div.opt-row', h('div.opt-label', label), h('div.col', { style: { gap: '5px', minWidth: 0 } }, ...field, hint ? h('div.opt-hint', hint) : null));
     const ok = await modal(h('span.row', 'Folders & options — ', voiceChip(voice.name + ' voice pack', voice.color)), [
       h('div.opt-grid',
         row('Patch name', null, name),

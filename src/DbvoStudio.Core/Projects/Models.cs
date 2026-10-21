@@ -259,12 +259,18 @@ public sealed class Phase1Line
     [JsonIgnore] public bool IsStageDirection => Final != null && ScriptRules.IsStageDirection(Final);
 
     /// <summary>A stage direction nobody has decided on yet: voice it (e.g. a laugh) or keep it silent.</summary>
-    [JsonIgnore] public bool NeedsVoiceDecision => IsStageDirection && VoiceApproved == null && Status != Phase1Status.Removed && !Excluded;
+    [JsonIgnore] public bool NeedsVoiceDecision => IsStageDirection && !StageDecided && Status != Phase1Status.Removed && !Excluded;
+
+    /// <summary>
+    /// The stage direction is dealt with: voiced / silent was chosen, or its text was fixed and goes into the
+    /// DBVO Fix plugin (it then stays silent unless ♪ is turned on). Only an untouched one asks "voice or silent?".
+    /// </summary>
+    [JsonIgnore] public bool StageDecided => VoiceApproved != null || UserEdited || (Final != null && Final != Original && (FixApproved ?? true));
 
     /// <summary>A flagged line whose final text now passes the script (fixed by hand or by an imported DBVO Fix plugin), or a decided stage direction.</summary>
     [JsonIgnore]
     public bool IsResolved => WasFlagged && Final != null && Final != Original
-                              && (ScriptRules.IsVoiceReady(Final) || (IsStageDirection && VoiceApproved != null));
+                              && (ScriptRules.IsVoiceReady(Final) || (IsStageDirection && StageDecided));
 
     /// <summary>Still needs the user's decision.</summary>
     [JsonIgnore]
