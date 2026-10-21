@@ -378,7 +378,8 @@ public sealed partial class Backend
             var pw = PathChecks.Check(x.Lines.Where(l => !l.IsOmitted).Select(l => l.FinalLine), voice.Naming, x.WavLipFolder, fuz, Path.Combine(_lib.PatchFolder(x.Id), "takes"));
             if (pw.Count > 0) warnings.Add("Path too long: " + string.Join(", ", pw.Select(w => w.Where).Distinct()));
         }
-        var pending = x.Lines.Where(l => !l.IsOmitted && !l.Excluded && l.SelectedTakeId == null && (x.Kind != "vc" || l.SourceWav != null || x.TtsForMissing)).ToList();
+        // What "Generate missing" would make: no take yet, failed, or text changed since the take.
+        var pending = Phase2Service.Eligible(x, false);
         return new
         {
             x.Id, x.Name, x.VoicePackId, x.ModIds, x.ReferenceIds, x.UpdatedUtc, x.Kind,

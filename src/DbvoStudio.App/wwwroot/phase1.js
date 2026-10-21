@@ -126,7 +126,7 @@ async function batchAdd(initial) {
   drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
   drop.addEventListener('drop', async (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('over'); try { add(await droppedPaths([...(e.dataTransfer.files || [])])); } catch (err) { fail(err); } });
-  const paste = h('textarea', { rows: 4, placeholder: 'SeranaDialogAddon.esp | Serana Dialogue Addon | Followers\nSDA Patch Collection.esp | Serana Dialogue Addon | Followers', spellcheck: false });
+  const paste = h('textarea', { rows: 4, placeholder: 'ExampleMod.esp | Example Mod | Quests\nExampleMod - Patch.esp | Example Mod | Quests', spellcheck: false });
   const pasteMsg = h('div.faint');
 
   function add(paths) {
@@ -586,7 +586,7 @@ export async function modView(id) {
       return h('div.help.bad',
         h('p', h('b', 'BROKEN LINE. '), 'The script can\'t make this line voice-ready on its own: usually an alias placeholder like <Alias=…>, asterisks such as *laughs*, or a < or parenthesis in the wrong place.'),
         h('ul',
-          h('li', 'Reword it in the box below so the subtitle reads cleanly. Stage directions can go in a trailing (parenthesis): DBVO keeps that out of the voice and the filename. For example "No Serana. *laughs*" can become "No Serana. (laughs)".'),
+          h('li', 'Reword it in the box below so the subtitle reads cleanly. Stage directions can go in a trailing (parenthesis): DBVO keeps that out of the voice and the filename. For example "No, thank you. *laughs*" can become "No, thank you. (laughs)".'),
           l.hasOtherAlias ? h('li', 'For an alias, either reword it so no placeholder remains, or add written-out versions as variants below (one file each).') : null,
           h('li', 'Your text goes into the DBVO Fix plugin and the topic file automatically. No need to copy it anywhere by hand.'),
           h('li', 'Left as is, the plugin keeps its original line and this line stays unvoiced.')));
@@ -797,7 +797,7 @@ export async function modView(id) {
     if (unreviewed.length) {
       const choice = await modal('Flagged lines not reviewed', [
         h('div', `${unreviewed.length} BROKEN LINE / TOO LONG WILL CTD row(s) were never opened. Unresolved rows get no override: the game keeps its original text and the line is not voiced.`),
-        h('div.box', { style: { maxHeight: '200px', overflow: 'auto' } }, unreviewed.slice(0, 40).map(({ p, l }) => h('div.row', kindBadge(l), h('span.mono.faint', p.fileName), h('span.ellipsis', l.original)))),
+        h('div.box', { style: { maxHeight: '200px', overflow: 'auto' } }, unreviewed.slice(0, 40).map(({ p, l }) => h('div.row', { style: { flexWrap: 'nowrap' } }, kindBadge(l), h('span.mono.faint', { style: { whiteSpace: 'nowrap', flexShrink: 0 } }, p.fileName), h('span.ellipsis', { style: { minWidth: 0 } }, l.original)))),
       ], [{ label: 'Continue anyway', value: 'go' }, { label: 'Show them', primary: true, value: 'show' }]);
       if (!choice) return;
       if (choice === 'show') {

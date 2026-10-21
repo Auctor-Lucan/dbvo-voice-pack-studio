@@ -86,7 +86,11 @@ export function h(tag, attrs, ...children) {
 }
 
 export function clear(el) {
-  el.replaceChildren(); // one step: a blur handler that re-renders while children are removed cannot break it
+  // Blur first: a focused input inside would fire change/blur while being removed, and a handler that
+  // re-renders this element then would break the removal.
+  const a = document.activeElement;
+  if (a && a !== document.body && el.contains(a)) a.blur();
+  el.replaceChildren();
   return el;
 }
 

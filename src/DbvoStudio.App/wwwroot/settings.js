@@ -380,9 +380,9 @@ async function voices(selectedId, rerender, onSelect) {
     renderTags();
     const preview = h('div.box.mono', { style: { fontSize: '12px', whiteSpace: 'pre-wrap' } });
     const renderPreview = () => {
-      const ex = (t) => (t || '').replaceAll('{mod}', 'Lucien').replaceAll('{packId}', v.packId || 'packid').replaceAll('{voicePack}', v.name || 'Voice');
+      const ex = (t) => (t || '').replaceAll('{mod}', 'Example Mod').replaceAll('{packId}', v.packId || 'packid').replaceAll('{voicePack}', v.name || 'Voice');
       preview.textContent = [
-        'For a mod called "Lucien", a new DBVO Patch gets:',
+        'For a mod called "Example Mod", a new DBVO Patch gets:',
         `  WAV + LIP folder   ${ex(d.wavLipFolder) || '(not set)'}`,
         `  DBVO Fix folder    ${ex(d.fixFolder) || '(not set)'}`,
         `  Final folder       ${ex(d.finalRoot) || '(not set)'}`,
@@ -402,7 +402,7 @@ async function voices(selectedId, rerender, onSelect) {
 
     clear(editor).append(
       section('Voice pack', h('div.row', h('div.spacer'), savedEl, h('button.btn.primary.sm', { onclick: async () => { if (await persistNow()) toast('Saved.'); } }, 'Save')),
-        srow('Name', null, txt(v, 'name', { placeholder: 'e.g. Vampira' })),
+        srow('Name', null, txt(v, 'name', { placeholder: 'e.g. MyVoice' })),
         srow('Colour', 'The voice pack label takes this colour everywhere, so you always see which voice you are working with.', colorIn),
         srow('DBVO voice pack ID', 'The folder name under Sound\\DBVO\\ and the voice_pack_id in the DBVO JSON.', txt(v, 'packId', { placeholder: 'e.g. vampira', after: renderPreview })),
         srow('Author', null, txt(v, 'author')),
@@ -413,10 +413,10 @@ async function voices(selectedId, rerender, onSelect) {
             h('span.dim', v.engine === 'voxcpm' ? `VoxCPM · ${v.voxCpm.voice || 'no reference voice yet'}` : v.engine === 'omnivoice' ? `OmniVoice · ${v.omniVoice.voice || 'no reference voice yet'}` : `${v.eleven.voiceName || '— no voice picked yet —'} · ${v.eleven.modelId}`)))),
       section('Defaults for new DBVO Patches', null,
         h('div.help', { style: { margin: '10px 0' } }, 'These are only starting points. Each new DBVO Patch copies them, with ', h('b', '{mod}'), ' replaced by the mod name, and from then on the patch\'s own folders count (Phase 2 → Folders & options).'),
-        srow('WAV + LIP folder', 'e.g. C:\\DBVO Dev\\Vampira - {mod}\\RawWav', pathField(d.wavLipFolder, (x) => { d.wavLipFolder = x; persistSoon(); renderPreview(); }, { folder: true, title: 'WAV + LIP folder (then add {mod} where the mod name goes)' })),
-        srow('DBVO Fix folder', 'Working copy of the DBVO Fix plugins and topic files, apart from the audio. e.g. C:\\DBVO Dev\\Vampira - {mod}\\Fix', pathField(d.fixFolder, (x) => { d.fixFolder = x; persistSoon(); renderPreview(); }, { folder: true, title: 'DBVO Fix folder (then add {mod})' })),
-        srow('Final folder', 'Your FOMOD root, e.g. C:\\DBVO Vampira FOMOD. Phase 3 builds the installer from here.', pathField(d.finalRoot, (x) => { d.finalRoot = x; persistSoon(); renderPreview(); }, { folder: true, title: 'Final folder' })),
-        srow('.fuz sub-folder', 'Inside the final folder. e.g. Vamp - {mod}\\Sound\\DBVO\\{packId}; the DBVO Fix plugins go next to that Sound folder.', txt(d, 'fuzTemplate', { placeholder: 'Sound\\DBVO\\{packId}', after: renderPreview })),
+        srow('WAV + LIP folder', 'e.g. C:\\DBVO Dev\\MyVoice - {mod}\\RawWav', pathField(d.wavLipFolder, (x) => { d.wavLipFolder = x; persistSoon(); renderPreview(); }, { folder: true, title: 'WAV + LIP folder (then add {mod} where the mod name goes)' })),
+        srow('DBVO Fix folder', 'Working copy of the DBVO Fix plugins and topic files, apart from the audio. e.g. C:\\DBVO Dev\\MyVoice - {mod}\\Fix', pathField(d.fixFolder, (x) => { d.fixFolder = x; persistSoon(); renderPreview(); }, { folder: true, title: 'DBVO Fix folder (then add {mod})' })),
+        srow('Final folder', 'Your FOMOD root, e.g. C:\\DBVO MyVoice FOMOD. Phase 3 builds the installer from here.', pathField(d.finalRoot, (x) => { d.finalRoot = x; persistSoon(); renderPreview(); }, { folder: true, title: 'Final folder' })),
+        srow('.fuz sub-folder', 'Inside the final folder. e.g. MyVoice - {mod}\\Sound\\DBVO\\{packId}; the DBVO Fix plugins go next to that Sound folder.', txt(d, 'fuzTemplate', { placeholder: 'Sound\\DBVO\\{packId}', after: renderPreview })),
         srow('Release folder', 'Where Phase 3 writes the packed FOMOD archive.', pathField(d.releaseFolder, (x) => { d.releaseFolder = x; persistSoon(); }, { folder: true, title: 'Release folder' })),
         srow('Preview', null, preview)),
       section('Tags toolbar', null, srow('Tags for this voice', 'Shown above the Phase 2 grid (ElevenLabs v3 / v4).', tagsBox)),

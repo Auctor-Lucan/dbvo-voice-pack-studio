@@ -629,7 +629,8 @@ export async function patchView(id) {
   }
 
   // ---- filters
-  const pendingLine = (l) => !l.omitted && !l.excluded && (l.status === 'Pending' || l.status === 'Failed') && canGen(l);
+  // Like the backend's "missing": no take yet, failed, or the spoken text changed since the take.
+  const pendingLine = (l) => !l.omitted && !l.excluded && (l.status === 'Pending' || l.status === 'Failed' || l.status === 'Stale') && canGen(l);
   function counts() {
     const L = patch.lines;
     return {
@@ -675,7 +676,7 @@ export async function patchView(id) {
     if (!had) q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 150));
     // Only filters that match at least one line (the open one always stays).
     const opt = (key, label, title) => (key === 'all' || filter === key || c[key] ? chip(key, label, title) : null);
-    clear(filters).append(opt('all', 'All'), opt('pending', vc ? 'To convert' : 'To generate', 'Lines without a take yet, and failed ones'), opt('generated', vc ? 'Converted' : 'Generated'),
+    clear(filters).append(opt('all', 'All'), opt('pending', vc ? 'To convert' : 'To generate', 'Lines without a take yet, failed ones, and lines whose spoken text changed since their take'), opt('generated', vc ? 'Converted' : 'Generated'),
       opt('failed', 'Failed', 'The last attempt made no usable take (engine error, credits, offline local engine, LIP or WAV step). The error is shown at the top of the line\'s panel; Generate missing retries these.'),
       opt('marked', 'Flagged', 'Flagged to revisit'), opt('excluded', 'Excluded', 'Won\'t generate or export'),
       opt('omitted', 'Omitted', 'Left out because a ticked reference topic file (e.g. the base game pack) already has the line'),
@@ -765,7 +766,7 @@ export async function patchView(id) {
       h('button.btn', { disabled: busy || !c.active, title: 'A new take for every line that is not omitted or excluded (the new take becomes the one used)', onclick: () => generate('all') }, `All lines (${c.active})`),
       h('button.btn', { disabled: busy || !sel.length, title: 'A new take for each ticked line', onclick: () => generate('selected', sel) }, `Ticked lines (${sel.length})`),
       h('button.btn', { disabled: busy || !c.marked, title: 'A new take for each flagged line', onclick: () => generate('marked') }, `Flagged lines (${c.marked})`),
-      h('button.btn.primary', { disabled: busy || !c.pending, title: 'Lines without a take yet, and failed ones', onclick: () => generate('missing') }, `${verb} missing (${c.pending})`));
+      h('button.btn.primary', { disabled: busy || !c.pending, title: 'Lines without a take yet, failed ones, and lines whose spoken text changed since their take', onclick: () => generate('missing') }, `${verb} missing (${c.pending})`));
   }
 
   async function bulkExclude(ids, value) {
@@ -1004,9 +1005,9 @@ export async function patchView(id) {
       i.addEventListener('input', renderPreview);
       return { i, el: h('div.path-input', i, h('button.btn.sm', { onclick: async () => { const f = await rpc('pick.folder', { title }); if (f) { i.value = f; renderPreview(); } } }, 'Browse')) };
     };
-    const wl = folder(patch.wavLipFolder, 'WAV + LIP folder', 'C:\\DBVO Dev\\Vampira - Lucien\\RawWav');
-    const fx = folder(patch.fixFolder, 'DBVO Fix folder', 'C:\\DBVO Dev\\Vampira - Lucien\\Fix');
-    const fr = folder(patch.finalRoot, 'Final folder', 'C:\\DBVO Vampira FOMOD\\04 Followers');
+    const wl = folder(patch.wavLipFolder, 'WAV + LIP folder', 'C:\\DBVO Dev\\MyVoice - Example Mod\\RawWav');
+    const fx = folder(patch.fixFolder, 'DBVO Fix folder', 'C:\\DBVO Dev\\MyVoice - Example Mod\\Fix');
+    const fr = folder(patch.finalRoot, 'Final folder', 'C:\\DBVO MyVoice FOMOD\\04 Followers');
     // Same rules as the app uses when writing: relative to the final folder, ending in Sound\DBVO\<voice pack ID>.
     const normTpl = (t) => {
       let v = (t || '').trim().replace(/\//g, '\\');

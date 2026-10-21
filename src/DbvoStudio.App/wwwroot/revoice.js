@@ -41,7 +41,7 @@ export async function revoiceListView() {
   return view;
 
   async function create() {
-    const r = await prompt('New revoice project', [{ name: 'n', label: 'Name', placeholder: 'e.g. Vigilant revoiced' }]);
+    const r = await prompt('New revoice project', [{ name: 'n', label: 'Name', placeholder: 'e.g. Example Town revoiced' }]);
     if (!r || !r.n.trim()) return;
     try { const c = await rpc('revoice.create', { name: r.n.trim() }); go('revoice', { id: c.id }); } catch (e) { fail(e); }
   }
@@ -192,7 +192,7 @@ export async function revoiceView(id) {
   }
 
   function folderField(value, onPick) {
-    const i = h('input', { type: 'text', value: value || '', placeholder: 'e.g. D:\\MO2\\mods\\Vigilant Revoiced', style: { flex: '1' } });
+    const i = h('input', { type: 'text', value: value || '', placeholder: 'e.g. D:\\MO2\\mods\\Example Town Revoiced', style: { flex: '1' } });
     i.addEventListener('change', () => onPick(i.value.trim()));
     return h('div.path-input', i, h('button.btn.sm', { title: 'Choose the folder', onclick: async () => { const f = await rpc('pick.folder', { title: 'Output folder' }); if (f) onPick(f); } }, 'Browse'));
   }

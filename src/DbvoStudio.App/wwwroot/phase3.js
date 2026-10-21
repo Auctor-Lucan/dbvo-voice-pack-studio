@@ -54,8 +54,8 @@ async function newFomod() {
   const s = app.state;
   if (!s.voicePacks.length) { toast('Create a voice pack first.', true); go('settings', { tab: 'voices', id: 'new' }); return; }
   const voice = h('select', s.voicePacks.map((v) => h('option', { value: v.id, selected: v.id === s.settings.lastVoicePackId }, v.name)));
-  const name = h('input', { type: 'text', placeholder: 'e.g. DBVO Vampira' });
-  const root = h('input', { type: 'text', placeholder: 'the final folder of your patches, e.g. D:\\DBVO Vampira FOMOD' });
+  const name = h('input', { type: 'text', placeholder: 'e.g. DBVO MyVoice' });
+  const root = h('input', { type: 'text', placeholder: 'the final folder of your patches, e.g. D:\\DBVO MyVoice FOMOD' });
   const pickVoice = () => { const v = s.voicePacks.find((x) => x.id === voice.value); if (v && !root.value) root.value = (v.destinations.finalRoot || '').replace(/\\?[^\\]*\{mod\}.*$/, ''); };
   voice.addEventListener('change', pickVoice);
   pickVoice();

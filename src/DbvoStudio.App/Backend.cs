@@ -705,7 +705,8 @@ public sealed partial class Backend
             _ => null,
         };
         var reasons = ScriptRules.Explain(text);
-        if (problem == null && r.Kind == LineKind.Valid) reasons.Clear();
+        // A valid line, and a player-name line with no other alias (voiced in player-name patches), have nothing to fix.
+        if (problem == null && (r.Kind == LineKind.Valid || r.Kind == LineKind.Broken)) reasons.Clear();
         bool stage = ScriptRules.IsStageDirection(text);
         if (stage)
         {

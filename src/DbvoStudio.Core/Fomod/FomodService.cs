@@ -261,6 +261,7 @@ public sealed class FomodService
         catch (Exception ex) { Add("error", "ModuleConfig.xml", "Could not be written: " + ex.Message); }
 
         if (string.IsNullOrWhiteSpace(p.RootFolder) || !Directory.Exists(p.RootFolder)) Add("error", "Project", "Set the FOMOD root folder (the folder that holds the patch folders).");
+        if (!string.IsNullOrWhiteSpace(p.ReleaseFolder) && !Path.IsPathRooted(p.ReleaseFolder)) Add("error", "Project", "The release folder must be a full path, such as D:\\DBVO\\Releases.");
         if (string.IsNullOrWhiteSpace(p.Info.Name)) Add("warning", "info.xml", "No mod name.");
         if (string.IsNullOrWhiteSpace(p.Info.Version)) Add("warning", "info.xml", "No version.");
         if (p.Json.Enabled)
@@ -487,6 +488,7 @@ public sealed class FomodService
     public async Task<BuildResult> BuildAsync(FomodProject p, NamingMode naming, bool package, IProgress<GenerationProgress>? progress = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(p.ReleaseFolder)) throw new InvalidOperationException("Set the release folder first.");
+        if (!Path.IsPathRooted(p.ReleaseFolder)) throw new InvalidOperationException("The release folder must be a full path, such as D:\\DBVO\\Releases.");
         var res = new BuildResult();
         var archiveBase = SafeName($"{(string.IsNullOrWhiteSpace(p.Info.Name) ? p.Name : p.Info.Name)}{(string.IsNullOrWhiteSpace(p.Info.Version) ? "" : " " + p.Info.Version)}");
         var staging = Path.Combine(p.ReleaseFolder, "_staging", archiveBase);
