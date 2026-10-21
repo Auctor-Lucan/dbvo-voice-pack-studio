@@ -37,6 +37,8 @@ public sealed class RevoiceExportReport
     /// <summary>Already in the output folder and kept ("keep files already there").</summary>
     public int Skipped { get; set; }
     public int Failed { get; set; }
+    /// <summary>Files from an earlier export that no longer match a line and were deleted.</summary>
+    public int Removed { get; set; }
     /// <summary>Files written per game folder, e.g. "Sound\Voice\Vigilant.esm\MaleOldGrumpy" → 120.</summary>
     public Dictionary<string, int> Folders { get; } = new();
     public List<string> Errors { get; } = new();
@@ -566,12 +568,41 @@ public sealed class RevoiceService
     // ---------------------------------------------------------------- export
 
     /// <summary>Write the chosen takes as .fuz files at the game's paths under the output folder.</summary>
-    public async Task<RevoiceExportReport> ExportAsync(RevoiceProject p, ExternalTools tools, bool overwrite, IProgress<GenerationProgress>? progress, CancellationToken ct, RevoiceSession? session = null)
+    private static List<RevoiceLine> ExportLines(RevoiceProject p) =>
+        // Lines no longer in the plugins (Gone) are kept for their takes but never exported: the game would not use the file.
+        p.Lines.Where(l => !l.Excluded && !l.Gone && l.SelectedTake != null && !(p.Speakers.TryGetValue(l.SpeakerKey, out var a) && a.Skip)).ToList();
+
+    /// <summary>
+    /// Files an earlier export wrote that no current line uses: the mod or the plugin list changed, or a line now
+    /// belongs to another voice type (a different file, so the old one is never played). Only files that still exist.
+    /// </summary>
+    public static List<string> StaleExports(RevoiceProject p)
+    {
+        if (string.IsNullOrWhiteSpace(p.OutputFolder)) return new();
+        var current = p.Lines.Where(l => !l.Gone).Select(l => l.RelativePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return p.ExportedFiles.Where(f => !current.Contains(f) && File.Exists(Path.Combine(p.OutputFolder, f))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    public async Task<RevoiceExportReport> ExportAsync(RevoiceProject p, ExternalTools tools, bool overwrite, IProgress<GenerationProgress>? progress, CancellationToken ct, RevoiceSession? session = null, bool removeStale = false)
     {
         if (string.IsNullOrWhiteSpace(p.OutputFolder)) throw new InvalidOperationException("Set the output folder first.");
         var rep = new RevoiceExportReport();
-        // Lines no longer in the plugins (Gone) are kept for their takes but never exported: the game would not use the file.
-        var lines = p.Lines.Where(l => !l.Excluded && !l.Gone && l.SelectedTake != null && !(p.Speakers.TryGetValue(l.SpeakerKey, out var a) && a.Skip)).ToList();
+        var lines = ExportLines(p);
+        if (removeStale)
+            foreach (var f in StaleExports(p))
+            {
+                try
+                {
+                    var full = Path.Combine(p.OutputFolder, f);
+                    File.Delete(full);
+                    rep.Removed++;
+                    // tidy empty voice type / plugin folders left behind
+                    for (var dir = Path.GetDirectoryName(full); dir != null && dir.Length > p.OutputFolder.Length && Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any(); dir = Path.GetDirectoryName(dir))
+                        Directory.Delete(dir);
+                    p.ExportedFiles.RemoveAll(x => x.Equals(f, StringComparison.OrdinalIgnoreCase));
+                }
+                catch (Exception ex) { rep.Errors.Add($"{f}: not removed ({ex.Message})"); }
+            }
         var root = _lib.RevoiceFolder(p.Id);
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
         Directory.CreateDirectory(workRoot);
@@ -594,6 +625,7 @@ public sealed class RevoiceService
                 lock (rep)
                 {
                     rep.Written++;
+                    if (!p.ExportedFiles.Contains(line.RelativePath, StringComparer.OrdinalIgnoreCase)) p.ExportedFiles.Add(line.RelativePath);
                     var folder = Path.GetDirectoryName(line.RelativePath)!;
                     rep.Folders[folder] = rep.Folders.TryGetValue(folder, out var n) ? n + 1 : 1;
                 }

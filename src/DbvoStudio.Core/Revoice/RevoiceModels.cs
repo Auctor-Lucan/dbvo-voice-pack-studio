@@ -140,4 +140,6 @@ public sealed class RevoiceProject
     /// <summary>Proposed links for orphaned files, waiting for approval.</summary>
     public List<OrphanMatch> OrphanProposals { get; set; } = new();
     public DateTime? LastExportUtc { get; set; }
+    /// <summary>.fuz files this tool has written to the output folder (relative paths), so files that no longer match a line can be cleaned up.</summary>
+    public List<string> ExportedFiles { get; set; } = new();
 }

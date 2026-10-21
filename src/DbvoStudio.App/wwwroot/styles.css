@@ -409,7 +409,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .legend-note b { color: var(--text); font-weight: 600; }
 .legend-item { display: inline-flex; gap: 6px; align-items: center; }
 .appr.demo { cursor: default; pointer-events: none; }
-.demo-ex { color: var(--bad); font-size: 15px; }
+.demo-ex { color: var(--bad); display: inline-flex; }
 .icon-btn.on-bad { color: var(--bad); }
 .act-btn:hover:not(:disabled) .corner { stroke: var(--warn); }
 .appr .note { font-size: 16px; line-height: 17px; display: inline-block; height: 17px; overflow: visible; }

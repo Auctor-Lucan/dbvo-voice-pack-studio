@@ -113,7 +113,21 @@ export async function revoiceView(id) {
 
   async function doExport(overwrite) {
     if (!proj.outputFolder) { toast('Set the output folder in Setup first.', true); tab = 'setup'; renderAll(); return; }
-    try { await rpc('revoice.export', { id, overwrite }); } catch (e) { fail(e); }
+    try {
+      // Files an earlier export wrote that no line uses any more (the mod changed, or a line now has another voice type).
+      const stale = await rpc('revoice.staleExports', { id }).catch(() => []);
+      let removeStale = false;
+      if (stale.length) {
+        const v = await modal('Files from an earlier export', [
+          h('div', `${stale.length} .fuz file(s) in the output folder were written by an earlier export but no line uses them now. The mod or the plugin list changed since, or these lines now belong to another voice type, so the game looks for them in another folder.`),
+          h('div.box.mono', { style: { maxHeight: '180px', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: '12px' } }, stale.slice(0, 200).join('\n') + (stale.length > 200 ? `\n… ${stale.length - 200} more` : '')),
+          h('div.faint', 'Only files this tool wrote are listed; nothing else in the folder is touched.'),
+        ], [{ label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' }, { label: 'Delete them', primary: true, value: 'delete' }]);
+        if (v == null) return;
+        removeStale = v === 'delete';
+      }
+      await rpc('revoice.export', { id, overwrite, removeStale });
+    } catch (e) { fail(e); }
   }
 
   async function writePack() {
@@ -706,7 +720,7 @@ export async function revoiceView(id) {
       if (d.kind === 'revoice-scan' && d.ok) { if (proj.lines.length && tab === 'setup') tab = 'speakers'; toast(`Scan done: ${d.report.lines.toLocaleString()} voice files to make, ${d.report.withOriginal.toLocaleString()} with a current file.`); }
       if (d.kind === 'revoice-export' && d.ok !== undefined && d.report) {
         const folders = Object.entries(d.report.folders || {}).sort((a, b) => a[0].localeCompare(b[0]));
-        await modal('Exported', [h('div.kv', h('div', 'Written'), h('div', String(d.report.written)), h('div', 'Kept (already there)'), h('div', String(d.report.skipped || 0)), h('div', 'Failed'), h('div', String(d.report.failed)), h('div', 'Folder'), h('div.mono', d.folder)),
+        await modal('Exported', [h('div.kv', h('div', 'Written'), h('div', String(d.report.written)), h('div', 'Kept (already there)'), h('div', String(d.report.skipped || 0)), d.report.removed ? h('div', 'Old files deleted') : null, d.report.removed ? h('div', String(d.report.removed)) : null, h('div', 'Failed'), h('div', String(d.report.failed)), h('div', 'Folder'), h('div.mono', d.folder)),
           folders.length ? h('div', h('div.field-label', 'Written to'), h('div.box.mono', { style: { maxHeight: '180px', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: '12px' } }, folders.map(([f, n]) => `${f}\\  ${n}`).join('\n'))) : null,
           d.report.files.length ? h('div', h('div.field-label', 'New voice type pack'), h('div.box.mono', { style: { whiteSpace: 'pre-wrap' } }, d.report.files.join('\n'))) : null,
           d.report.errors.length ? h('div.box.mono', { style: { maxHeight: '160px', overflow: 'auto' } }, d.report.errors.slice(0, 50).join('\n')) : null],

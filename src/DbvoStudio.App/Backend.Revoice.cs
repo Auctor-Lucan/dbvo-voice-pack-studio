@@ -172,6 +172,7 @@ public sealed partial class Backend
             case "revoice.estimate": return await Locked(() => RvEstimate(p));
             case "revoice.generate": return StartRvGenerate(p);
             case "revoice.export": return StartRvExport(p);
+            case "revoice.staleExports": return await Locked(() => RevoiceService.StaleExports(LoadRv(S(p, "id"))));
             case "revoice.npcs":
             {
                 var proj = LoadRv(S(p, "id"));
@@ -697,6 +698,7 @@ public sealed partial class Backend
         var id = S(p, "id");
         var proj = LoadRv(id);
         bool overwrite = !p.TryGetProperty("overwrite", out var ow) || ow.ValueKind != JsonValueKind.False;
+        bool removeStale = B(p, "removeStale");
         _jobCts = new CancellationTokenSource();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
@@ -705,7 +707,7 @@ public sealed partial class Backend
             {
                 var session = proj.NewVoiceTypes.Count > 0 ? RvSession(proj) : null;
                 var progress = new Progress<Core.Projects.GenerationProgress>(x => Emit("progress", new { kind = "fuz", x.Done, x.Total, x.Failed, x.Current, message = "Writing .fuz files" }));
-                var rep = await RvService().ExportAsync(proj, Tools(), overwrite, progress, ct, session);
+                var rep = await RvService().ExportAsync(proj, Tools(), overwrite, progress, ct, session, removeStale);
                 await _gate.WaitAsync();
                 try { _lib.Save(proj); } finally { _gate.Release(); }
                 Emit("jobDone", new { kind = "revoice-export", id, ok = rep.Failed == 0, report = rep, folder = proj.OutputFolder });

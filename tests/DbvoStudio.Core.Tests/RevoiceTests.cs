@@ -55,3 +55,23 @@ public class RevoiceExportPathTests
         Assert.Equal(Path.Combine("Sound", "Voice", "Skyrim.esm", "_AelaByAuctorVoice", "C00_C00JoinTopic_000E1E9F_1.fuz"), plan.RelativePath);
     }
 }
+
+public class RevoiceStaleExportTests
+{
+    [Fact]
+    public void Files_no_line_uses_any_more_are_found()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "dbvo-stale-" + Guid.NewGuid().ToString("N")[..6]);
+        var p = new RevoiceProject { OutputFolder = root };
+        var now = new RevoiceLine { PluginFolder = "Mod.esp", VoiceType = "MaleNord", FileStem = "a_b_00000800_1" };
+        p.Lines.Add(now);
+        var old = Path.Combine("Sound", "Voice", "Mod.esp", "MaleCommoner", "a_b_00000800_1.fuz");
+        foreach (var f in new[] { now.RelativePath, old })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(root, f))!);
+            File.WriteAllBytes(Path.Combine(root, f), new byte[] { 1 });
+            p.ExportedFiles.Add(f);
+        }
+        Assert.Equal(new[] { old }, RevoiceService.StaleExports(p));
+    }
+}

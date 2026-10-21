@@ -1,5 +1,5 @@
 // Phase 1: Mods list and the per-plugin workspace.
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const KIND_LABEL = {
@@ -315,7 +315,7 @@ export async function modView(id) {
       { id: 'final', title: 'Final in-game line', flex: 1.3, width: 320, render: (l) => finalCell(l) },
       { id: 'fix', title: 'Fix', tip: 'Edit goes into the DBVO Fix plugin', width: 56, resizable: false, align: 'center', render: (l) => approvalChip(l, 'fix') },
       { id: 'voice', title: 'Voice', tip: 'Voiced in Phase 2 (in the topic file)', width: 56, resizable: false, align: 'center', render: (l) => approvalChip(l, 'voice') },
-      { id: 'excl', title: 'Exclude', tip: 'Leave the line out of the topic file', width: 66, resizable: false, align: 'center', render: (l) => h('button.icon-btn' + (l.excluded ? '.on-bad' : ''), { title: l.excluded ? 'Excluded: click to include again' : 'Exclude from the topic file', onclick: () => act(l, 'exclude', !l.excluded) }, l.excluded ? '⊕' : '⊘') },
+      { id: 'excl', title: 'Exclude', tip: 'Leave the line out of the topic file', width: 66, resizable: false, align: 'center', render: (l) => h('button.act-btn.excl-btn' + (l.excluded ? '.on.bad' : ''), { title: l.excluded ? 'Excluded: click to include again' : 'Exclude from the topic file', onclick: () => act(l, 'exclude', !l.excluded) }, icon('ban', { size: 14 })) },
     ],
   });
   grid.el.addEventListener('selection', () => renderActions());
@@ -523,7 +523,7 @@ export async function modView(id) {
           h('span.legend-note', 'Review ', h('b', 'BROKEN'), ' and ', h('b', 'TOO LONG WILL CTD'), ' lines before Phase 2.'),
           h('span.legend-item', h('span.appr.on.demo.fix', 'Fix'), '= Edit made in DBVO Fix plugin'),
           h('span.legend-item', h('span.appr.on.demo', h('span.note', '♪')), '= To be voiced in Phase 2'),
-          h('span.legend-item', h('span.demo-ex', '⊕'), '= Excluded from voicing in Phase 2')),
+          h('span.legend-item', h('span.demo-ex', icon('ban', { size: 14 })), '= Excluded from voicing in Phase 2')),
         h('div.spacer'), q, columnsMenu(grid),
         h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp1', showInsp); split.classList.toggle('no-insp', !showInsp); renderFilters(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel')));
   }
