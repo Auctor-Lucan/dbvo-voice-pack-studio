@@ -531,6 +531,7 @@ const ICON_PATHS = {
   flag: '<path class="corner" d="M3 7V5a2 2 0 0 1 2-2h2"/><path class="corner" d="M17 3h2a2 2 0 0 1 2 2v2"/><path class="corner" d="M21 17v2a2 2 0 0 1-2 2h-2"/><path class="corner" d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="1"/><path d="M18.94 12.33a1 1 0 0 0 0-.66 7.5 7.5 0 0 0-13.88 0 1 1 0 0 0 0 .66 7.5 7.5 0 0 0 13.88 0"/>',
   ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
   undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
   coins: '<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>',
 };
 
@@ -551,4 +552,76 @@ export function icon(name, { size = 16, filled = false } = {}) {
   span.className = 'ico';
   span.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="${filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name] || ''}</svg>`;
   return span;
+}
+
+// ------------------------------------------------------------------ external requirements
+// Things DBVO Studio cannot ship (licences), explained plainly: what it is, where to get it, where to put it.
+const extLink = (url, text) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); rpc('open.url', { url }); } }, text || url);
+const REQUIREMENTS = {
+  facefx: {
+    title: 'FaceFXWrapper.exe: makes the .lip (lip-sync) files',
+    why: 'Not included: it contains Creation Kit code and Bethesda files, so each user downloads it.',
+    steps: () => [
+      ['Download FaceFXWrapper from Nukem\'s page: ', extLink('https://www.nexusmods.com/skyrimspecialedition/mods/20061', 'Nexus Mods'), ' or ', extLink('https://github.com/Nukem9/FaceFXWrapper/releases', 'GitHub releases'), '.'],
+      ['Unzip it into any folder you keep, e.g. C:\\DBVO Tools\\.'],
+      ['Global Settings → Tools → FaceFXWrapper.exe → Browse, and pick FaceFXWrapper.exe.'],
+      ['Already have DBVO Voice Pack Maker installed? Then it is found automatically.'],
+    ],
+  },
+  fonix: {
+    title: 'FonixData.cdf: the speech data FaceFXWrapper needs for .lip files',
+    why: 'Not included: it is Bethesda\'s file from the Creation Kit.',
+    steps: () => [
+      ['Install the free Skyrim Special Edition Creation Kit from Steam: ', extLink('https://store.steampowered.com/app/1946180/', 'Steam store page'), ' (you need to own Skyrim Special Edition).'],
+      ['After installing, the file is here: <Skyrim Special Edition>\\Data\\Sound\\Voice\\Processing\\FonixData.cdf.'],
+      ['Set Global Settings → Plugins → Base game plugins folder to your game\'s Data folder and DBVO Studio finds it by itself. Or use Browse next to FonixData.cdf.'],
+      ['Not there after installing the Creation Kit? Some installs miss it: ', extLink('https://www.nexusmods.com/skyrimspecialedition/mods/40971', 'SSE Creation Kit Fonixdata Lip Sync Fix'), ' on Nexus Mods provides it.'],
+    ],
+  },
+  xwma: {
+    title: 'xWMAEncode.exe: converts the audio for .fuz files',
+    why: 'Not included: it is a Microsoft tool (DirectX SDK) that comes with the Creation Kit.',
+    steps: () => [
+      ['Install the free Skyrim Special Edition Creation Kit from Steam: ', extLink('https://store.steampowered.com/app/1946180/', 'Steam store page'), '.'],
+      ['It is then here: <Skyrim Special Edition>\\Tools\\Audio\\xWMAEncode.exe. DBVO Studio looks there by itself (set the Base game plugins folder if your game is not in the default Steam folder).'],
+      ['Or use Browse next to xWMAEncode.exe. It also comes with Yakitori Audio Converter and the Microsoft DirectX SDK (June 2010).'],
+      ['Only needed for .fuz files. WAV + LIP export works without it.'],
+    ],
+  },
+  elevenlabs: {
+    title: 'ElevenLabs API key: lets DBVO Studio generate voices with your ElevenLabs account',
+    why: 'Each user uses their own account and credits.',
+    steps: () => [
+      ['Sign in at ', extLink('https://elevenlabs.io/app/settings/api-keys', 'elevenlabs.io → API keys'), ' (make an account first if you have none).'],
+      ['Create API key. Give it access to Text to Speech, Speech to Speech, Voices and Models (or full access), then copy it.'],
+      ['Global Settings → ElevenLabs → API key: paste it and Save key. It is stored encrypted for your Windows user.'],
+      ['Characters you generate use your plan\'s credits; the credits button in Phase 2 shows what is left.'],
+    ],
+  },
+  python: {
+    title: 'Python with faster-whisper (optional)',
+    why: 'Only for the "My faster-whisper (Python)" engine. The built-in Whisper engine needs nothing.',
+    steps: () => [
+      ['Install Python 3.10 or newer from ', extLink('https://www.python.org/downloads/windows/', 'python.org'), '.'],
+      ['Open a terminal and run: pip install faster-whisper'],
+      ['Global Settings → WAV to LIP → Python: Browse to python.exe.'],
+    ],
+  },
+};
+
+/** An ⓘ button that explains, with links, how to get an external requirement. */
+export function needInfo(key) {
+  const r = REQUIREMENTS[key];
+  if (!r) return null;
+  const btn = h('button.icon-btn.need-info', { title: 'How to get ' + r.title.split(':')[0], onclick: (e) => { e.preventDefault(); e.stopPropagation(); showNeed(key); } }, icon('info', { size: 15 }));
+  return btn;
+}
+
+export function showNeed(key) {
+  const r = REQUIREMENTS[key];
+  if (!r) return;
+  modal(r.title, [
+    h('div.faint', r.why),
+    h('ol.need-steps', r.steps().map((parts) => h('li', ...parts))),
+  ]);
 }

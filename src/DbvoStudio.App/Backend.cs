@@ -466,6 +466,7 @@ public sealed partial class Backend
         if (s.TryGetProperty("ui", out var ui) && ui.ValueKind == JsonValueKind.Object)
             foreach (var kv in ui.EnumerateObject()) _settings.Ui[kv.Name] = kv.Value.ToString();
         _lib.Save(_settings);
+        AutoDetectTools(); // e.g. a new base game folder finds the Creation Kit's FonixData.cdf / xWMAEncode.exe; a cleared path falls back to the included copy
         return State();
     }
 
@@ -498,24 +499,56 @@ public sealed partial class Backend
         };
     }
 
-    /// <summary>Find ffmpeg / FaceFXWrapper next to the app, or from an installed DBVO Voice Pack Maker.</summary>
+    /// <summary>The copy of a tool that ships with DBVO Studio (Tools\ffmpeg, Tools\7-Zip), if present.</summary>
+    private static string? Bundled(string folder, string exe)
+    {
+        var f = Path.Combine(AppContext.BaseDirectory, "Tools", folder, exe);
+        return File.Exists(f) ? f : null;
+    }
+
+    /// <summary>
+    /// Fill in tool paths that are empty or no longer exist: the copies that ship with the app (ffmpeg, 7-Zip),
+    /// then an installed DBVO Voice Pack Maker, then the Skyrim Special Edition folder (Creation Kit files:
+    /// Tools\Audio\xWMAEncode.exe, Data\Sound\Voice\Processing\FonixData.cdf), then the default Steam folder.
+    /// </summary>
     private void AutoDetectTools()
     {
         string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        string pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
         string la = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var dirs = new[]
+        var skyrimRoots = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_settings.BaseGameFolder))
         {
+            var b = _settings.BaseGameFolder.TrimEnd('\\', '/');
+            skyrimRoots.Add(Path.GetFileName(b).Equals("Data", StringComparison.OrdinalIgnoreCase) ? Path.GetDirectoryName(b) ?? b : b);
+        }
+        skyrimRoots.Add(Path.Combine(pf86, "Steam", "steamapps", "common", "Skyrim Special Edition"));
+        skyrimRoots.Add(Path.Combine(pf, "Steam", "steamapps", "common", "Skyrim Special Edition"));
+        var dirs = new List<string>
+        {
+            Path.Combine(AppContext.BaseDirectory, "Tools", "ffmpeg"),
+            Path.Combine(AppContext.BaseDirectory, "Tools", "7-Zip"),
             Path.Combine(AppContext.BaseDirectory, "bin"),
             AppContext.BaseDirectory,
             Path.Combine(pf, "DBVO Voice Pack Maker"),
             Path.Combine(la, "DBVO Voice Pack Maker"),
             Path.Combine(la, "Programs", "DBVO Voice Pack Maker"),
+            Path.Combine(pf, "7-Zip"),
         };
+        foreach (var r in skyrimRoots) { dirs.Add(Path.Combine(r, "Tools", "Audio")); dirs.Add(Path.Combine(r, "Tools", "LipGen")); dirs.Add(Path.Combine(r, "Data", "Sound", "Voice", "Processing")); }
         bool changed = false;
         string? Find(params string[] names) => dirs.SelectMany(d => names.Select(n => Path.Combine(d, n))).FirstOrDefault(File.Exists);
-        if (!File.Exists(_settings.FfmpegPath)) { var f = Find("ffmpeg.exe", "ffmpeg-x86_64-pc-windows-msvc.exe"); if (f != null) { _settings.FfmpegPath = f; changed = true; } }
-        if (!File.Exists(_settings.FaceFxWrapperPath)) { var f = Find("FaceFXWrapper.exe", "FaceFXWrapper-x86_64-pc-windows-msvc.exe"); if (f != null) { _settings.FaceFxWrapperPath = f; changed = true; } }
-        if (!File.Exists(_settings.XwmaEncodePath)) { var f = Find("xWMAEncode.exe", "xwmaencode.exe", "xwmaencode-x86_64-pc-windows-msvc.exe"); if (f != null) { _settings.XwmaEncodePath = f; changed = true; } }
+        void Fill(Func<string> get, Action<string> set, params string[] names)
+        {
+            if (File.Exists(get())) return;
+            var f = Find(names);
+            if (f != null) { set(f); changed = true; }
+        }
+        Fill(() => _settings.FfmpegPath, v => _settings.FfmpegPath = v, "ffmpeg.exe", "ffmpeg-x86_64-pc-windows-msvc.exe");
+        Fill(() => _settings.SevenZipPath, v => _settings.SevenZipPath = v, "7z.exe");
+        Fill(() => _settings.FaceFxWrapperPath, v => _settings.FaceFxWrapperPath = v, "FaceFXWrapper.exe", "FaceFXWrapper-x86_64-pc-windows-msvc.exe");
+        Fill(() => _settings.XwmaEncodePath, v => _settings.XwmaEncodePath = v, "xWMAEncode.exe", "xwmaencode.exe", "xwmaencode-x86_64-pc-windows-msvc.exe");
+        Fill(() => _settings.FonixDataPath, v => _settings.FonixDataPath = v, "FonixData.cdf");
         if (changed) _lib.Save(_settings);
     }
 

@@ -33,6 +33,26 @@ jobs:
           dotnet-version: 10.0.x
       - name: Publish
         run: dotnet publish src/DbvoStudio.App/DbvoStudio.App.csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=false -o publish/DBVO-Voice-Pack-Studio
+      - name: Bundle ffmpeg (LGPL build)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # FFmpeg's LGPL Windows build from BtbN/FFmpeg-Builds (redistributable with its license text).
+          $rel = gh api repos/BtbN/FFmpeg-Builds/releases/tags/latest | ConvertFrom-Json
+          $asset = $rel.assets | Where-Object { $_.name -match '^ffmpeg-n[0-9.]+-latest-win64-lgpl-[0-9.]+\.zip$' } | Sort-Object name -Descending | Select-Object -First 1
+          if (-not $asset) { $asset = $rel.assets | Where-Object { $_.name -eq 'ffmpeg-master-latest-win64-lgpl.zip' } | Select-Object -First 1 }
+          if (-not $asset) { throw "No LGPL win64 ffmpeg build found" }
+          Write-Host "Using $($asset.name)"
+          Invoke-WebRequest $asset.browser_download_url -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffx
+          $dir = Get-ChildItem ffx -Directory | Select-Object -First 1
+          $dest = "publish/DBVO-Voice-Pack-Studio/Tools/ffmpeg"
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          Copy-Item (Join-Path $dir.FullName "bin/ffmpeg.exe") $dest
+          Copy-Item (Join-Path $dir.FullName "LICENSE.txt") $dest
+          "FFmpeg $($asset.name), unmodified, from $($asset.browser_download_url)`r`nBuilt by https://github.com/BtbN/FFmpeg-Builds (LGPL configuration). Source code: https://ffmpeg.org/download.html and https://github.com/FFmpeg/FFmpeg" | Out-File -Encoding utf8 (Join-Path $dest "SOURCE.txt")
+          & (Join-Path $dest "ffmpeg.exe") -hide_banner -version | Select-Object -First 3
       - name: Upload
         uses: actions/upload-artifact@v4
         with:

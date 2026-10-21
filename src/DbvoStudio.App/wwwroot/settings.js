@@ -1,7 +1,7 @@
 // Global Settings: tools, voice packs, pronunciation, omit references, categories, library. Saved as you change them.
 import { VOICE_COLORS, voiceChip } from './phase2.js';
 import { THEMES, applyTheme } from './themes.js';
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, switchEl, segmented, popupMenu } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, switchEl, segmented, popupMenu, needInfo } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const TABS = [
@@ -175,7 +175,7 @@ async function general(_, rerender) {
 
   return h('div',
     section('ElevenLabs', null,
-      srow('API key', 'Stored encrypted for your Windows user.', h('div.col',
+      srow(h('span.row', { style: { gap: '4px' } }, 'API key', needInfo('elevenlabs')), 'Stored encrypted for your Windows user. Click ⓘ for where to get one.', h('div.col',
         h('div.row', apiKey,
           h('button.btn.sm.primary', { title: 'Save the key encrypted for your Windows user', onclick: async () => { try { await rpc('settings.setApiKey', { key: apiKey.value.trim() }); apiKey.value = ''; await refreshState(); rerender(); } catch (e) { fail(e); } } }, 'Save key'),
           h('button.btn.sm', { title: 'Check the key and show your remaining credits', onclick: test }, 'Test')),
@@ -197,11 +197,11 @@ async function general(_, rerender) {
       srow('Confirm batch generation', 'Shows the count, characters and engine before generating or converting several lines. Single lines never ask.',
         switchEl((st.ui || {}).confirmBatch !== 'false', (x) => save({ ui: { confirmBatch: x ? 'true' : 'false' } }), null, { title: 'Ask before generating more than one line' }))),
     section('Tools', h('div.row', status(t.fonix, 'FonixData'), status(t.xwma, 'xWMAEncode'), status(t.ffmpeg, 'ffmpeg'), status(t.faceFx, 'FaceFXWrapper'), status(t.sevenZip, '7-Zip')),
-      srow('FonixData.cdf', 'Needed for LIP files.', pathField(st.fonixDataPath, (x) => save({ fonixDataPath: x }), { filter: 'FonixData|*.cdf', title: 'FonixData.cdf' })),
-      srow('xWMAEncode.exe', 'Comes with Yakitori Audio Converter. Needed for .fuz files.', pathField(st.xwmaEncodePath, (x) => save({ xwmaEncodePath: x }), { filter: 'xWMAEncode|*.exe', title: 'xWMAEncode.exe' })),
-      srow('ffmpeg.exe', 'Found automatically if DBVO Voice Pack Maker is installed.', pathField(st.ffmpegPath, (x) => save({ ffmpegPath: x }), { filter: 'ffmpeg|*.exe', title: 'ffmpeg.exe' })),
-      srow('FaceFXWrapper.exe', 'Found automatically if DBVO Voice Pack Maker is installed.', pathField(st.faceFxWrapperPath, (x) => save({ faceFxWrapperPath: x }), { filter: 'FaceFXWrapper|*.exe', title: 'FaceFXWrapper.exe' })),
-      srow('7z.exe', h('span', 'Optional: only for .7z FOMOD archives (.zip needs nothing). From ', link('https://www.7-zip.org', '7-zip.org'), ', usually C:\\Program Files\\7-Zip\\7z.exe.'), pathField(st.sevenZipPath, (x) => save({ sevenZipPath: x }), { filter: '7z.exe|7z.exe;7za.exe', title: '7z.exe' }))),
+      srow(h('span.row', { style: { gap: '4px' } }, 'FonixData.cdf', needInfo('fonix')), 'Needed for LIP files. From the Creation Kit: click ⓘ for how to get it.', pathField(st.fonixDataPath, (x) => save({ fonixDataPath: x }), { filter: 'FonixData|*.cdf', title: 'FonixData.cdf' })),
+      srow(h('span.row', { style: { gap: '4px' } }, 'xWMAEncode.exe', needInfo('xwma')), 'Needed for .fuz files. From the Creation Kit: click ⓘ for how to get it.', pathField(st.xwmaEncodePath, (x) => save({ xwmaEncodePath: x }), { filter: 'xWMAEncode|*.exe', title: 'xWMAEncode.exe' })),
+      srow('ffmpeg.exe', 'Included with DBVO Studio (Tools\\ffmpeg). Change it only to use another copy.', pathField(st.ffmpegPath, (x) => save({ ffmpegPath: x }), { filter: 'ffmpeg|*.exe', title: 'ffmpeg.exe' })),
+      srow(h('span.row', { style: { gap: '4px' } }, 'FaceFXWrapper.exe', needInfo('facefx')), 'Needed for LIP files. A free download: click ⓘ for how to get it. Found automatically if DBVO Voice Pack Maker is installed.', pathField(st.faceFxWrapperPath, (x) => save({ faceFxWrapperPath: x }), { filter: 'FaceFXWrapper|*.exe', title: 'FaceFXWrapper.exe' })),
+      srow('7z.exe', 'Included with DBVO Studio (Tools\\7-Zip), for .7z archives. Change it only to use another copy.', pathField(st.sevenZipPath, (x) => save({ sevenZipPath: x }), { filter: '7z.exe|7z.exe;7za.exe', title: '7z.exe' }))),
     section('Plugins', null,
       srow('Base game plugins folder', 'A folder with Skyrim.esm, Update.esm and the DLC masters (your game\'s Data folder works). Used as masters when reading plugins.',
         h('div.col', pathField(st.baseGameFolder, (x) => save({ baseGameFolder: x }), { folder: true, title: 'Base game plugins' }), status(t.baseGame, 'found'))),

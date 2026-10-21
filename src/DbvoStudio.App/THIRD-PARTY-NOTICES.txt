@@ -1,0 +1,53 @@
+DBVO Voice Pack Studio - third-party components
+================================================
+
+The following components are included with DBVO Voice Pack Studio. Each keeps its own license.
+
+ffmpeg (Tools\ffmpeg\ffmpeg.exe)
+  FFmpeg, LGPL build from https://github.com/BtbN/FFmpeg-Builds (unmodified).
+  License: GNU Lesser General Public License v2.1 or later - see Tools\ffmpeg\LICENSE.txt.
+  Source code: https://ffmpeg.org/download.html (exact build: see Tools\ffmpeg\SOURCE.txt).
+  Used to convert audio (sample rate, format, loudness) and to decode .fuz / .xwm audio for playback.
+
+7-Zip (Tools\7-Zip\7z.exe, 7z.dll)
+  7-Zip 24.07, Copyright (C) 1999-2024 Igor Pavlov. https://www.7-zip.org/ (unmodified).
+  License: GNU LGPL, with BSD 3-clause and unRAR license restrictions - see Tools\7-Zip\License.txt.
+  Source code: https://www.7-zip.org/download.html
+  Used to read .7z mod archives and to pack .7z FOMOD archives.
+
+Whisper.net and whisper.cpp
+  Whisper.net (https://github.com/sandrohanea/whisper.net), MIT License.
+  whisper.cpp / ggml (https://github.com/ggml-org/whisper.cpp), MIT License.
+  Whisper models are not included: they are downloaded on first use from Hugging Face (Whisper.net ggml models; OpenAI Whisper weights, MIT License).
+
+K4os.Compression.LZ4 (https://github.com/MiloszKrajewski/K4os.Compression.LZ4), MIT License.
+  Used to read Skyrim Special Edition BSA archives.
+
+Microsoft .NET runtime (https://github.com/dotnet/runtime), MIT License.
+Microsoft Edge WebView2 SDK (https://www.nuget.org/packages/Microsoft.Web.WebView2), Microsoft license (redistributable).
+System.Security.Cryptography.ProtectedData (https://github.com/dotnet/runtime), MIT License.
+
+FOMOD ModuleConfig.xsd, Copyright (c) 2017 Daniel Nunes, MIT License.
+
+UESP reference data (NPC voice types, quoted dialogue, book authors)
+  From UESP - The Unofficial Elder Scrolls Pages (https://en.uesp.net/), collected by Auctor Lucan.
+  Licensed under Creative Commons Attribution-ShareAlike 2.5 (https://creativecommons.org/licenses/by-sa/2.5/).
+
+MIT License text (applies to the MIT-licensed components above, with each project's own copyright line):
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+  documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+  the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+  WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+  COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+  OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+NOT included (each user gets these themselves; Global Settings > Tools explains how):
+  FaceFXWrapper.exe (Nukem9; contains Creation Kit code and Bethesda resources), FonixData.cdf (Bethesda, Creation Kit),
+  xWMAEncode.exe (Microsoft, DirectX SDK / Creation Kit).

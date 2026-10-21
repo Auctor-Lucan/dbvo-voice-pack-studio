@@ -1,5 +1,5 @@
 // Other Tools → WAV to LIP: a port of the WAV_to_LIP app (Whisper transcription + FaceFXWrapper).
-import { rpc, on, h, clear, toast, fail, confirmBox, droppedPaths, switchEl, icon } from './lib.js';
+import { rpc, on, h, clear, toast, fail, confirmBox, droppedPaths, switchEl, icon, needInfo } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 let files = []; // kept while the app runs, like the Python app's queue
@@ -25,9 +25,9 @@ export async function wavLipView() {
   };
   const tools = h('div.section', h('div.section-head', h('h2', 'Lip-generation tools'), h('div.spacer'), h('button.btn.sm', { onclick: () => go('settings', { tab: 'general' }) }, 'Change in Global Settings')),
     h('div.section-body',
-      h('div.srow', h('div.lbl', 'FaceFXWrapper.exe'), h('div.row', h('span.mono.grow.ellipsis', st.faceFxWrapperPath || '— not set —'), h('span.badge.' + (st.tools.faceFx ? 'b-valid' : 'b-broken'), st.tools.faceFx ? '✓' : '✕'))),
-      h('div.srow', h('div.lbl', 'FonixData.cdf'), h('div.row', h('span.mono.grow.ellipsis', st.fonixDataPath || '— not set —'), h('span.badge.' + (st.tools.fonix ? 'b-valid' : 'b-broken'), st.tools.fonix ? '✓' : '✕'))),
-      h('div.srow', { title: 'Built-in Whisper only: converts to 16 kHz for transcription.' }, h('div.lbl', 'ffmpeg.exe'), h('div.row', h('span.mono.grow.ellipsis', st.ffmpegPath || '— not set —'), h('span.badge.' + (st.tools.ffmpeg ? 'b-valid' : 'b-broken'), st.tools.ffmpeg ? '✓' : '✕')))));
+      h('div.srow', h('div.lbl', h('span.row', { style: { gap: '4px' } }, 'FaceFXWrapper.exe', needInfo('facefx'))), h('div.row', h('span.mono.grow.ellipsis', st.faceFxWrapperPath || '— not set —'), h('span.badge.' + (st.tools.faceFx ? 'b-valid' : 'b-broken'), st.tools.faceFx ? '✓' : '✕'))),
+      h('div.srow', h('div.lbl', h('span.row', { style: { gap: '4px' } }, 'FonixData.cdf', needInfo('fonix'))), h('div.row', h('span.mono.grow.ellipsis', st.fonixDataPath || '— not set —'), h('span.badge.' + (st.tools.fonix ? 'b-valid' : 'b-broken'), st.tools.fonix ? '✓' : '✕'))),
+      h('div.srow', { title: 'Built-in Whisper only: converts to 16 kHz for transcription.' }, h('div.lbl', 'ffmpeg.exe'), h('div.row', h('span.mono.grow.ellipsis', st.ffmpegPath || 'included with DBVO Studio'), h('span.badge.' + (st.tools.ffmpeg ? 'b-valid' : 'b-broken'), st.tools.ffmpeg ? '✓' : '✕')))));
 
   const whisperBody = h('div.section-body');
   const renderWhisper = () => clear(whisperBody).append(
