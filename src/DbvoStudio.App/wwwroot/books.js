@@ -496,7 +496,7 @@ export async function bookProjectView(id) {
       h('div.spacer'),
       h('span.faint', { title: 'The longest part this model accepts' }, `Parts ≈ ${proj.partTarget.toLocaleString()} chars (max ${Math.min(proj.partMax, proj.ceiling).toLocaleString()})`));
   }
-  function glow() { setTimeout(() => { const t = body.querySelector('.voices-tbl'); if (t) { t.classList.add('flash-hl'); setTimeout(() => t.classList.remove('flash-hl'), 1600); } }, 60); }
+  function glow() { setTimeout(() => { const t = body.querySelector('.voices-tbl'); if (t) { t.classList.add('flash-hl'); setTimeout(() => t.classList.remove('flash-hl'), 2600); } }, 60); }
 
   function renderInspector() {
     clear(insp);

@@ -58,6 +58,20 @@ public sealed class SimulationResult
     public List<string> Flags { get; set; } = new();
 }
 
+public sealed class FomodSummary
+{
+    public int Pages { get; set; }
+    public int Groups { get; set; }
+    public int Options { get; set; }
+    public int Linked { get; set; }
+    public int Patches { get; set; }
+    public int Files { get; set; }
+    public int VoiceFiles { get; set; }
+    public int Archives { get; set; }
+    public int Missing { get; set; }
+    public long Bytes { get; set; }
+}
+
 public sealed class BuildResult
 {
     public string Staging { get; set; } = "";
@@ -88,6 +102,42 @@ public sealed class FomodService
 
     public string Resolve(FomodProject p, string source) =>
         Path.IsPathRooted(Os(source)) ? Os(source) : Path.Combine(Os(p.RootFolder), Os(source));
+
+    /// <summary>Counts for the build summary: pages, groups, options, linked options, and the files the options install (each file once).</summary>
+    public FomodSummary Summarize(FomodProject p)
+    {
+        var opts = p.AllOptions().ToList();
+        var s = new FomodSummary
+        {
+            Pages = p.Steps.Count, Groups = p.Steps.Sum(x => x.Groups.Count), Options = opts.Count,
+            Linked = opts.Count(o => o.PatchId != null),
+            Patches = opts.Where(o => o.PatchId != null).Select(o => o.PatchId).Distinct().Count(),
+        };
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Count(string file)
+        {
+            if (!seen.Add(file)) return;
+            s.Files++;
+            try { s.Bytes += new FileInfo(file).Length; } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            var ext = Path.GetExtension(file);
+            if (ext.Equals(".fuz", StringComparison.OrdinalIgnoreCase)) s.VoiceFiles++;
+            else if (ext.Equals(".bsa", StringComparison.OrdinalIgnoreCase)) s.Archives++;
+        }
+        foreach (var f in opts.SelectMany(o => o.Files).Concat(p.RequiredInstallFiles))
+        {
+            if (string.IsNullOrWhiteSpace(f.Source)) continue;
+            var path = Resolve(p, f.Source);
+            if (f.Kind == "folder")
+            {
+                if (!Directory.Exists(path)) { s.Missing++; continue; }
+                try { foreach (var x in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)) Count(x); }
+                catch (IOException) { s.Missing++; } catch (UnauthorizedAccessException) { s.Missing++; }
+            }
+            else if (File.Exists(path)) Count(path);
+            else s.Missing++;
+        }
+        return s;
+    }
 
     /// <summary>Relative to the FOMOD root when the path is inside it; otherwise absolute (copied in when packaging).</summary>
     public static string MakeRelative(FomodProject p, string absolute)

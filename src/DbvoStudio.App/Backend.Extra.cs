@@ -297,6 +297,8 @@ public sealed partial class Backend
                     var carrier = proj.AllOptions().FirstOrDefault(o => o.Files.Any(f => f.Destination.Equals("DragonbornVoiceOver", StringComparison.OrdinalIgnoreCase)
                                                                                     || f.Destination.StartsWith(@"SKSE\Plugins\DBVO2", StringComparison.OrdinalIgnoreCase)));
                     if (carrier != null) { proj.Json.Enabled = false; }
+                    // A Voiced Books installer has no DBVO voice pack file to install.
+                    if (B(p, "books")) proj.Json.Enabled = false;
                     _lib.Save(proj);
                     return new { project = FomodDto(proj), jsonFrom = carrier?.Name };
                 });
@@ -352,6 +354,11 @@ public sealed partial class Backend
                 if (p.TryGetProperty("choices", out var ch) && ch.ValueKind == JsonValueKind.Object)
                     choices = ch.EnumerateObject().ToDictionary(x => x.Name, x => x.Value.ValueKind == JsonValueKind.True);
                 return new FomodService(_lib, Runtime()).Simulate(proj, plugins, choices);
+            }
+            case "fomod.summary":
+            {
+                var proj = p.GetProperty("project").Deserialize<FomodProject>(JsonOptions)!;
+                return await Task.Run(() => new FomodService(_lib, Runtime()).Summarize(proj));
             }
             case "fomod.loadOrder": return ReadLoadOrder(S(p, "path"));
             case "fomod.preview":

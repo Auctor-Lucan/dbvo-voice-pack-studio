@@ -473,6 +473,7 @@ public sealed partial class Backend
             sources = proj.Sources.OrderByDescending(x => x.Priority).Select(x => new { x.Id, x.Kind, x.Path, x.Priority, x.BaseGame, exists = x.Kind == "folder" ? Directory.Exists(x.Path) : File.Exists(x.Path) }),
             baseGameFolder = RevoiceService.DataFolder(_settings.BaseGameFolder),
             proj.LastScan, proj.LastExportUtc, sessionOpen = s != null,
+            exportedTakes = proj.ExportedTakes,
             plans = proj.NewVoiceTypes,
             speakers = RvSpeakers(proj),
             mediaBase = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, _lib.RevoiceFolder(proj.Id)).Replace('\\', '/') + "/",

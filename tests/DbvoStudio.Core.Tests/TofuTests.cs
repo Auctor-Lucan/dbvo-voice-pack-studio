@@ -15,4 +15,14 @@ public class TofuTests
         Assert.Equal(LineKind.Fixed, r.Kind);
         Assert.Equal(expected, r.Final);
     }
+
+    [Fact]
+    public void Edits_reverts_and_imported_fix_lines_get_plain_punctuation()
+    {
+        var line = new DbvoStudio.Core.Projects.Phase1Line { Original = "It’s fine…", Suggested = "It's fine..." };
+        DbvoStudio.Core.Projects.Phase1Service.SetFinal(line, "“Wait”—now");
+        Assert.Equal("\"Wait\"--now", line.Final);
+        DbvoStudio.Core.Projects.Phase1Service.RevertToOriginal(line);
+        Assert.Equal("It's fine...", line.Final);
+    }
 }

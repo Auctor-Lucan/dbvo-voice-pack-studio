@@ -337,13 +337,28 @@ export async function modView(id) {
     return f;
   }
 
+  // Curly quotes, long dashes and the … character show as squares ("tofu") in Skyrim's subtitles: replace them as you type.
+  function detofu(el) {
+    el.addEventListener('input', () => {
+      const v = el.value;
+      if (!/[‘’“”—–…]/.test(v)) return;
+      const pos = el.selectionStart;
+      const fix = (t) => t.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/—/g, '--').replace(/–/g, '-').replace(/…/g, '...');
+      const before = fix(v.slice(0, pos));
+      el.value = before + fix(v.slice(pos));
+      el.setSelectionRange(before.length, before.length);
+      if (!store.get('tofuNoticed', false)) { store.set('tofuNoticed', true); toast('Changed to plain punctuation so Skyrim\'s font can show it.'); }
+    });
+    return el;
+  }
+
   function finalInput(l) {
     if (l.status === 'Removed') return h('span.faint', l.final || '');
     const inp = h('input', { type: 'text', value: l.final ?? '', placeholder: l.flagged ? 'Fix this line, or leave empty' : '' });
     if (l.needsOverride) inp.style.color = 'var(--link)';
     inp.addEventListener('change', () => act(l, 'setFinal', inp.value));
     inp.addEventListener('focus', () => { if (focusedKey !== l.key) { focusedKey = l.key; renderInspector(); } });
-    return inp;
+    return detofu(inp);
   }
 
   // The final line, with the script's suggestion (✓) and undo (↶) next to it.
@@ -633,6 +648,7 @@ export async function modView(id) {
         else if (text !== l.original) checkEl.append(h('div.check.ok', r.isPlayerName ? '✓ Valid player-name line' : '✓ The script accepts this line'));
       } catch { /* advisory */ }
     }, 250);
+    detofu(finalBox);
     finalBox.addEventListener('input', check);
     finalBox.addEventListener('change', () => act(l, 'setFinal', finalBox.value));
     check();

@@ -764,5 +764,5 @@ export function flashRow(grid, key, bad = false) {
   const el = grid.rowEl(key);
   if (!el) return;
   el.classList.add(bad ? 'flash-bad' : 'flash-done');
-  setTimeout(() => el.classList.remove('flash-done', 'flash-bad'), 1600);
+  setTimeout(() => el.classList.remove('flash-done', 'flash-bad'), 2600);
 }

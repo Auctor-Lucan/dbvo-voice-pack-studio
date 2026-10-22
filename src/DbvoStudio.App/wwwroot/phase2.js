@@ -1,5 +1,5 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret } from './tagtools.js';
 import { recordTake } from './recorder.js';
@@ -459,7 +459,7 @@ export async function patchView(id) {
   const grp = (label, ...kids) => h('div.tgroup', { title: TOOL_TIPS[label] || '' }, h('label', label), h('div.row', ...kids));
   const slider = (obj, key, min, max, step, label, locked) => {
     const val = h('span.mono.dim', { style: { width: '34px' } }, Number(obj[key]).toFixed(2));
-    const r = h('input', { type: 'range', min, max, step, value: obj[key], disabled: locked, style: { width: '96px' } });
+    const r = h('input', { type: 'range', min, max, step, value: obj[key], disabled: locked, style: { width: '80px' } });
     r.addEventListener('input', () => { val.textContent = Number(r.value).toFixed(2); });
     r.addEventListener('change', () => setIn(obj, key, Number(r.value)));
     return grp(label, r, val);
@@ -470,7 +470,7 @@ export async function patchView(id) {
     return grp(label, i);
   };
   const voicePicker = (obj, idKey, nameKey, list, label = 'Voice') => {
-    const sel = h('select', { disabled: voice.settingsLocked, style: { maxWidth: '200px' }, onchange: (ev) => { const v = list.find((x) => x.voiceId === ev.target.value); if (nameKey) obj[nameKey] = v ? v.name : ''; setIn(obj, idKey, ev.target.value); } },
+    const sel = h('select', { disabled: voice.settingsLocked, style: { maxWidth: '170px' }, onchange: (ev) => { const v = list.find((x) => x.voiceId === ev.target.value); if (nameKey) obj[nameKey] = v ? v.name : ''; setIn(obj, idKey, ev.target.value); } },
       h('option', { value: '' }, list.length ? '— pick a voice —' : ((nameKey && obj[nameKey]) || 'Loading voices…')),
       list.map((v) => h('option', { value: v.voiceId, selected: v.voiceId === obj[idKey] }, v.name)));
     if (obj[idKey] && !list.some((v) => v.voiceId === obj[idKey])) sel.append(h('option', { value: obj[idKey], selected: true }, (nameKey && obj[nameKey]) || obj[idKey]));
@@ -495,7 +495,7 @@ export async function patchView(id) {
     if (eng === 'sts') {
       const st = voice.sts;
       const fmt = h('select', { disabled: locked, onchange: (ev) => setIn(st, 'outputFormat', ev.target.value) },
-        [['mp3_44100_128', 'MP3 44.1k 128'], ['mp3_44100_192', 'MP3 44.1k 192'], ['pcm_44100', 'PCM 44.1k (Pro plan)'], ['pcm_24000', 'PCM 24k'], ['pcm_22050', 'PCM 22k'], ['pcm_16000', 'PCM 16k']].map(([v, t]) => h('option', { value: v, selected: v === st.outputFormat }, t)));
+        [['mp3_44100_128', 'MP3 44.1k 128'], ['mp3_44100_192', 'MP3 44.1k 192'], ['pcm_44100', 'PCM 44.1k (lossless)']].map(([v, t]) => h('option', { value: v, selected: v === st.outputFormat }, t)));
       const modelSel = h('select', { disabled: locked, onchange: (ev) => setIn(st, 'modelId', ev.target.value) },
         (models.length ? models : [{ modelId: st.modelId }]).map((m) => h('option', { value: m.modelId, selected: m.modelId === st.modelId }, m.modelId)));
       tb.append(voicePicker(st, 'voiceId', 'voiceName', voices, 'Target voice'), grp('Model', modelSel),
@@ -560,17 +560,15 @@ export async function patchView(id) {
     if (eng === 'elevenlabs' || eng === 'sts') creditsSlot.append(creditsEl || (creditsEl = creditsButton(() => patch.lines.filter(pendingLine).reduce((a, l) => a + l.spoken.length, 0))));
   }
 
-  function folderButton() {
-    const btn = h('button.btn.sm.ghost', { title: 'Open this patch\'s folders in Explorer' }, icon('folder', { size: 14 }), ' Open folder ▾');
-    btn.addEventListener('click', () => {
-      const items = [
-        patch.wavLipFolder ? { label: 'WAV + LIP folder', sub: patch.wavLipFolder, onclick: () => rpc('open.path', { path: patch.wavLipFolder }).catch(fail) } : null,
-        patch.finalRoot ? { label: 'Final folder (.fuz)', sub: patch.finalRoot, onclick: () => rpc('open.path', { path: patch.finalRoot }).catch(fail) } : null,
-        patch.fixFolder ? { label: 'DBVO Fix folder', sub: patch.fixFolder, onclick: () => rpc('open.path', { path: patch.fixFolder }).catch(fail) } : null,
-      ].filter(Boolean);
-      if (!items.length) { toast('This patch has no export folders yet. Set them in Folders & options (top right).', true); return; }
-      popupMenu(btn, items);
-    });
+  // Folders ▾ in the page head: the settings dialog and every folder of this patch, with its path.
+  function foldersMenu() {
+    const btn = h('button.btn.sm', { title: 'Folders & options, and opening this patch\'s folders in Explorer' }, icon('folder', { size: 14 }), ' Folders ▾');
+    btn.addEventListener('click', () => popupMenu(btn, [
+      { label: 'Folders & options…', sub: 'Output folders, DBVO Fix folder, reference topic files and overwrite options', onclick: openOptions },
+      patch.wavLipFolder ? { label: 'Open the WAV + LIP folder', sub: patch.wavLipFolder, onclick: () => rpc('open.path', { path: patch.wavLipFolder }).catch(fail) } : { label: 'Open the WAV + LIP folder', sub: 'Not set yet: Folders & options…', onclick: openOptions },
+      patch.finalRoot ? { label: 'Open the final folder (.fuz)', sub: patch.finalRoot, onclick: () => rpc('open.path', { path: patch.finalRoot }).catch(fail) } : { label: 'Open the final folder (.fuz)', sub: 'Not set yet: Folders & options…', onclick: openOptions },
+      patch.fixFolder ? { label: 'Open the DBVO Fix folder', sub: patch.fixFolder, onclick: () => rpc('open.path', { path: patch.fixFolder }).catch(fail) } : null,
+    ].filter(Boolean)));
     return btn;
   }
 
@@ -617,11 +615,11 @@ export async function patchView(id) {
     if (vc) {
       tagbar.append(h('span.lbl', 'Voice Changer'),
         h('span.dim', 'The source recording decides the delivery. For converted lines the text column is only used for the .lip, so edit it if the source says something different. Lines without a source use it as text-to-speech when that is turned on.'),
-        h('div.spacer'), folderButton());
+        null);
       return;
     }
     if (engine() !== 'elevenlabs') {
-      tagbar.append(h('span.lbl', 'Tags'), h('span.dim', 'Audio tags are an ElevenLabs v3/v4 feature; local engines ignore them (they are removed before sending).'), h('div.spacer'), folderButton());
+      tagbar.append(h('span.lbl', 'Tags'), h('span.dim', 'Audio tags are an ElevenLabs v3/v4 feature; local engines ignore them (they are removed before sending).'), null);
       return;
     }
     const chip = (t) => {
@@ -647,7 +645,7 @@ export async function patchView(id) {
       h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick the box of one or more rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
       h('button.btn.sm.ghost', { title: 'Add a [tag] to every line in the current filter…', onclick: () => bulkTagDialog() }, 'Add a [tag] to all shown…'),
       h('div.spacer'),
-      folderButton());
+      null);
   }
 
   async function autotag(ids) {
@@ -674,7 +672,7 @@ export async function patchView(id) {
       pending: L.filter(pendingLine).length,
       generated: L.filter((l) => l.status === 'Generated' && !l.stale && !l.omitted && !l.excluded).length,
       failed: L.filter((l) => l.status === 'Failed' && !l.omitted && !l.excluded).length,
-      stale: L.filter((l) => l.stale || l.status === 'Stale').length,
+      stale: L.filter((l) => (l.stale || l.status === 'Stale') && l.takes.length).length,
       omitted: L.filter((l) => l.omitted).length,
       marked: L.filter((l) => l.marked).length,
       excluded: L.filter((l) => l.excluded).length,
@@ -744,7 +742,10 @@ export async function patchView(id) {
           h('p', 'Keys: ↑/↓ move, Space ticks, Ctrl+A ticks all shown.')));
       return;
     }
-    const spoken = h('textarea', { rows: 3, disabled: l.omitted, title: 'What the voice says. Edit freely and put [tags] anywhere; the file name doesn\'t change' }, l.spoken);
+    const spoken = h('textarea.autogrow', { rows: 2, disabled: l.omitted, title: 'What the voice says. Edit freely and put [tags] anywhere; the file name doesn\'t change' }, l.spoken);
+    const grow = () => { spoken.style.height = 'auto'; spoken.style.height = Math.min(220, spoken.scrollHeight + 2) + 'px'; };
+    spoken.addEventListener('input', grow);
+    requestAnimationFrame(grow);
     spoken.addEventListener('change', () => { if (spoken.value !== l.spoken) upd(l, 'spoken', spoken.value); });
     trackCaret(spoken, l);
     insp.append(
@@ -753,14 +754,16 @@ export async function patchView(id) {
         h('button.act-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit', onclick: () => upd(l, 'mark', !l.marked) }, icon('flag')),
         h('button.act-btn' + (l.approved ? '.on' : ''), { title: !l.takes.length ? 'No take to approve yet' : l.approved ? 'Approved - click to clear' : 'Approve: heard and accepted (A in Review)', disabled: !l.takes.length, onclick: () => upd(l, 'approve', !l.approved) }, icon('check'))),
       l.lastError ? h('div.banner.bad', { style: { margin: 0 } }, l.lastError) : null,
-      h('div', h('div.field-label', 'Original line (from the mod)'), h('div.box', l.originalLine)),
-      h('div', h('div.field-label', 'In-game line'), h('div.box', l.finalLine)),
-      h('div', h('div.field-label', 'File'), h('div.box.mono', { style: { wordBreak: 'break-all' } }, l.stem + '.wav / .lip / .fuz')),
+      l.originalLine === l.finalLine
+        ? h('div', h('div.field-label', 'Line (same in game)'), h('div.box', l.finalLine))
+        : [h('div', h('div.field-label', 'Original line (from the mod)'), h('div.box', l.originalLine)), h('div', h('div.field-label', 'In-game line (edited in Phase 1)'), h('div.box', l.finalLine))],
+      h('div', h('div.field-label', 'File'), h('div.file-row', h('span.mono.ellipsis', { title: `${l.stem}.wav / .lip / .fuz` }, l.stem), h('span.ext-tags', h('span.badge.b-skip', '.wav'), h('span.badge.b-skip', '.lip'), h('span.badge.b-skip', '.fuz')),
+        h('button.icon-btn', { title: 'Copy the file name', onclick: () => navigator.clipboard.writeText(l.stem).then(() => toast('Copied.')) }, '⧉'))),
       vc ? h('div', h('div.field-label', 'Source WAV'), l.hasSource ? h('div.row', h('button.btn.sm', { title: 'Play the original recording this line is converted from', onclick: () => playSource(l) }, '▶ Play source'), h('span.mono.faint.ellipsis', { title: l.sourceWav }, l.sourceWav)) : h('div.banner.bad', { style: { margin: 0 } }, 'No source WAV found with this name.')) : null,
       h('div', h('div.field-label', vc ? 'Text for the LIP' : 'Spoken text (tags allowed)'), spoken,
-        h('div.row', { style: { marginTop: '6px', flexWrap: 'wrap', rowGap: '6px' } },
-          vc || engine() !== 'elevenlabs' ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.omitted, onclick: () => autotag([l.lineId]) }, 'AI Auto Tag'),
-          l.spokenEdited ? h('button.btn.sm.ghost', { title: 'Put the in-game line back as the spoken text', onclick: () => upd(l, 'resetSpoken') }, '↺ Restore in-game line') : null,
+        h('div.row', { style: { marginTop: '6px', gap: '6px' } },
+          vc || engine() !== 'elevenlabs' ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.omitted, onclick: () => autotag([l.lineId]) }, 'AI tag'),
+          l.spokenEdited ? h('button.btn.sm.ghost', { title: 'Put the in-game line back as the spoken text', onclick: () => upd(l, 'resetSpoken') }, '↺ Restore') : null,
           h('div.spacer'),
           h('button.btn.sm', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running' : 'Record this line with your microphone, then keep it as it is or convert it into the voice pack voice', disabled: l.omitted || !!app.job, onclick: () => record(l) }, '🎙 Record'),
           h('button.btn.sm.primary', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running' : !canGen(l) ? 'No source file for this line (text-to-speech for such lines is off)' : 'Make a new take of this line', disabled: l.omitted || !!app.job || !canGen(l), onclick: () => generate('selected', [l.lineId], { autoplay: true }) }, l.takes.length ? 'New take' : vc ? 'Convert' : 'Generate'))),
@@ -768,14 +771,13 @@ export async function patchView(id) {
         h('div.row', { style: { marginTop: '6px' } }, h('button.btn.sm.primary', { title: 'Keep the suggested tags', onclick: () => upd(l, 'acceptTags') }, 'Accept'), h('button.btn.sm', { title: 'Go back to the text before tagging', onclick: () => upd(l, 'rejectTags') }, 'Undo'))) : null,
       l.omittedBy ? switchEl(l.overrideOmit, (v) => upd(l, 'overrideOmit', v), `Generate anyway (it is in "${l.omittedBy}")`) : null,
       h('h3', `Takes (${l.takes.length})`),
-      l.takes.length ? h('div.col', l.takes.slice().reverse().map((t) => h('div.take' + (t.id === l.selectedTakeId ? '.sel' : ''),
-        h('button.icon-btn.big', { title: 'Play', onclick: () => play(l, t) }, '▶'),
-        h('div.grow', { style: { minWidth: 0 } }, h('div', '#' + t.slot + (t.id === l.selectedTakeId ? ' · used' : '')),
-          h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.settings.engine} · ${t.settings.modelId}${t.settings.engine && t.settings.engine.startsWith('elevenlabs') ? ` · stab ${t.settings.stability} · sim ${t.settings.similarity}${t.settings.speakerBoost ? ' · boost' : ''}` : ''}${t.settings.seed != null ? ' · seed ' + t.settings.seed : ''}`),
-          t.spokenText !== l.spoken ? h('div.meta.ellipsis', { title: t.spokenText }, 'Text then: ' + t.spokenText) : null,
-          t.original ? h('div.meta', { title: 'Building .fuz files uses the imported .fuz as it is: no second encode' }, 'Imported .fuz, kept as it is') : null,
-          t.qa ? h('div.meta.qa', { title: qaText(t.qa) }, t.qa.flags.length ? h('span', { style: { color: 'var(--warn)' } }, '⚠ QA: ' + t.qa.flags.map((f) => QA_WHY[f] || f).join(', ')) : h('span', { style: { color: 'var(--ok)' } }, 'QA passed'),
-            t.qa.heard ? ` · heard "${t.qa.heard}"` : '') : null),
+      l.takes.length ? h('div.col', { style: { gap: '4px' } }, l.takes.slice().reverse().map((t) => h('div.take.compact' + (t.id === l.selectedTakeId ? '.sel' : ''),
+        h('button.icon-btn', { title: 'Play', onclick: () => play(l, t) }, '▶'),
+        h('div.grow', { style: { minWidth: 0 } },
+          h('div.row', { style: { gap: '6px' } }, h('b', '#' + t.slot), t.id === l.selectedTakeId ? h('span.faint', 'used') : null,
+            t.qa ? h('span', { title: qaText(t.qa) + (t.qa.heard ? `\nHeard: "${t.qa.heard}"` : ''), style: { color: t.qa.flags.length ? 'var(--warn)' : 'var(--ok)' } }, t.qa.flags.length ? '⚠ ' + t.qa.flags.map((f) => QA_WHY[f] || f).join(', ') : '✓') : null,
+            h('span.meta.ellipsis', { title: `${t.settings.engine} · ${t.settings.modelId}${t.settings.engine && t.settings.engine.startsWith('elevenlabs') ? ` · stability ${t.settings.stability} · similarity ${t.settings.similarity}${t.settings.speakerBoost ? ' · boost' : ''}` : ''}${t.settings.seed != null ? ' · seed ' + t.settings.seed : ''}${t.original ? '\nImported .fuz, kept as it is' : ''}` }, `${t.durationSeconds.toFixed(1)} s · ${t.settings.modelId || t.settings.engine}${t.original ? ' · imported' : ''}`)),
+          t.spokenText !== l.spoken ? h('div.meta.ellipsis', { title: t.spokenText }, 'Text then: ' + t.spokenText) : null),
         t.id !== l.selectedTakeId ? h('button.btn.sm', { title: 'Use this take for export and .fuz', onclick: () => upd(l, 'selectTake', t.id) }, 'Use') : null,
         h('button.icon-btn', { title: 'Discard take', onclick: async () => { if (await confirmBox('Discard take?', `Delete take #${t.slot} and its files?`, 'Discard', true)) upd(l, 'deleteTake', t.id); } }, '🗑'))))
         : h('div.faint', 'No takes yet.'),
@@ -797,37 +799,52 @@ export async function patchView(id) {
       { label: 'Build .fuz into the final folder', sub: 'Also writes the DBVO Fix plugins and topic file', onclick: () => buildFuz(false) },
       { label: 'Build .fuz to another folder…', sub: 'Only the .fuz files', onclick: () => buildFuz(true) },
       { label: 'Only DBVO Fix plugins + topic file', sub: 'No audio: just the plugin with the edited lines and the topic file', onclick: writeFix },
+      { label: 'Spoken text to a spreadsheet (CSV)…', sub: 'Edit it in Excel or any editor, then Import ▾ it back', onclick: exportCsv },
     ].filter(Boolean)));
     const takesBtn = h('button.btn', { disabled: busy, title: 'Clean up takes you no longer need' }, 'Takes ▾');
     takesBtn.addEventListener('click', () => popupMenu(takesBtn, [
       { label: `Keep only the used take · ticked lines (${sel.length})`, sub: 'Deletes the other takes and their files (kept ★ takes stay)', onclick: () => sel.length ? purge(sel) : toast('Tick the box of one or more rows first.', true) },
       { label: 'Keep only the used take · all lines', sub: 'Deletes every take that is not in use or kept ★', onclick: () => purge(null) },
     ]));
-    const more = h('button.btn', { disabled: busy, title: 'Import an earlier pack, check takes, edit text in a spreadsheet, merge takes' }, 'More ▾');
-    more.addEventListener('click', () => popupMenu(more, [
-      { label: 'Import an earlier voice pack…', sub: 'DBVO 1 (Legacy names) or DBVO 2.0 folder: fills lines without takes, .fuz kept as it is', onclick: legacyImport },
-      { label: 'Merge takes from another patch…', sub: 'Its takes for the same lines are added; yours are never replaced', onclick: mergeTakes },
-      { label: `Check takes · ${sel.length ? `ticked lines (${sel.length})` : 'all lines'}`, sub: 'Whisper compares what is said with the line; loudness and clipping too. Flags only, deletes nothing', onclick: () => qaRun(sel.length ? sel : null) },
-      c.qa || patch.lines.some((l) => l.takes.some((t) => t.qa)) ? { label: 'Clear check results', sub: 'Remove every ⚠ / ✓ from Check takes (the takes stay)', onclick: clearQa } : null,
-      { label: 'Spoken text to a spreadsheet (CSV)…', sub: 'Edit it in Excel or any editor, then import it back', onclick: exportCsv },
+    const imp = h('button.btn', { disabled: busy, title: 'Bring in takes or text from elsewhere' }, 'Import ▾');
+    imp.addEventListener('click', () => popupMenu(imp, [
+      { label: 'An earlier voice pack…', sub: 'DBVO 1 (Legacy names) or DBVO 2.0 folder: fills lines without takes, .fuz kept as it is', onclick: legacyImport },
+      { label: 'Takes from another patch…', sub: 'Its takes for the same lines are added; yours are never replaced', onclick: mergeTakes },
       { label: 'Spoken text from a spreadsheet (CSV)…', sub: 'Shows every change first; you pick which to apply', onclick: importCsv },
-    ].filter(Boolean)));
+    ]));
+    const checkBtn = h('button.btn', { disabled: busy, title: `Check takes${sel.length ? ` of the ${sel.length} ticked line(s)` : ' of every line'}: Whisper compares what is said with the line, plus loudness and clipping. Flags only, deletes nothing.`, onclick: () => qaRun(sel.length ? sel : null) }, 'Check takes');
     const reviewBtn = h('button.btn' + (review ? '.review-on' : ''), { title: review ? 'End Review (Esc)' : 'Listen through the lines with the keyboard: Space plays, A approves and moves on, R makes a new take, F flags', onclick: () => setReview(!review) }, review ? '■ End review' : '▶ Review');
+    const chars = (ls) => ls.reduce((a, l) => a + (l.spoken || '').length, 0);
+    const pend = patch.lines.filter(pendingLine);
+    const tickedL = sel.map((x) => index.get(x)).filter((l) => l && !l.omitted && canGen(l));
+    const flagged = patch.lines.filter((l) => l.marked && !l.omitted && !l.excluded && canGen(l));
+    const qaL = patch.lines.filter((l) => qaFlagged(l) && !l.omitted && !l.excluded && canGen(l));
+    const unapp = patch.lines.filter((l) => l.takes.length && !l.approved && !l.omitted && !l.excluded && canGen(l));
+    const all = patch.lines.filter((l) => !l.omitted && !l.excluded && canGen(l));
+    const genBtn = generateButton({
+      running: app.job && app.job.kind === 'generate', label: vc ? 'Convert options' : 'Generate options',
+      items: () => [
+        { key: 'missing', label: 'Missing', count: pend.length, chars: chars(pend), desc: `Lines without a take yet, failed ones, and lines whose spoken text changed since their take.` },
+        { key: 'ticked', label: 'Ticked', count: tickedL.length, chars: chars(tickedL), desc: 'A new take for each ticked line.' },
+        { key: 'flagged', label: 'Flagged', count: flagged.length, chars: chars(flagged), desc: 'A new take for each line you flagged to revisit.' },
+        { key: 'qa', label: 'Check found problems', count: qaL.length, chars: chars(qaL), desc: 'A new take for each line Check takes flagged (the words differ, too quiet, or clipping).' },
+        { key: 'unapproved', label: 'Not approved yet', count: unapp.length, chars: chars(unapp), desc: 'A new take for each line that has a take you haven\'t approved in Review.' },
+        { key: 'all', label: 'All lines', count: all.length, chars: chars(all), warn: true, desc: 'A new take for every line that is not omitted or excluded. Uses the most credits; earlier takes stay.' },
+      ],
+      onPick: (k) => k === 'missing' ? generate('missing') : k === 'all' ? generate('all') : k === 'flagged' ? generate('marked')
+        : generate('selected', (k === 'ticked' ? tickedL : k === 'qa' ? qaL : unapp).map((l) => l.lineId)),
+    });
     clear(actions).append(
       helpButton('generating'),
       h('span.stat', h('b', c.generated), ` / ${c.active} ${vc ? 'converted' : 'generated'}`, c.approved ? ` · ${c.approved} approved` : '', patch.exportApprovedOnly ? h('span', { title: 'Folders & options → Export: only approved lines are exported' }, ' · exporting approved only') : '', c.omitted ? ` · ${c.omitted} omitted` : '', c.excluded ? ` · ${c.excluded} excluded` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} changed since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
       h('div.spacer'),
       sel.length || c.marked ? tickedMenu(sel, c) : null,
       reviewBtn,
-      more,
+      checkBtn,
+      imp,
       takesBtn,
       exp,
-      h('button.btn', { disabled: busy || !c.active, title: 'A new take for every line that is not omitted or excluded (the new take becomes the one used)', onclick: () => generate('all') }, `All lines (${c.active})`),
-      h('button.btn', { disabled: busy || !sel.length, title: 'A new take for each ticked line', onclick: () => generate('selected', sel) }, `Ticked lines (${sel.length})`),
-      h('button.btn', { disabled: busy || !c.marked, title: 'A new take for each flagged line', onclick: () => generate('marked') }, `Flagged lines (${c.marked})`),
-      app.job && app.job.kind === 'generate'
-        ? h('button.btn.primary.stop-btn', { title: 'Stop now: lines already made keep their takes; nothing more is sent to the engine', onclick: (e) => { e.currentTarget.disabled = true; e.currentTarget.textContent = 'Stopping…'; rpc('job.cancel').catch(fail); } }, `■ Stop ${vc ? 'converting' : 'generating'}`)
-        : h('button.btn.primary', { disabled: busy || !c.pending, title: 'Lines without a take yet, failed ones, and lines whose spoken text changed since their take', onclick: () => generate('missing') }, `${verb} missing (${c.pending})`));
+      genBtn);
   }
 
   // One menu for what to do with the ticked rows (and flags), so the status bar stays on one line.
@@ -1178,7 +1195,7 @@ export async function patchView(id) {
       voiceSel,
       h('button.icon-btn', { title: 'Edit this voice pack (Global Settings)', onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, '✎'),
       h('span.badge.b-skip', { title: voice.naming === 'Legacy' ? 'File names: Legacy (DBVO 1.0), from the line text. Set per voice pack.' : 'File names: DBVO 2.0 hashes. Set per voice pack.' }, voice.naming === 'Legacy' ? 'Legacy names' : 'DBVO 2.0 names'),
-      h('button.btn.sm', { title: 'Output folders, DBVO Fix folder, reference topic files and overwrite options', onclick: openOptions }, 'Folders & options…'),
+      foldersMenu(),
       h('button.btn.sm.ghost', { title: 'Re-read Phase 1 now (also happens every time you open this patch)', onclick: sync }, '⟳ Refresh'),
       h('button.btn.sm.ghost.danger', { title: 'Delete this patch and its takes', onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes its takes too. Files already exported stay where they are. A backup of the project is made first.', 'Delete', true)) { await rpc('patch.delete', { id }); go('patches'); } } }, 'Delete'));
   }

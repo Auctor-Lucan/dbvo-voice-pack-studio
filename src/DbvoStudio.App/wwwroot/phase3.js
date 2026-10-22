@@ -207,6 +207,15 @@ export async function fomodView(id) {
   // ---- editor panels
   const sec = (title, extra, ...rows) => h('div.section', h('div.section-head', h('h2', title), extra), h('div.section-body', rows));
   const srow = (label, help, control) => h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', { title: typeof help === 'string' ? help : label }, control));
+  const card = (label, help, control, o = {}) => {
+    const c = h('div.scard' + (o.wide ? '.wide' : ''));
+    const more = help && help.length > 70;
+    c.append(h('div.scard-lbl', h('span', label),
+      more ? h('button.qmark', { type: 'button', title: help, onclick: () => c.classList.toggle('open') }, '?') : null),
+    control,
+    help ? h('small.scard-help', { title: help }, help) : null);
+    return c;
+  };
   const txt = (obj, key, opts = {}) => {
     const i = opts.area ? h('textarea', { rows: opts.rows || 6, placeholder: opts.placeholder || '' }, obj[key] ?? '') : h('input', { type: 'text', value: obj[key] ?? '', placeholder: opts.placeholder || '', style: { width: '100%' } });
     i.addEventListener('input', () => { obj[key] = i.value; changed(opts.tree); if (opts.after) opts.after(); });
@@ -234,14 +243,14 @@ export async function fomodView(id) {
     if (root && abs.toLowerCase().startsWith(root.toLowerCase() + '\\')) return abs.slice(root.length + 1);
     return abs;
   };
-  const imagePicker = (obj, key) => {
+  const imagePicker = (obj, key, cls = '') => {
     const prev = h('div');
     const load = async () => {
       clear(prev);
       if (!obj[key]) return;
       try {
         const url = await rpc('file.dataUrl', { path: obj[key], root: proj.rootFolder });
-        prev.append(url ? h('img.img-preview', { src: url }) : h('div.faint', 'Image not found (relative to the FOMOD root).'));
+        prev.append(url ? h('img.img-preview' + cls, { src: url }) : h('div.faint', 'Image not found (relative to the FOMOD root).'));
       } catch (e) { prev.append(h('div.faint', e.message)); }
     };
     const i = h('input', { type: 'text', value: obj[key] || '', placeholder: 'Images\\Header.png' });
@@ -266,30 +275,31 @@ export async function fomodView(id) {
   function projectPanel() {
     const i = proj.info;
     const groups = h('input', { type: 'text', value: (i.groups || []).join(', '), style: { width: '100%' } });
-    groups.addEventListener('input', () => { i.groups = groups.value.split(',').map((x) => x.trim()).filter(Boolean); changed(); });
+    groups.addEventListener('input', () => { i.groups = groups.value.split(',').map((x) => x.trim()).filter(Boolean); changed(); refreshSummary(); });
     const pathIn = (key, title) => {
       const el = h('input', { type: 'text', value: proj[key] || '' });
-      el.addEventListener('change', () => { proj[key] = el.value.trim(); changed(); });
-      return h('div.path-input', el, h('button.btn.sm', { onclick: async () => { const f = await rpc('pick.folder', { title }); if (f) { el.value = f; proj[key] = f; changed(); } } }, 'Browse'));
+      el.addEventListener('change', () => { proj[key] = el.value.trim(); changed(); refreshSummary(); });
+      return h('div.path-input', el, h('button.btn.sm', { onclick: async () => { const f = await rpc('pick.folder', { title }); if (f) { el.value = f; proj[key] = f; changed(); refreshSummary(); } } }, 'Browse'));
     };
-    return h('div',
-      sec('Installer', null,
-        srow('Project name', 'Only shown in this app.', txt(proj, 'name', { after: renderHead })),
-        srow('FOMOD root folder', 'The folder that holds your patch folders and images. Relative file sources start here.', pathIn('rootFolder', 'FOMOD root folder')),
-        srow('Release folder', 'The packed archive is written here, named from the mod name and version.', pathIn('releaseFolder', 'Release folder')),
-        srow('Archive', '.zip needs nothing; .7z uses 7-Zip (Global Settings).', segmented([['zip', '.zip'], ['7z', '.7z']], proj.archiveFormat, (x) => { proj.archiveFormat = x; changed(); renderEditor(); renderHead(); })),
-        srow('Voice files', 'Loose files: thousands of .fuz files, as before. BSA: each option installs one archive plus the plugin that loads it (its DBVO Fix plugin, or a small empty light plugin), which installs faster and keeps the Data folder tidy. The option must be active in the load order for the game to read the BSA.',
-          h('div.row', segmented([['loose', 'Loose files'], ['bsa', 'Pack as BSA']], proj.packBsa ? 'bsa' : 'loose', (x) => { proj.packBsa = x === 'bsa'; changed(); renderEditor(); }), helpButton('pack-as-bsa'))),
-        srow('XML encoding', 'UTF-16 is what FOMOD Creation Tool writes; both work in MO2 and Vortex.', segmented([['utf-16', 'UTF-16'], ['utf-8', 'UTF-8']], proj.encoding, (x) => { proj.encoding = x; changed(); renderEditor(); })),
-        srow('Title in the installer', 'moduleName in ModuleConfig.xml.', txt(proj, 'moduleName')),
-        srow('Header image', 'moduleImage: shown at the top of every page.', imagePicker(proj, 'moduleImage'))),
-      sec('info.xml', null,
-        srow('Mod name', null, txt(i, 'name')),
-        srow('Author', null, txt(i, 'author')),
-        srow('Version', 'Also used in the archive name.', txt(i, 'version')),
-        srow('Website', 'e.g. your Nexus page.', txt(i, 'website')),
-        srow('Description', null, descArea(i, 'description', 8)),
-        srow('Groups', 'Comma separated, e.g. Audio - Voice.', groups)),
+    const main = h('div.fomod-main',
+      sec('Installer', null, h('div.scards',
+        card('Project name', 'Only shown in this app.', txt(proj, 'name', { after: renderHead })),
+        card('Title in the installer', 'moduleName in ModuleConfig.xml: the big title MO2 and Vortex show above every page.', txt(proj, 'moduleName')),
+        card('FOMOD root folder', 'The folder that holds your patch folders and images. Relative file sources start here.', pathIn('rootFolder', 'FOMOD root folder')),
+        card('Release folder', 'The packed archive is written here, named from the mod name and version.', pathIn('releaseFolder', 'Release folder')),
+        h('div.scards3.wide',
+          card('Archive', '.zip needs nothing; .7z uses 7-Zip (Global Settings) and is usually smaller.', segmented([['zip', '.zip'], ['7z', '.7z']], proj.archiveFormat, (x) => { proj.archiveFormat = x; changed(); renderEditor(); renderHead(); })),
+          card('Voice files', 'Loose files: thousands of .fuz files, as before. BSA: each option installs one archive plus the plugin that loads it (its DBVO Fix plugin, or a small empty light plugin), which installs faster and keeps the Data folder tidy. The option must be active in the load order for the game to read the BSA.',
+            h('div.row', { style: { flexWrap: 'nowrap' } }, segmented([['loose', 'Loose'], ['bsa', 'BSA']], proj.packBsa ? 'bsa' : 'loose', (x) => { proj.packBsa = x === 'bsa'; changed(); renderEditor(); }), helpButton('pack-as-bsa'))),
+          card('XML encoding', 'UTF-16 is what FOMOD Creation Tool writes; both work in MO2 and Vortex.', segmented([['utf-16', 'UTF-16'], ['utf-8', 'UTF-8']], proj.encoding, (x) => { proj.encoding = x; changed(); renderEditor(); }))),
+        card('Header image', 'moduleImage: shown at the top of every installer page. Relative to the FOMOD root; about 600 × 120 px or wider looks best.', imagePicker(proj, 'moduleImage', '.hdr'), { wide: true }))),
+      sec('info.xml', null, h('div.scards',
+        card('Mod name', 'The name MO2 and Vortex show for the mod.', txt(i, 'name')),
+        card('Author', 'You, or your team.', txt(i, 'author')),
+        card('Version', 'Also used in the archive name.', txt(i, 'version')),
+        card('Website', 'e.g. your Nexus page.', txt(i, 'website')),
+        card('Groups', 'Categories, comma separated, e.g. Audio - Voice.', groups, { wide: true }),
+        card('Description', 'Shown by the mod manager in the mod\'s info. The icon buttons insert at the cursor.', descArea(i, 'description', 8), { wide: true }))),
       proj.moduleDependenciesXml || proj.conditionalFileInstallsXml || (proj.requiredInstallFiles || []).length
         ? sec('Kept from the imported FOMOD', null,
           h('div.help', { style: { margin: '10px 0' } }, 'These parts have no simple editor. They are written back exactly as they are; edit the XML here if you know the format.'),
@@ -297,6 +307,45 @@ export async function fomodView(id) {
           proj.conditionalFileInstallsXml != null ? srow('Conditional file installs', null, txt(proj, 'conditionalFileInstallsXml', { area: true, rows: 8 })) : null,
           (proj.requiredInstallFiles || []).length ? srow('Required install files', null, filesTable(proj.requiredInstallFiles)) : null)
         : null);
+    summaryEl = h('div.fomod-summary');
+    paintSummary();
+    refreshSummary();
+    return h('div.fomod-proj', main, summaryEl);
+  }
+
+  // ---- build summary (right of the Installer settings)
+  let summaryEl = null, summary = null;
+  const refreshSummary = debounce(async () => {
+    try { summary = await rpc('fomod.summary', { project: proj }); } catch { summary = null; }
+    paintSummary();
+  }, 400);
+  const fmtBytes = (b) => b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : b >= 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' KB';
+  function paintSummary() {
+    if (!summaryEl) return;
+    const sm = summary;
+    const val = store.get('fomodVal:' + id, null);
+    const row = (k, v, tip) => [h('div', { title: tip || '' }, k), h('div.mono', { title: tip || '' }, v)];
+    clear(summaryEl).append(
+      h('h3', 'Build summary'),
+      sm ? h('div.kv.sum-kv',
+        row('Pages', String(sm.pages)), row('Groups', String(sm.groups)), row('Options', String(sm.options)),
+        row('DBVO Patches', sm.patches ? `${sm.patches} (${sm.linked} options)` : '0', 'Options linked to a DBVO Patch; ⟳ Refresh linked updates their files'),
+        row('Voice files', sm.voiceFiles.toLocaleString(), '.fuz files the options install (each counted once)'),
+        sm.archives ? row('BSA archives', String(sm.archives)) : null,
+        row('Files in all', sm.files.toLocaleString()),
+        row('Estimated size', sm.bytes ? '≈ ' + fmtBytes(sm.bytes) : '—', 'The files before packing. Voice files are already compressed, so the archive is about the same size.'),
+        sm.missing ? [h('div', { style: { color: 'var(--bad)' } }, 'Missing sources'), h('div.mono', { style: { color: 'var(--bad)' }, title: 'File or folder sources that are not on disk. Validate lists them.' }, String(sm.missing))] : null)
+        : h('div.faint', 'Counting…'),
+      h('div.sum-sep'),
+      h('div.row', { style: { gap: '8px' } }, h('b', 'Last check'), h('div.spacer'), h('button.btn.sm', { title: 'Check against the ModuleConfig 5.0 schema and for missing files', onclick: validate }, 'Validate')),
+      val ? h('div', { style: { color: val.errors ? 'var(--bad)' : val.warnings ? 'var(--warn)' : 'var(--ok)', marginTop: '4px' }, title: 'Run Validate again after changes' },
+        val.errors || val.warnings ? `${val.errors} error(s), ${val.warnings} warning(s)` : '✓ No problems found', h('div.faint', { style: { fontSize: '12px' } }, new Date(val.at).toLocaleString()))
+        : h('div.faint', { style: { marginTop: '4px' } }, 'Not checked yet.'),
+      h('div.sum-sep'),
+      h('div', h('b', 'Last build')),
+      proj.lastBuildUtc ? h('div', { style: { marginTop: '4px' } }, new Date(proj.lastBuildUtc).toLocaleString(), proj.lastArchive ? h('div.mono.faint.ellipsis', { title: proj.lastArchive, style: { fontSize: '12px' } }, proj.lastArchive.split(/[\\/]/).pop()) : null,
+        proj.lastArchive ? h('button.btn.sm.ghost', { style: { marginTop: '4px' }, title: 'Show the archive in Explorer', onclick: () => rpc('open.path', { path: proj.lastArchive.replace(/[\\/][^\\/]*$/, '') }).catch(fail) }, 'Open folder') : null)
+        : h('div.faint', { style: { marginTop: '4px' } }, 'Not built yet.'));
   }
 
   function jsonPanel() {
@@ -455,6 +504,8 @@ export async function fomodView(id) {
     try {
       const issues = await rpc('fomod.validate', { project: proj });
       const errors = issues.filter((i) => i.level === 'error');
+      store.set('fomodVal:' + id, { errors: errors.length, warnings: issues.length - errors.length, at: Date.now() });
+      paintSummary();
       await modal(issues.length ? `${errors.length} error(s), ${issues.length - errors.length} warning(s)` : 'No problems found', [
         issues.length ? h('div.box', { style: { maxHeight: '60vh', overflow: 'auto', padding: 0 } }, issues.map((i) => h('div.issue', { onclick: () => { if (i.optionId) { document.getElementById('modal').classList.add('hidden'); select(i.optionId); } } },
           h('span.badge.' + (i.level === 'error' ? 'b-broken' : 'b-toolong'), i.level), h('span.faint', i.where), h('span', i.message))))
@@ -539,6 +590,7 @@ export async function fomodView(id) {
       renderTree(); renderEditor();
     }
     renderHead();
+    paintSummary();
   };
   document.addEventListener('job-done', onJobDone);
 

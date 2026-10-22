@@ -327,7 +327,7 @@ public sealed class Phase1Service
     /// <summary>Apply a user edit: the final in-game text for a row.</summary>
     public static void SetFinal(Phase1Line line, string? text)
     {
-        line.Final = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        line.Final = string.IsNullOrWhiteSpace(text) ? null : Rules.ScriptRules.Detofu(text.Trim());
         line.UserEdited = line.Final != line.Suggested;
         line.Reviewed = true;
         if (line.Status == Phase1Status.ChangedInMod) line.Status = Phase1Status.Active;
@@ -336,7 +336,7 @@ public sealed class Phase1Service
     /// <summary>Undo back to the original text from the plugin.</summary>
     public static void RevertToOriginal(Phase1Line line)
     {
-        line.Final = line.Original;
+        line.Final = line.Original == null ? null : Rules.ScriptRules.Detofu(line.Original);
         line.UserEdited = line.Final != line.Suggested;
         line.Reviewed = true;
     }

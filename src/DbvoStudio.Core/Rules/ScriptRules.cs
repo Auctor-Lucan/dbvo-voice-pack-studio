@@ -80,6 +80,13 @@ public static class ScriptRules
     }
 
     /// <summary>The script's FixPlayerDialogueString.</summary>
+    /// <summary>
+    /// The script's tofu fix only: curly quotes, em/en dashes and the ellipsis character become plain punctuation
+    /// that Skyrim's subtitle font can show (otherwise they show as squares).
+    /// </summary>
+    public static string Detofu(string val) => val.Replace(LSingle, '\'').Replace(RSingle, '\'')
+        .Replace(LDouble, '"').Replace(RDouble, '"').Replace(EmDash.ToString(), "--").Replace(EnDash, '-').Replace(Ellipsis.ToString(), "...");
+
     public static string Fix(string val)
     {
         string t = val.Replace(';', ',').Replace('[', '(').Replace(']', ')')
