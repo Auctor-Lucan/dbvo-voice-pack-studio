@@ -150,6 +150,6 @@ export async function helpView(anchor) {
 /** Where F1 opens the guide on each page. */
 export const PAGE_HELP = {
   home: 'introduction', mods: 'add-mods', mod: 'review-the-lines', patches: 'the-patch-list', patch: 'the-patch-page', vc: 'voice-changer',
-  fomods: '1-start-a-project', fomod: '3-edit-pages-groups-and-options', revoices: 'npc-revoice-tool', revoice: 'setup', wavlip: 'wav-to-lip-tool',
+  fomods: '1-start-a-project', fomod: '3-edit-pages-groups-and-options', revoices: 'npc-revoice-tool', revoice: 'setup', wavlip: 'wav-to-lip-tool', books: 'voiced-books-tool', book: 'voiced-books-tool',
   settings: 'getting-started', voices: '5-create-a-voice-pack', help: 'introduction',
 };

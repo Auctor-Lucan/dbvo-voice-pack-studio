@@ -60,6 +60,9 @@ public sealed class TtsRequest
     [JsonPropertyName("language_code")] public string? LanguageCode { get; set; }
     [JsonPropertyName("apply_text_normalization")] public string? ApplyTextNormalization { get; set; }
     [JsonPropertyName("pronunciation_dictionary_locators")] public List<PronunciationLocator>? PronunciationDictionaries { get; set; }
+    /// <summary>Request stitching: the text before and after this one, so long readings flow across requests (not on eleven_v3).</summary>
+    [JsonPropertyName("previous_text")] public string? PreviousText { get; set; }
+    [JsonPropertyName("next_text")] public string? NextText { get; set; }
 
     /// <summary>Not sent in the body: becomes the output_format query parameter (e.g. mp3_44100_128, pcm_44100).</summary>
     [JsonIgnore] public string OutputFormat { get; set; } = "mp3_44100_128";

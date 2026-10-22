@@ -6,6 +6,7 @@ import { fomodsView, fomodView } from './phase3.js';
 import { wavLipView } from './tools.js';
 import { revoiceListView, revoiceView } from './revoice.js';
 import { settingsView } from './settings.js';
+import { booksListView, bookProjectView } from './books.js';
 import { homeView, noteRecent } from './home.js';
 import { helpView, PAGE_HELP } from './help.js';
 
@@ -47,7 +48,7 @@ export function go(view, params = {}) {
   render();
 }
 
-const SECTION = { home: 'home', help: 'help', mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches', fomods: 'fomods', fomod: 'fomods', settings: 'settings', voices: 'settings', wavlip: 'tools', vc: 'patches', revoices: 'tools', revoice: 'tools' };
+const SECTION = { home: 'home', help: 'help', mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches', fomods: 'fomods', fomod: 'fomods', settings: 'settings', voices: 'settings', wavlip: 'tools', vc: 'patches', revoices: 'tools', revoice: 'tools', books: 'tools', book: 'tools' };
 
 let renderTicket = 0;
 export async function render() {
@@ -55,7 +56,7 @@ export async function render() {
   document.querySelectorAll('[data-section]').forEach((b) => b.classList.toggle('active', b.dataset.section === section));
   document.getElementById('brand').classList.toggle('active', section === 'home');
   // An Other Tools page shows its name in the top bar, after the three phases.
-  const tool = { wavlip: ['WAV to LIP Tool', 'wavlip'], revoices: ['NPC Revoice Tool', 'revoices'], revoice: ['NPC Revoice Tool', 'revoices'] }[app.route.view];
+  const tool = { wavlip: ['WAV to LIP Tool', 'wavlip'], revoices: ['NPC Revoice Tool', 'revoices'], revoice: ['NPC Revoice Tool', 'revoices'], books: ['Voiced Books Tool', 'books'], book: ['Voiced Books Tool', 'books'] }[app.route.view];
   const tc = document.getElementById('tool-crumb');
   tc.classList.toggle('hidden', !tool);
   if (tool) { tc.textContent = tool[0]; tc.onclick = () => go(tool[1]); }
@@ -78,6 +79,8 @@ export async function render() {
       case 'wavlip': view = await wavLipView(); break;
       case 'revoices': view = await revoiceListView(); break;
       case 'revoice': view = await revoiceView(app.route.id); break;
+      case 'books': view = await booksListView(); break;
+      case 'book': view = await bookProjectView(app.route.id); break;
       case 'voices': view = await settingsView('voices', app.route.id); break;
       case 'settings': view = await settingsView(app.route.tab, app.route.id); break;
       default: view = await modsView();
@@ -119,6 +122,7 @@ const toolsBtn = document.getElementById('tools-btn');
 toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [
   { label: 'WAV to LIP Tool', sub: 'Whisper listens to WAV files and makes matching .lip files', onclick: () => go('wavlip') },
   { label: 'NPC Revoice Tool', sub: 'Replace NPC voice files in any mod', onclick: () => go('revoices') },
+  { label: 'Voiced Books Tool', sub: 'Narrate books, letters and journals for Voiced Books of Skyrim', onclick: () => go('books') },
 ]));
 
 // ---- background jobs (generation, .fuz, FOMOD, WAV to LIP)

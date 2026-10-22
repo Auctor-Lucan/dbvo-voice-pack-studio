@@ -45,3 +45,10 @@ gzip -9 uesp-skyrim.json
 ```
 
 The input is a JSONL file with one UESP page per line (`title`, `source_url`, `revision_timestamp`, `content_wikitext`).
+
+# Voice type templates
+
+`voicetype-templates.txt` lists, for every vanilla voice type (Skyrim, Dawnguard, Dragonborn), the leveled actor
+templates (`Lvl…`) and character templates (`LChar…`) whose NPCs can have it. It was compiled by Auctor Lucan for
+Immersively Voiced Books of Skyrim. The Voiced Books Tool uses it when a book's author is an NPC that gets its voice
+type from a template: the template's voice types are shown as candidates (a template can stand for several).

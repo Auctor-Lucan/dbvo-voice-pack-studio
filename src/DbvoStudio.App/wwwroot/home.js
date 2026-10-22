@@ -6,9 +6,9 @@ const CHOICES = [
   { icon: 'wave', color: '#58a6ff', title: 'I want to make DBVO patches.', sub: 'Import a mod\'s plugins, review the player lines, then voice them.', go: () => go('mods') },
   { icon: 'mic', color: '#d2a8ff', title: 'I want to revoice an NPC or a whole mod.', sub: 'Give characters in any mod, or the base game, a new voice.', go: () => go('revoices') },
   { icon: 'box', color: '#3fb950', title: 'I want to build a FOMOD installer.', sub: 'Gather your patches into an installer with the DBVO JSON.', go: () => go('fomods') },
+  { icon: 'book', color: '#e3b341', title: 'I want to narrate Skyrim\'s books.', sub: 'Patch the base game or mods for Voiced Books of Skyrim.', go: () => go('books') },
   { icon: 'lips', color: '#f0883e', title: 'I want lip sync for WAV files I already have.', sub: 'Whisper listens, FaceFXWrapper writes the .lip files.', go: () => go('wavlip') },
   { icon: 'gear', color: '#8b949e', title: 'I want to set up the studio.', sub: 'Library, tools, ElevenLabs key and voice packs.', go: () => go('settings', { tab: 'general' }) },
-  { icon: 'book', color: '#e3b341', title: 'I want to read the guide.', sub: 'Every screen and button, explained.', go: () => go('help') },
 ];
 
 // The welcome: the first one on the very first launch, then the next one each time DBVO Studio opens, looping.
@@ -75,7 +75,7 @@ function pickMaiq() {
 
 const WAVE = [18, 30, 52, 40, 70, 88, 60, 94, 72, 46, 80, 100, 64, 38, 58, 84, 50, 28, 44, 22, 36, 16];
 const RECENT_KEY = 'recent';
-const RECENT_VIEWS = ['mod', 'patch', 'fomod', 'revoice'];
+const RECENT_VIEWS = ['mod', 'patch', 'fomod', 'revoice', 'book'];
 
 /** Remember a project page the user opened, newest first, for "Pick up where you left off". */
 export function noteRecent(route) {
@@ -88,6 +88,7 @@ export function noteRecent(route) {
 export async function homeView() {
   const s = await refreshState();
   const revoices = await rpc('revoice.list').catch(() => []);
+  const books = await rpc('books.list').catch(() => []);
   const view = h('div.view.home');
 
   // ---- left: welcome, counts and the studio check
@@ -129,7 +130,7 @@ export async function homeView() {
   const right = h('section.home-start', h('div.home-lbl', 'Start something'), cards);
 
   // ---- bottom: work to pick up again, most recently opened first
-  const items = recentItems(s, revoices);
+  const items = recentItems(s, revoices, books);
   const bottom = h('section.home-recent', h('div.home-lbl', 'Pick up where you left off'),
     items.length ? h('div.home-rcs', items.map((x) => h('button.home-rc', { style: { '--c': x.color }, title: 'Open ' + x.name, onclick: () => go(x.view, { id: x.id }) },
       h('b.ellipsis', x.name), h('small.ellipsis', x.sub),
@@ -141,7 +142,7 @@ export async function homeView() {
   return view;
 }
 
-function recentItems(s, revoices) {
+function recentItems(s, revoices, books = []) {
   const all = [];
   for (const p of s.patches) {
     const n = p.total - p.omitted - (p.excluded || 0);
@@ -157,6 +158,9 @@ function recentItems(s, revoices) {
   }
   for (const r of revoices) {
     all.push({ view: 'revoice', id: r.id, name: r.name, sub: `NPC Revoice · ${r.speakers} speakers`, done: r.generated, total: r.lines, count: `${r.generated} / ${r.lines} lines`, color: '#d2a8ff' });
+  }
+  for (const b of books) {
+    all.push({ view: 'book', id: b.id, name: b.name, sub: `Voiced Books · ${b.books} books`, done: b.generated, total: b.lines, count: `${b.generated} / ${b.lines} parts`, color: '#e3b341' });
   }
   // Most recently opened first; then the rest in the order above (patches before mods), four in all.
   const order = store.get(RECENT_KEY, []);

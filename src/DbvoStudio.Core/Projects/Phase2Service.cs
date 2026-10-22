@@ -363,7 +363,8 @@ public sealed partial class Phase2Service
     /// <param name="stateGate">Lock shared with any other code that edits or saves the same patch object.</param>
     public async Task GenerateAsync(DbvoPatch patch, VoicePack voice, IReadOnlyList<Phase2Line> lines, ExternalTools tools,
         IProgress<GenerationProgress>? progress = null, Func<Phase2Line, Task>? onLineDone = null, CancellationToken ct = default,
-        SemaphoreSlim? stateGate = null, string? engineOverride = null, string? folder = null, Action? save = null)
+        SemaphoreSlim? stateGate = null, string? engineOverride = null, string? folder = null, Action? save = null,
+        bool makeLip = true, Func<Phase2Line, string>? takeFolder = null, Func<Phase2Line, (string? Previous, string? Next)>? context = null)
     {
         string root = folder ?? _lib.PatchFolder(patch.Id);
         bool vc = patch.Kind == "vc";
@@ -456,6 +457,13 @@ public sealed partial class Phase2Service
                         PronunciationDictionaries = es.PronunciationDictionaryIds.Count == 0 ? null
                             : es.PronunciationDictionaryIds.Take(3).Select(id => new PronunciationLocator { DictionaryId = id }).ToList(),
                     };
+                    if (context != null && !es.ModelId.Contains("v3", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Request stitching: the neighbouring text keeps the voice's flow across parts (not available on eleven_v3).
+                        var (prevText, nextText) = context(line);
+                        req.PreviousText = string.IsNullOrWhiteSpace(prevText) ? null : ApplyPronunciations(prevText, pronunciations, es.ModelId);
+                        req.NextText = string.IsNullOrWhiteSpace(nextText) ? null : ApplyPronunciations(nextText, pronunciations, es.ModelId);
+                    }
                     var audio = await limiter.RunAsync(x => client!.TextToSpeechAsync(req, x), ex => ex is ElevenLabsException { Retryable: true }, ct: c);
                     return new EngineAudio(audio, es.OutputFormat, new TakeSettings
                     {
@@ -501,7 +509,7 @@ public sealed partial class Phase2Service
                     w.Write(wav);
 
                     var lip = work.File("a.lip");
-                    await tools.MakeLipAsync(wav, work.File("r.wav"), lip, SpokenText.StripTags(spoken), ct);
+                    if (makeLip) await tools.MakeLipAsync(wav, work.File("r.wav"), lip, SpokenText.StripTags(spoken), ct);
 
                     var take = new Take
                     {
@@ -511,13 +519,13 @@ public sealed partial class Phase2Service
                         Settings = got.Settings,
                     };
                     var stem = line.FileStem ?? LineNaming.Stem(line.FinalLine, voice.Naming);
-                    var rel = Path.Combine("takes", line.LineId, take.Slot.ToString("00"));
+                    var rel = Path.Combine(takeFolder?.Invoke(line) ?? Path.Combine("takes", line.LineId), take.Slot.ToString("00"));
                     var dir = Path.Combine(root, rel);
                     Directory.CreateDirectory(dir);
                     take.WavPath = Path.Combine(rel, stem + ".wav");
-                    take.LipPath = Path.Combine(rel, stem + ".lip");
+                    take.LipPath = makeLip ? Path.Combine(rel, stem + ".lip") : "";
                     File.Copy(wav, Path.Combine(root, take.WavPath), true);
-                    File.Copy(lip, Path.Combine(root, take.LipPath), true);
+                    if (makeLip) File.Copy(lip, Path.Combine(root, take.LipPath), true);
                     newTake = take;
                 }
                 finally { convertGate.Release(); }

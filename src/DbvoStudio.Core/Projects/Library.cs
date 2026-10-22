@@ -28,7 +28,7 @@ public sealed class Library
     {
         Root = Path.GetFullPath(root);
         Directory.CreateDirectory(Root);
-        foreach (var d in new[] { "voicepacks", "references", "mods", "patches", "fomods", "revoice", "backups" })
+        foreach (var d in new[] { "voicepacks", "references", "mods", "patches", "fomods", "revoice", "books", "backups" })
             Directory.CreateDirectory(Path.Combine(Root, d));
     }
 
@@ -102,6 +102,19 @@ public sealed class Library
     {
         p.UpdatedUtc = DateTime.UtcNow;
         SaveJson(Path.Combine(RevoiceFolder(p.Id), "project.json"), p);
+    }
+
+    // ---------- Voiced Books projects (Other Tools) ----------
+    public string BooksFolder(string id) => Path.Combine(Root, "books", id);
+    public List<Books.BooksProject> LoadBooksProjects() =>
+        Directory.EnumerateDirectories(Path.Combine(Root, "books"))
+            .Select(d => Load<Books.BooksProject>(Path.Combine(d, "project.json"))).Where(p => p != null).Select(p => p!)
+            .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    public Books.BooksProject? LoadBooksProject(string id) => Load<Books.BooksProject>(Path.Combine(BooksFolder(id), "project.json"));
+    public void Save(Books.BooksProject p)
+    {
+        p.UpdatedUtc = DateTime.UtcNow;
+        SaveJson(Path.Combine(BooksFolder(p.Id), "project.json"), p);
     }
 
     // ---------- references ----------

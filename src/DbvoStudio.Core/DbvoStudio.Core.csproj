@@ -13,6 +13,8 @@
     <EmbeddedResource Include="Fomod\ModuleConfig.xsd" LogicalName="DbvoStudio.Core.Fomod.ModuleConfig.xsd" />
     <None Include="Fomod\ModuleConfig.xsd.LICENSE.txt" />
     <EmbeddedResource Include="Reference\uesp-skyrim.json.gz" LogicalName="DbvoStudio.Core.Reference.uesp-skyrim.json.gz" />
+    <EmbeddedResource Include="Reference\voicetype-templates.txt" LogicalName="DbvoStudio.Core.Reference.voicetype-templates.txt" />
+    <EmbeddedResource Include="Books\Sets\*.json.gz" LogicalName="DbvoStudio.Core.Books.Sets.%(Filename)%(Extension)" />
     <None Include="Reference\README.md" />
     <None Include="Reference\extract_uesp.py" />
   </ItemGroup>

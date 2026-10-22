@@ -616,3 +616,59 @@ html.has-bg .subnav { background: color-mix(in srgb, var(--panel) 86%, transpare
 .est-group { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .kv4 { display: grid; grid-template-columns: max-content 1fr max-content 1fr max-content 1fr; gap: 4px 14px; font-size: 13px; }
 .kv4 > div:nth-child(odd) { color: var(--dim); }
+
+/* Generate options panel (Phase 2, NPC Revoice, Voiced Books) */
+.gen-pop { display: flex; flex-direction: column; gap: 2px; min-width: 360px; max-width: 440px; }
+.gen-item { text-align: left; padding: 8px 10px; border-radius: 6px; background: transparent; border: 1px solid transparent; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.gen-item:hover:not(:disabled) { background: var(--raised); border-color: var(--line); }
+.gen-item.off { opacity: .45; cursor: default; }
+.gen-item.warn b { color: var(--warn); }
+.gen-top { display: flex; align-items: center; gap: 8px; width: 100%; }
+.gen-top .mono { color: var(--text); }
+.gen-desc { font-size: 12px; color: var(--dim); line-height: 1.35; }
+
+/* Export: one prominent filled button at the right end of a tool's head (NPC Revoice, Voiced Books) */
+.btn.accent { background: color-mix(in srgb, var(--ok) 78%, #000); border-color: color-mix(in srgb, var(--ok) 50%, transparent); color: #fff; font-weight: 650; }
+.btn.accent:hover { background: var(--ok); }
+.btn.accent:disabled { opacity: .5; }
+.btn.export-btn { margin-left: 10px; padding-left: 14px; padding-right: 14px; display: inline-flex; align-items: center; gap: 4px; }
+/* A real button (not text on the background) inside a toolbar */
+.btn.bordered { border: 1px solid var(--line); background: var(--raised); }
+.btn.bordered:hover { border-color: var(--accent); }
+.flash-hl { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .4s; border-radius: 8px; }
+.dot.Partial { background: linear-gradient(90deg, var(--ok) 50%, transparent 50%); border-color: var(--ok); }
+
+/* Voiced Books */
+details.voice-settings { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-width: 1200px; background: var(--panel); }
+details.voice-settings > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+details.voice-settings > summary::-webkit-details-marker { display: none; }
+details.voice-settings > summary::before { content: '▸'; color: var(--dim); }
+details.voice-settings[open] > summary::before { content: '▾'; }
+details.voice-settings .toolbar { margin-top: 8px; border: 0; padding: 0; }
+details.inline-details > summary { cursor: pointer; color: var(--link); font-size: 12.5px; }
+.voices-tbl { max-width: 1200px; }
+.voices-tbl td { vertical-align: middle; }
+.voice-cell select { max-width: 220px; }
+.book-editor-overlay { position: fixed; inset: 0; background: rgba(1, 4, 9, .72); z-index: 900; display: flex; align-items: stretch; justify-content: center; padding: 2.5vh 2vw; }
+.book-editor { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; flex: 1; display: flex; flex-direction: column; min-height: 0; box-shadow: 0 20px 60px rgba(0, 0, 0, .5); }
+.ed-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.ed-head h2 { margin: 0; font-size: 17px; }
+.ed-head .mono { font-size: 11.5px; }
+.ed-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(260px, 1fr) minmax(360px, 1.35fr) minmax(300px, .9fr); }
+.ed-body > div { min-height: 0; display: flex; flex-direction: column; padding: 10px 14px; gap: 8px; }
+.ed-left, .ed-mid { border-right: 1px solid var(--line-soft); }
+.ed-col-head { display: flex; align-items: center; gap: 8px; }
+.game-text { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.game-text-body { flex: 1; overflow: auto; white-space: pre-wrap; line-height: 1.55; color: var(--dim); background: var(--bg); border: 1px solid var(--line-soft); border-radius: 6px; padding: 10px 12px; font-family: Georgia, "Times New Roman", serif; font-size: 14px; }
+.ed-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+textarea.spoken-ed { flex: 1; min-height: 160px; resize: none; line-height: 1.55; font-size: 14px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+.checks-box { max-height: 26%; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.check-item { font-size: 12.5px; color: var(--dim); }
+.check-item.bad { color: var(--warn); }
+.parts-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.part-card { border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; background: var(--raised); display: flex; flex-direction: column; gap: 4px; }
+.part-card.stale { border-color: var(--warn); }
+.part-card select { max-width: 120px; font-size: 12px; }
+.part-excerpt { font-size: 12px; color: var(--dim); cursor: pointer; line-height: 1.4; }
+.part-excerpt:hover { color: var(--text); }
+.break-row { display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 11.5px; }

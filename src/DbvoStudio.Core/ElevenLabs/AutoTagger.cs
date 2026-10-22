@@ -38,7 +38,7 @@ public sealed class AutoTagger : IDisposable
     public AutoTagger(string endpoint, string apiKey, string model, HttpClient? http = null)
     {
         if (string.IsNullOrWhiteSpace(endpoint)) throw new InvalidOperationException("AI Auto Tag needs an AI provider, and none is set up yet. Choose one in " + FriendlyError.AiPlace + ".");
-        _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(180) };
         _http.BaseAddress = new Uri(endpoint.TrimEnd('/') + "/");
         if (!string.IsNullOrWhiteSpace(apiKey))
             _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
@@ -76,6 +76,26 @@ public sealed class AutoTagger : IDisposable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new AutoTagResult(lineId, null, ex is JsonException or KeyNotFoundException or IndexOutOfRangeException
+                ? "The AI provider answered in a form DBVO Studio doesn't understand. Check that the endpoint is OpenAI-compatible (it usually ends in /v1)."
+                : FriendlyError.From(ex, "Your AI provider"));
+        }
+    }
+
+    /// <summary>A plain chat request (system + user message) to the same AI provider. Returns the reply text or an error.</summary>
+    public async Task<(string? Text, string? Error)> ChatAsync(string system, string user, double temperature, CancellationToken ct = default)
+    {
+        try
+        {
+            var body = new { model = _model, temperature, messages = new object[] { new { role = "system", content = system }, new { role = "user", content = user } } };
+            using var resp = await _http.PostAsJsonAsync("chat/completions", body, ct);
+            var text = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode) return (null, FriendlyError.Http("Your AI provider", (int)resp.StatusCode, text, FriendlyError.AiPlace));
+            using var doc = JsonDocument.Parse(text);
+            return (doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()?.Trim() ?? "", null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return (null, ex is JsonException or KeyNotFoundException or IndexOutOfRangeException
                 ? "The AI provider answered in a form DBVO Studio doesn't understand. Check that the endpoint is OpenAI-compatible (it usually ends in /v1)."
                 : FriendlyError.From(ex, "Your AI provider"));
         }

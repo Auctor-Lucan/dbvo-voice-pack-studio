@@ -19,7 +19,7 @@ if (webview) {
   webview.addEventListener('message', (e) => {
     const msg = e.data;
     if (msg && msg.event) {
-      (listeners.get(msg.event) || []).forEach((fn) => fn(msg.data));
+      (listeners.get(msg.event) || []).slice().forEach((fn) => fn(msg.data));
       return;
     }
     const p = pending.get(msg.id);
@@ -53,6 +53,7 @@ export function droppedPaths(fileList) {
 export function on(event, fn) {
   if (!listeners.has(event)) listeners.set(event, []);
   listeners.get(event).push(fn);
+  return () => { const l = listeners.get(event); const i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); };
 }
 
 /** h('div.cls#id', {attrs/on*}, ...children) */
@@ -565,6 +566,9 @@ const ICON_PATHS = {
   help: '<circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  export: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>',
+  scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>',
   coins: '<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>',
 };
 
@@ -693,6 +697,30 @@ export function popover(anchor, content) {
   window.addEventListener('keydown', onKey, true);
   document.body.append(el);
   openPop = { el, anchor, close };
+}
+
+export function closePopover() { if (openPop) openPop.close(); }
+
+/**
+ * The one "Generate options ▾" button of a page: a panel lists what can be generated, each with its count, characters
+ * and a plain sentence; empty choices are greyed out. Every choice goes through the page's "Check before spending
+ * credits" step. While a generation runs, the button is the Stop button.
+ * items(): [{ key, label, count, chars, desc, warn }]
+ */
+export function generateButton({ running, items, onPick, unit = 'line', label = 'Generate options', title = 'Choose what to generate. You see the count, characters and every setting before any credits are spent.' }) {
+  if (running) {
+    return h('button.btn.primary.stop-btn', { title: 'Stop now: what is already made keeps its takes; nothing more is sent to the engine', onclick: (e) => { e.currentTarget.disabled = true; e.currentTarget.textContent = 'Stopping…'; rpc('job.cancel').catch(fail); } }, '■ Stop generating');
+  }
+  const btn = h('button.btn.primary.gen-btn', { title }, label + ' ▾');
+  btn.addEventListener('click', () => popover(btn, () => [h('div.gen-pop', items().filter(Boolean).map((it) => {
+    const off = !it.count;
+    const n = `${it.count.toLocaleString()} ${it.unit || unit}${it.count === 1 ? '' : 's'}`;
+    return h('button.gen-item' + (off ? '.off' : '') + (it.warn ? '.warn' : ''), {
+      disabled: off, title: off ? 'Nothing to generate here right now' : it.desc,
+      onclick: () => { closePopover(); onPick(it.key); },
+    }, h('div.gen-top', h('b', it.label), h('span.spacer'), h('span.mono', n), it.chars != null ? h('span.faint', `${it.chars.toLocaleString()} chars`) : null), h('div.gen-desc', it.desc));
+  }))]));
+  return btn;
 }
 
 /** Hover texts for the engine settings in the Phase 2 and NPC Revoice toolbars, by their label. */
