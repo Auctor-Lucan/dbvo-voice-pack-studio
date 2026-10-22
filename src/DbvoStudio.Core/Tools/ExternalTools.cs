@@ -23,7 +23,7 @@ public sealed class ExternalTools
 
     public static async Task<ToolResult> RunAsync(string exe, IEnumerable<string> args, CancellationToken ct = default, TimeSpan? timeout = null)
     {
-        if (!File.Exists(exe)) throw new ToolException($"Tool not found: {exe}");
+        if (!File.Exists(exe)) throw new ToolException($"{Path.GetFileName(exe)} isn't where it was set ({exe}). Pick it again in Global Settings → General & tools → Tools.");
         var psi = new ProcessStartInfo(exe)
         {
             RedirectStandardOutput = true,
@@ -50,7 +50,7 @@ public sealed class ExternalTools
         catch (OperationCanceledException)
         {
             try { p.Kill(true); } catch { }
-            throw new ToolException($"{Path.GetFileName(exe)} timed out or was cancelled.");
+            throw new ToolException(ct.IsCancellationRequested ? "Cancelled." : $"{Path.GetFileName(exe)} took longer than {(int)(timeout ?? TimeSpan.FromMinutes(5)).TotalMinutes} minutes and was stopped. The file may be very long or damaged.");
         }
         return new ToolResult(p.ExitCode, o.ToString(), e.ToString());
     }
@@ -65,7 +65,7 @@ public sealed class ExternalTools
         if (filters.Count > 0) { args.Add("-af"); args.Add(string.Join(",", filters)); }
         args.AddRange(new[] { "-ac", "1", "-ar", sampleRate.ToString(), "-acodec", "pcm_s16le", "-map_metadata", "-1", output });
         var r = await RunAsync(FfmpegPath, args, ct);
-        if (r.ExitCode != 0 || !File.Exists(output)) throw new ToolException("ffmpeg failed: " + Tail(r.StdErr));
+        if (r.ExitCode != 0 || !File.Exists(output)) throw new ToolException($"ffmpeg couldn't convert {Path.GetFileName(input)}. The file may be damaged or not audio. ({Tail(r.StdErr)})");
     }
 
     /// <summary>Raw 16-bit little-endian mono PCM (ElevenLabs pcm_* output) to a WAV file.</summary>
@@ -80,18 +80,18 @@ public sealed class ExternalTools
     public async Task MakeLipAsync(string wav, string resampledWav, string lipOut, string text, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(FonixDataPath) || !File.Exists(FonixDataPath))
-            throw new ToolException("FonixData.cdf is not set. Pick it in Settings.");
+            throw new ToolException("Making .lip files needs FonixData.cdf, and it isn't set. Pick it in Global Settings → General & tools → Tools.");
         var r = await RunAsync(FaceFxWrapperPath, new[] { "Skyrim", "USEnglish", FonixDataPath, wav, resampledWav, lipOut, text }, ct, TimeSpan.FromMinutes(5));
-        if (!File.Exists(lipOut)) throw new ToolException("FaceFXWrapper made no .lip: " + Tail(r.StdOut + r.StdErr));
+        if (!File.Exists(lipOut)) throw new ToolException($"FaceFXWrapper made no .lip file for {Path.GetFileName(wav)}. Usual causes: the text is empty or has only symbols, the audio is silent, or FonixData.cdf is the wrong file.{Details(r.StdOut + r.StdErr)}");
     }
 
     /// <summary>xWMAEncode /b 48000 in.wav out.xwm (the settings Yakitori uses).</summary>
     public async Task ToXwmaAsync(string wav, string xwmOut, int bitrate = 48000, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(XwmaEncodePath) || !File.Exists(XwmaEncodePath))
-            throw new ToolException("xWMAEncode.exe is not set. Pick it in Settings (it comes with Yakitori Audio Converter).");
+            throw new ToolException("Building .fuz files needs xWMAEncode.exe, and it isn't set. Pick it in Global Settings → General & tools → Tools (it comes with Yakitori Audio Converter).");
         var r = await RunAsync(XwmaEncodePath, new[] { "/b", bitrate.ToString(), wav, xwmOut }, ct);
-        if (r.ExitCode != 0 || !File.Exists(xwmOut)) throw new ToolException("xWMAEncode failed: " + Tail(r.StdOut + r.StdErr));
+        if (r.ExitCode != 0 || !File.Exists(xwmOut)) throw new ToolException($"xWMAEncode couldn't encode {Path.GetFileName(wav)}. The WAV may be damaged or empty.{Details(r.StdOut + r.StdErr)}");
     }
 
     /// <summary>Integrated loudness (LUFS) and true peak (dBTP) of an audio file (ffmpeg ebur128). Null where ffmpeg gave none.</summary>
@@ -113,6 +113,8 @@ public sealed class ExternalTools
         var tp = Num(System.Text.RegularExpressions.Regex.Match(sum, @"Peak:\s+(-?[\d.]+|-inf) dBFS"));
         return (i, tp);
     }
+
+    private static string Details(string s) { var t = Tail(s); return t.Length == 0 ? "" : $" ({t})"; }
 
     private static string Tail(string s)
     {

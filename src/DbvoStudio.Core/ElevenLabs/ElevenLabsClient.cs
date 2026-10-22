@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Text;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -201,7 +202,8 @@ public sealed class ElevenLabsClient : IDisposable
             429 => "ElevenLabs is busy or the concurrency limit was reached.",
             _ => $"ElevenLabs error {code}.",
         };
-        return new ElevenLabsException(resp.StatusCode, $"{friendly} {detail}".Trim(), retry);
+        _ = friendly; _ = detail;
+        return new ElevenLabsException(resp.StatusCode, FriendlyError.Http("ElevenLabs", code, body, FriendlyError.ElevenLabsPlace), retry);
     }
 
     public void Dispose()

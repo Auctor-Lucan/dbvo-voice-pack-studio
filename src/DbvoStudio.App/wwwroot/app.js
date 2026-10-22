@@ -16,6 +16,7 @@ export const app = {
 };
 
 const main = document.getElementById('main');
+Object.defineProperty(window, '__dbvoState', { get: () => app.state }); // lib.js helpers read the current state
 
 /** The user's background image behind every page (Global Settings → Appearance), or none. */
 export function applyBackground(ui) {
@@ -48,6 +49,7 @@ export function go(view, params = {}) {
 
 const SECTION = { home: 'home', help: 'help', mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches', fomods: 'fomods', fomod: 'fomods', settings: 'settings', voices: 'settings', wavlip: 'tools', vc: 'patches', revoices: 'tools', revoice: 'tools' };
 
+let renderTicket = 0;
 export async function render() {
   const section = SECTION[app.route.view] || 'mods';
   document.querySelectorAll('[data-section]').forEach((b) => b.classList.toggle('active', b.dataset.section === section));
@@ -57,8 +59,10 @@ export async function render() {
   const tc = document.getElementById('tool-crumb');
   tc.classList.toggle('hidden', !tool);
   if (tool) { tc.textContent = tool[0]; tc.onclick = () => go(tool[1]); }
-  clear(main);
-  main.append(h('div.empty', 'Loading…'));
+  // Keep the current page until the next one is ready, so switching pages never flashes an empty (or unshaded) frame.
+  // "Loading…" only shows when a page takes noticeably long.
+  const ticket = ++renderTicket;
+  const slow = setTimeout(() => { if (ticket === renderTicket) clear(main).append(h('div.empty.view', 'Loading…')); }, 400);
   try {
     if (!app.state) await refreshState();
     let view;
@@ -78,15 +82,32 @@ export async function render() {
       case 'settings': view = await settingsView(app.route.tab, app.route.id); break;
       default: view = await modsView();
     }
+    clearTimeout(slow);
+    if (ticket !== renderTicket) return; // a newer click already moved on
     clear(main).append(view);
   } catch (e) {
+    clearTimeout(slow);
+    if (ticket !== renderTicket) return;
     console.error(e);
     clear(main).append(h('div.empty', h('h2', 'Something went wrong'), h('div', e.message || String(e)),
-      h('div', { style: { marginTop: '12px' } }, h('button.btn', { onclick: () => go('home') }, 'Back to the landing page'))));
+      h('div', { style: { marginTop: '12px' } }, h('button.btn', { title: 'Go to the landing page', onclick: () => go('home') }, 'Back to the landing page'))));
     if (app.route.view !== 'home') store.set('route', { view: 'home' });
   }
 }
 
+// "Open Global Settings" on a problem message: go there and scroll to the section it names.
+document.addEventListener('go-settings', (e) => {
+  const { tab, section } = e.detail || {};
+  go('settings', { tab: tab || 'general' });
+  if (!section) return;
+  let tries = 0;
+  const find = () => {
+    const hd = [...main.querySelectorAll('.section-head h2')].find((x) => x.textContent.trim().toLowerCase().startsWith(section.toLowerCase()));
+    if (hd) { hd.scrollIntoView({ block: 'start' }); hd.closest('.section')?.classList.add('flash-hl'); setTimeout(() => hd.closest('.section')?.classList.remove('flash-hl'), 1600); }
+    else if (++tries < 20) setTimeout(find, 100);
+  };
+  setTimeout(find, 50);
+});
 document.querySelectorAll('.crumb[data-section]').forEach((b) => b.addEventListener('click', () => go(b.dataset.section)));
 document.querySelector('[data-section="settings"]').addEventListener('click', () => go('settings'));
 document.querySelector('[data-section="help"]').addEventListener('click', () => go('help', { anchor: PAGE_HELP[app.route.view] }));
@@ -103,7 +124,11 @@ toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [
 // ---- background jobs (generation, .fuz, FOMOD, WAV to LIP)
 const jobEl = document.getElementById('job');
 const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to LIP', generate: 'Generating', import: 'Importing', qa: 'Checking takes' };
+// Progress reports can arrive a moment after the job has finished (they travel separately); one of those must not
+// bring back the job bar and keep buttons disabled.
+let lastDone = null;
 on('progress', (p) => {
+  if (lastDone && lastDone.kind === p.kind && Date.now() - lastDone.t < 1500) return;
   app.job = p;
   jobEl.classList.remove('hidden');
   jobEl.querySelector('.job-label').textContent = `${(p.kind === 'fomod' || p.kind === 'revoice' || (p.kind === 'qa' && p.message)) && p.message ? p.message : LABEL[p.kind] || 'Working'}${p.kind === 'revoice' ? '…' : ` ${p.done}/${p.total}`}${p.failed ? ` · ${p.failed} failed` : ''}`;
@@ -112,6 +137,7 @@ on('progress', (p) => {
   document.dispatchEvent(new CustomEvent('job-progress', { detail: p }));
 });
 on('jobDone', async (d) => {
+  lastDone = { kind: d.kind, t: Date.now() };
   app.job = null;
   jobEl.classList.add('hidden');
   document.dispatchEvent(new CustomEvent('job-done', { detail: d }));
@@ -150,7 +176,7 @@ window.addEventListener('drop', (e) => e.preventDefault());
 
 // Start on the landing page, or where you left off (Global Settings → General & tools → Start page).
 (async () => {
-  clear(main).append(h('div.empty', 'Loading…'));
+  clear(main).append(h('div.empty.view', 'Loading…'));
   let home = true;
   try { await refreshState(); home = ((app.state.settings.ui || {}).startPage || 'home') !== 'last'; } catch { /* render shows the error */ }
   if (navigated) return;
@@ -159,3 +185,9 @@ window.addEventListener('drop', (e) => e.preventDefault());
 })();
 
 export { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce };
+
+// Text cut short with "…" shows in full when hovered.
+document.addEventListener('mouseover', (e) => {
+  const el = e.target.closest && e.target.closest('.stat, .ellipsis');
+  if (el && !el.hasAttribute('title') && el.scrollWidth > el.clientWidth + 1) el.title = el.textContent.trim();
+});

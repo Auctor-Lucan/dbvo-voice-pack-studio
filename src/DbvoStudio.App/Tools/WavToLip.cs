@@ -42,9 +42,9 @@ public sealed class WavToLip
     public async Task<(int Success, int Failed)> RunAsync(IReadOnlyList<string> files, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(_tools.FonixDataPath) || !File.Exists(_tools.FonixDataPath))
-            throw new InvalidOperationException("FonixData.cdf is not set. Pick it in Settings → General & tools. The official FaceFXWrapper needs this dictionary.");
+            throw new InvalidOperationException("Making .lip files needs FonixData.cdf, and it isn't set. Pick it in Global Settings → General & tools → Tools.");
         if (!File.Exists(_tools.FaceFxWrapperPath))
-            throw new InvalidOperationException("FaceFXWrapper.exe was not found. Pick it in Settings → General & tools.");
+            throw new InvalidOperationException("Making .lip files needs FaceFXWrapper.exe, and it wasn't found. Pick it in Global Settings → General & tools → Tools.");
         Directory.CreateDirectory(TempRoot);
 
         Func<string, CancellationToken, Task<string>> transcribe;
@@ -77,7 +77,7 @@ public sealed class WavToLip
                 try
                 {
                     var transcript = (await transcribe(wav, ct)).Trim();
-                    if (transcript.Length == 0) throw new InvalidOperationException("Whisper returned an empty transcript.");
+                    if (transcript.Length == 0) throw new InvalidOperationException("Whisper heard no words in this file. It may be silent, very short or only breathing.");
                     // The temporary transcript is the source of the exact text passed to FaceFXWrapper.
                     tempTxt = Path.Combine(TempRoot, Path.GetFileNameWithoutExtension(wav) + "_" + Environment.CurrentManagedThreadId + ".txt");
                     await File.WriteAllTextAsync(tempTxt, transcript, new UTF8Encoding(false), ct);
@@ -94,7 +94,7 @@ public sealed class WavToLip
                         throw new InvalidOperationException($"FaceFXWrapper did not create a non-empty .lip (exit code {r.ExitCode}). " + details[^Math.Min(1200, details.Length)..]);
                     }
                     if (previous != null && File.GetLastWriteTimeUtc(lip) == previous)
-                        throw new InvalidOperationException("The existing .lip file was not updated; refusing to count a stale file as success.");
+                        throw new InvalidOperationException("FaceFXWrapper ran but didn't update the .lip file, so this file is counted as failed rather than keeping an old .lip.");
                     success++;
                     Log($"SUCCESS: {name} -> {Path.GetFileName(lip)}   \"{facefxText}\"");
                 }
@@ -286,7 +286,7 @@ public sealed class WavToLip
         public async Task StartAsync(CancellationToken ct)
         {
             if (!File.Exists(_s.PythonPath))
-                throw new InvalidOperationException("Set python.exe of your faster-whisper environment in Settings → Tools (e.g. WAV_to_LIP_App\\.venv\\Scripts\\python.exe).");
+                throw new InvalidOperationException("The faster-whisper option needs the python.exe of its environment (e.g. WAV_to_LIP_App\\.venv\\Scripts\\python.exe). Set it in Global Settings → General & tools → WAV to LIP.");
             var script = Path.Combine(AppContext.BaseDirectory, "Tools", "faster_whisper_server.py");
             var psi = new ProcessStartInfo(_s.PythonPath)
             {
@@ -304,7 +304,7 @@ public sealed class WavToLip
             psi.Environment["PYTHONIOENCODING"] = "utf-8";
             if (!string.IsNullOrWhiteSpace(_s.CudaLibsFolder))
                 psi.Environment["PATH"] = _s.CudaLibsFolder + ";" + Environment.GetEnvironmentVariable("PATH");
-            _p = Process.Start(psi) ?? throw new InvalidOperationException("Could not start Python.");
+            _p = Process.Start(psi) ?? throw new InvalidOperationException("Python couldn't be started. Check the python.exe set in Global Settings → General & tools → WAV to LIP.");
             _ = Task.Run(async () =>
             {
                 string? line;
@@ -320,7 +320,7 @@ public sealed class WavToLip
         {
             while (true)
             {
-                var line = await _p!.StandardOutput.ReadLineAsync(ct) ?? throw new InvalidOperationException("The faster-whisper helper stopped. See the log for Python's error.");
+                var line = await _p!.StandardOutput.ReadLineAsync(ct) ?? throw new InvalidOperationException("The faster-whisper helper stopped unexpectedly. The log below shows Python's error; often a package is missing from that environment.");
                 if (!line.StartsWith("{")) continue;
                 var el = JsonDocument.Parse(line).RootElement.Clone();
                 if (el.GetProperty("type").GetString() == "log") { _log(el.GetProperty("message").GetString() ?? ""); continue; }

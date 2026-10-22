@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Text;
 using System.IO;
 using System.Text.Json;
 using DbvoStudio.App.Tools;
@@ -77,7 +78,7 @@ public sealed partial class Backend
                 var root = S(p, "root");
                 if (!Path.IsPathRooted(FomodService.Os(path)) && !string.IsNullOrWhiteSpace(root)) path = Path.Combine(root, FomodService.Os(path));
                 if (!File.Exists(path)) return null;
-                if (new FileInfo(path).Length > 25_000_000) throw new InvalidOperationException("File too large to preview.");
+                if (new FileInfo(path).Length > 25_000_000) throw new InvalidOperationException("This file is too large to preview here. Open it from its folder instead.");
                 var ext = Path.GetExtension(path).ToLowerInvariant();
                 var mime = ext switch { ".png" => "image/png", ".jpg" or ".jpeg" => "image/jpeg", ".gif" => "image/gif", ".bmp" => "image/bmp", ".webp" => "image/webp", ".wav" => "audio/wav", ".mp3" => "audio/mpeg", _ => "application/octet-stream" };
                 return $"data:{mime};base64,{Convert.ToBase64String(await File.ReadAllBytesAsync(path))}";
@@ -461,7 +462,7 @@ public sealed partial class Backend
 
     private object StartWavToLip(List<string> files)
     {
-        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         if (files.Count == 0) throw new InvalidOperationException("Add at least one WAV file first.");
         _jobCts = new CancellationTokenSource();
         var ct = _jobCts.Token;
@@ -488,8 +489,8 @@ public sealed partial class Backend
             catch (Exception ex)
             {
                 App.Log("WAV to LIP failed: " + ex);
-                Emit("wavlip", new { kind = "fatal", text = ex.Message, index = 0, total = 0 });
-                Emit("jobDone", new { kind = "wavlip", ok = false, message = ex.Message });
+                Emit("wavlip", new { kind = "fatal", text = FriendlyError.From(ex), index = 0, total = 0 });
+                Emit("jobDone", new { kind = "wavlip", ok = false, message = FriendlyError.From(ex) });
             }
             finally { _jobCts = null; }
         });
@@ -520,7 +521,7 @@ public sealed partial class Backend
 
     private object StartImportFuz(string id)
     {
-        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         _jobCts = new CancellationTokenSource();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
@@ -529,7 +530,7 @@ public sealed partial class Backend
             {
                 var patch = LoadPatch(id);
                 var voice = LoadVoice(patch.VoicePackId);
-                var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "import", g.Done, g.Total, g.Failed, g.Current }));
+                var progress = new DirectProgress<GenerationProgress>(g => Emit("progress", new { kind = "import", g.Done, g.Total, g.Failed, g.Current }));
                 int n = await new Phase2Service(_lib, Runtime()).ImportFuzAsync(patch, voice, _lib.LoadMods(), Tools(), progress, ct, _gate);
                 Emit("jobDone", new { kind = "import", patchId = id, ok = true, message = $"{n} line(s) imported from .fuz files." });
             }
@@ -537,7 +538,7 @@ public sealed partial class Backend
             catch (Exception ex)
             {
                 App.Log("Import .fuz failed: " + ex);
-                Emit("jobDone", new { kind = "import", patchId = id, ok = false, message = ex.Message });
+                Emit("jobDone", new { kind = "import", patchId = id, ok = false, message = FriendlyError.From(ex) });
             }
             finally { _jobCts = null; }
         });
@@ -546,7 +547,7 @@ public sealed partial class Backend
 
     private object StartFomodBuild(JsonElement p)
     {
-        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         var proj = p.GetProperty("project").Deserialize<FomodProject>(JsonOptions)!;
         bool package = !p.TryGetProperty("package", out var pk) || pk.ValueKind != JsonValueKind.False;
         _jobCts = new CancellationTokenSource();
@@ -561,7 +562,7 @@ public sealed partial class Backend
                 var errors = svc.Validate(proj).Where(i => i.Level == "error").ToList();
                 if (errors.Count > 0) throw new InvalidOperationException("Fix these first: " + string.Join(" · ", errors.Take(5).Select(e => $"{e.Where}: {e.Message}")));
                 _lib.Backup("before-fomod-build", _settings.BackupsToKeep, routine: true);
-                var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "fomod", g.Done, g.Total, g.Failed, g.Current, g.Message }));
+                var progress = new DirectProgress<GenerationProgress>(g => Emit("progress", new { kind = "fomod", g.Done, g.Total, g.Failed, g.Current, g.Message }));
                 var res = await svc.BuildAsync(proj, voice?.Naming ?? NamingMode.Legacy, package, progress, ct);
                 foreach (var o in orphans) res.Warnings.Add($"\"{o}\" is no longer linked to a DBVO Patch (deleted, or its mod was removed): built as it was.");
                 await _gate.WaitAsync();
@@ -575,7 +576,7 @@ public sealed partial class Backend
             catch (Exception ex)
             {
                 App.Log("FOMOD build failed: " + ex);
-                Emit("jobDone", new { kind = "fomod", ok = false, message = ex.Message });
+                Emit("jobDone", new { kind = "fomod", ok = false, message = FriendlyError.From(ex) });
             }
             finally { _jobCts = null; }
         });

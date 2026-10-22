@@ -50,27 +50,21 @@ export async function recordTake({ patchId, line, onSaved }) {
     status.textContent = 'Recording discarded. Press Record to try again.';
   }
 
-  async function startRec() {
+  // The microphone opens when the recorder opens, and the meter runs from then on. A microphone that has only just been
+  // switched on often starts with a burst of static or a click; opening it early lets that pass before Record is pressed.
+  let ctx = null, opened = 0;
+  async function openMic() {
+    if (stream) return true;
     try {
-      if (!stream) stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
-    } catch (e) { status.textContent = 'No microphone available: ' + (e.message || e) + '. Check Windows Settings → Privacy → Microphone.'; return; }
-    discard();
-    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'].find((t) => MediaRecorder.isTypeSupported(t)) || '';
-    rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
-    chunks = [];
-    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    rec.onstop = () => {
-      blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
-      url = URL.createObjectURL(blob);
-      const dur = (performance.now() - startT) / 1000;
-      startIn.max = endIn.max = dur.toFixed(2); startIn.value = 0; endIn.value = dur.toFixed(2); syncLbl();
-      trim.classList.remove('hidden');
-      keepBtn.disabled = false; convBtn.disabled = !target.ready;
-      status.textContent = 'Listen, trim the start and end if needed, then keep it.';
-      audio.src = url; audio.play().catch(() => {});
-    };
-    // level meter
-    const ctx = new AudioContext();
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
+    } catch (e) {
+      status.textContent = /denied|permission/i.test(String(e && (e.name + e.message)))
+        ? 'Windows or the app was not allowed to use the microphone. Allow it in Windows Settings → Privacy & security → Microphone, then try again.'
+        : 'No microphone was found. Plug one in or pick one in Windows sound settings, then press Record again.';
+      return false;
+    }
+    opened = performance.now();
+    ctx = new AudioContext();
     const an = ctx.createAnalyser(); an.fftSize = 1024;
     ctx.createMediaStreamSource(stream).connect(an);
     const buf = new Float32Array(an.fftSize);
@@ -83,21 +77,43 @@ export async function recordTake({ patchId, line, onSaved }) {
       raf = requestAnimationFrame(draw);
     };
     draw();
+    return true;
+  }
+
+  async function startRec() {
+    if (!(await openMic())) return;
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+    discard();
+    const settle = 600 - (performance.now() - opened); // give a just-opened microphone a moment
+    if (settle > 0) { status.textContent = 'Getting the microphone ready…'; recBtn.disabled = true; await new Promise((r) => setTimeout(r, settle)); recBtn.disabled = false; }
+    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'].find((t) => MediaRecorder.isTypeSupported(t)) || '';
+    rec = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 256000 } : undefined);
+    chunks = [];
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    rec.onstop = () => {
+      blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+      url = URL.createObjectURL(blob);
+      const dur = (performance.now() - startT) / 1000;
+      startIn.max = endIn.max = dur.toFixed(2); startIn.value = 0; endIn.value = dur.toFixed(2); syncLbl();
+      trim.classList.remove('hidden');
+      keepBtn.disabled = false; convBtn.disabled = !target.ready;
+      status.textContent = 'Listen, trim the start and end if needed, then keep it.';
+      audio.src = url; audio.play().catch(() => {});
+    };
     rec.start(200);
     startT = performance.now();
     timer = setInterval(() => { clock.textContent = fmt((performance.now() - startT) / 1000); }, 50);
     recBtn.textContent = '■ Stop';
+    recBtn.title = 'Stop recording';
     recBtn.classList.add('danger');
     status.textContent = 'Recording… read the line, then press Stop.';
     recBtn.onclick = stopRec;
-    stopRec.ctx = ctx;
   }
   function stopRec() {
     if (rec && rec.state !== 'inactive') rec.stop();
-    clearInterval(timer); cancelAnimationFrame(raf);
-    if (stopRec.ctx) stopRec.ctx.close().catch(() => {});
-    meter.firstChild.style.width = '0%';
+    clearInterval(timer);
     recBtn.textContent = '● Record again';
+    recBtn.title = 'Record the line again (replaces this recording)';
     recBtn.classList.remove('danger');
     recBtn.onclick = startRec;
   }
@@ -121,6 +137,7 @@ export async function recordTake({ patchId, line, onSaved }) {
       keepBtn.disabled = false; convBtn.disabled = !target.ready; recBtn.disabled = false;
     }
   }
+  openMic(); // start the microphone (and its meter) now, so it has settled before Record
   keepBtn.onclick = () => keep(false);
   convBtn.onclick = () => keep(true);
 
@@ -134,6 +151,7 @@ export async function recordTake({ patchId, line, onSaved }) {
   // closed: release the microphone
   if (rec && rec.state !== 'inactive') { try { rec.stop(); } catch { /* already stopped */ } }
   clearInterval(timer); cancelAnimationFrame(raf);
+  if (ctx) ctx.close().catch(() => {});
   if (stream) stream.getTracks().forEach((t) => t.stop());
   audio.pause();
   if (url) URL.revokeObjectURL(url);

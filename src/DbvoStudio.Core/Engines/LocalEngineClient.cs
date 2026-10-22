@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Text;
 using System.Net.Http.Json;
 using System.Text.Json;
 using DbvoStudio.Core.Projects;
@@ -94,7 +95,7 @@ public sealed class LocalEngineClient : IDisposable
         {
             var detail = "";
             try { detail = await resp.Content.ReadAsStringAsync(ct); } catch { }
-            throw new HttpRequestException($"Local engine error {(int)resp.StatusCode}. {detail}".Trim());
+            throw new InvalidOperationException(FriendlyError.Http("The local voice engine", (int)resp.StatusCode, detail, "Global Settings → General & tools → Local voice engines"));
         }
         return await resp.Content.ReadAsByteArrayAsync(ct);
     }

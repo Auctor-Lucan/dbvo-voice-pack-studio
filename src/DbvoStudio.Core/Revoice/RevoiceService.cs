@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Text;
 using DbvoStudio.Core.Reference;
 using System.Security.Cryptography;
 using System.Text;
@@ -624,7 +625,7 @@ public sealed class RevoiceService
                     p.ExportedFiles.RemoveAll(x => x.Equals(f, StringComparison.OrdinalIgnoreCase));
                     p.ExportedTakes.Remove(f.ToLowerInvariant());
                 }
-                catch (Exception ex) { rep.Errors.Add($"{f}: not removed ({ex.Message})"); }
+                catch (Exception ex) { rep.Errors.Add($"{f}: not removed ({FriendlyError.From(ex)})"); }
             }
         var root = _lib.RevoiceFolder(p.Id);
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
@@ -659,7 +660,7 @@ public sealed class RevoiceService
                 }
             }
             catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { lock (rep) { rep.Failed++; rep.Errors.Add($"{line.FileStem}: {ex.Message}"); } }
+            catch (Exception ex) { lock (rep) { rep.Failed++; rep.Errors.Add($"{line.FileStem}: {FriendlyError.From(ex)}"); } }
             finally
             {
                 gate.Release();

@@ -70,6 +70,7 @@ export function h(tag, attrs, ...children) {
   }
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
+    if (k === 'title' && v === '') continue; // an empty title would hide the hover text of the element around it
     if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'class') el.className += ' ' + v;
     else if (k === 'style' && typeof v === 'object') { for (const [sk, sv] of Object.entries(v)) { if (sk.startsWith('--')) el.style.setProperty(sk, sv); else el.style[sk] = sv; } }
@@ -95,13 +96,22 @@ export function clear(el) {
 }
 
 let toastTimer;
+/** A short message at the bottom. Problems (bad = true) stay longer, wrap in full, can be clicked away,
+ *  and offer a way to the settings page they mention. */
 export function toast(text, bad = false) {
   const t = document.getElementById('toast');
-  t.textContent = text;
+  text = String(text ?? '');
+  const parts = [h('span.toast-text', text)];
+  if (bad) {
+    const m = /Global Settings(?: → ([^→.,;]+?)(?: → ([^.,;]+?))?)?(?=[.,;]|$| first| to | and )/.exec(text);
+    if (m) parts.push(h('button.btn.sm.toast-go', { title: 'Open the settings this message mentions', onclick: (e) => { e.stopPropagation(); t.classList.add('hidden'); document.dispatchEvent(new CustomEvent('go-settings', { detail: { tab: /voice pack/i.test(m[1] || '') ? 'voices' : 'general', section: (m[2] || m[1] || '').trim() } })); } }, 'Open Global Settings'));
+    parts.push(h('button.toast-x', { title: 'Close', onclick: (e) => { e.stopPropagation(); t.classList.add('hidden'); } }, '✕'));
+  }
+  t.replaceChildren(...parts);
   t.classList.toggle('bad', bad);
   t.classList.remove('hidden');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.add('hidden'), bad ? 7000 : 3200);
+  toastTimer = setTimeout(() => t.classList.add('hidden'), bad ? Math.min(20000, 7000 + text.length * 40) : 3200);
 }
 
 export function fail(e) {
@@ -113,7 +123,7 @@ export function fail(e) {
 /** A small ? that opens the user guide at a section (help.js listens), e.g. helpButton('the-toolbar'). */
 export function helpButton(anchor, { label = '' } = {}) {
   return h('button.help-btn', { type: 'button', title: 'Help: open the guide for this' + (label ? ` (${label})` : ''), 'data-help': anchor,
-    onclick: (e) => { e.preventDefault(); e.stopPropagation(); document.dispatchEvent(new CustomEvent('open-help', { detail: { anchor } })); } }, icon('help', { size: 15 }));
+    onclick: (e) => { e.preventDefault(); e.stopPropagation(); document.dispatchEvent(new CustomEvent('open-help', { detail: { anchor, toggle: true } })); } }, icon('help', { size: 15 }));
 }
 
 export function modal(title, content, buttons = [{ label: 'OK', primary: true, value: true }], { wide = false, help = null } = {}) {
@@ -443,8 +453,8 @@ export function switchEl(checked, onchange, label, { disabled = false, title = '
 /** Segmented control: options [[value, label]]. */
 export function segmented(options, value, onchange, { disabled = false } = {}) {
   const el = h('div.seg');
-  for (const [v, label] of options) {
-    const b = h('button' + (String(v) === String(value) ? '.on' : ''), { disabled, onclick: () => {
+  for (const [v, label, tip] of options) {
+    const b = h('button' + (String(v) === String(value) ? '.on' : ''), { disabled, title: tip || '', onclick: () => {
       // show the choice right away, also where the caller doesn't redraw
       el.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
       onchange(v);
@@ -485,7 +495,7 @@ export async function askFixOverwrite(paths) {
 export function popupMenu(anchor, items) {
   document.querySelectorAll('.menu').forEach((m) => m.remove());
   const r = anchor.getBoundingClientRect();
-  const m = h('div.menu', items.map((it) => h('button', { onclick: () => { m.remove(); it.onclick(); } }, h('div', it.label), it.sub ? h('div.menu-sub', it.sub) : null)));
+  const m = h('div.menu', items.map((it) => h('button', { title: it.title || it.sub || '', disabled: !!it.disabled, onclick: () => { m.remove(); it.onclick(); } }, h('div', it.label), it.sub ? h('div.menu-sub', it.sub) : null)));
   document.body.append(m);
   const { height: mh, width: mw } = m.getBoundingClientRect();
   // keep the whole menu on screen (a button at the right edge opens it leftwards)
@@ -517,7 +527,7 @@ export function columnsMenu(grid) {
       const cb = h('input', { type: 'checkbox', checked: !grid.hidden.has(c.id) });
       cb.addEventListener('change', () => grid.setHidden(c.id, !cb.checked));
       return h('label.menu-check', cb, c.title);
-    }), h('button', { onclick: () => { m.remove(); grid.resetColumns(); grid.hidden.clear(); grid.setHidden('__none', false); } }, h('div', 'Reset columns')));
+    }), h('button', { title: 'Show every column again, at its standard width and order', onclick: () => { m.remove(); grid.resetColumns(); grid.hidden.clear(); grid.setHidden('__none', false); } }, h('div', 'Reset columns')));
     document.body.append(m);
     m.style.left = Math.min(r.left, window.innerWidth - 260) + 'px';
     m.style.top = r.bottom + 6 + 'px';
@@ -648,3 +658,71 @@ export function showNeed(key) {
     h('ol.need-steps', r.steps().map((parts) => h('li', ...parts))),
   ]);
 }
+
+/** Before asking the AI for tags: is a provider set up? Explains what is missing if not. */
+export function aiReady() {
+  const ai = (window.__dbvoState && window.__dbvoState.settings.aiProvider) || {};
+  const where = 'Global Settings → General & tools → AI auto-tagging';
+  if (!ai.endpoint) { toast(`AI Auto Tag needs an AI provider, and none is set up yet. Choose one (free ones run on your own PC) in ${where}.`, true); return false; }
+  const local = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/i.test(ai.endpoint);
+  if (!local && !ai.hasKey) { toast(`AI Auto Tag uses an online AI provider (${ai.endpoint.replace(/^https?:\/\//, '').split('/')[0]}), which needs an API key, and none is saved. Add it in ${where}.`, true); return false; }
+  return true;
+}
+
+/** One readable sentence about an AI Auto Tag run: how many suggestions, and why the rest were skipped. */
+export function autotagSummary(results) {
+  const ok = results.filter((x) => !x.error).length;
+  const bad = results.filter((x) => x.error);
+  if (!bad.length) return `${ok} suggestion(s) ready. Accept (✓) or undo (✕) them in each row.`;
+  const reasons = [...new Set(bad.map((x) => x.error))];
+  if (!ok) return reasons.length === 1 ? `No tags were added. ${reasons[0]}` : `No tags were added. ${reasons[0]} (and ${reasons.length - 1} other problem(s))`;
+  return `${ok} suggestion(s) ready; ${bad.length} line(s) got none. ${reasons[0]}`;
+}
+
+/** A small panel under a button, for settings that don't need to be on screen all the time. Closes on a click
+ *  outside or Esc. content: a function returning the panel's elements (called each time it opens). */
+let openPop = null;
+export function popover(anchor, content) {
+  if (openPop) { const same = openPop.anchor === anchor; openPop.close(); if (same) return; }
+  const r = anchor.getBoundingClientRect();
+  const el = h('div.pop-panel', { style: { top: `${r.bottom + 6}px`, left: `${Math.max(8, Math.min(r.left, window.innerWidth - 360))}px` } }, ...content());
+  const onDown = (e) => { if (!el.contains(e.target) && !anchor.contains(e.target)) close(); };
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+  function close() { el.remove(); document.removeEventListener('mousedown', onDown, true); window.removeEventListener('keydown', onKey, true); if (openPop && openPop.el === el) openPop = null; }
+  document.addEventListener('mousedown', onDown, true);
+  window.addEventListener('keydown', onKey, true);
+  document.body.append(el);
+  openPop = { el, anchor, close };
+}
+
+/** Hover texts for the engine settings in the Phase 2 and NPC Revoice toolbars, by their label. */
+export const TOOL_TIPS = {
+  'Engine': 'Which voice engine makes the takes: ElevenLabs online, or VoxCPM / OmniVoice running on this PC',
+  'Voice': 'The voice that speaks the lines',
+  'Target voice': 'The voice the recordings are converted into',
+  'Engine · voice': 'This speaker\'s engine and voice',
+  'Speaker': 'Show one speaker\'s lines; pick its voice next to it',
+  'Model': 'The ElevenLabs model. "· tags" models (v3 / v4) understand [audio tags]',
+  'Stability': 'Creative varies the delivery more; Robust keeps it steady but flatter',
+  'Similarity': 'How closely the take sticks to the voice. Too high can add artefacts',
+  'Style': 'Exaggerates the voice\'s style. Costs speed and stability; 0 is safest',
+  'Speed': 'Speaking speed. 1.00 is normal',
+  'Speaker boost': 'Boosts similarity to the voice; slightly slower',
+  'Remove background noise': 'Strip background noise from the source before converting',
+  'Language': 'Force the language, or Auto to let the model detect it',
+  'Read numbers ⓘ': 'Whether numbers, dates and abbreviations are written out before speaking ("1st" → "first")',
+  'Output': 'Audio format, seed and how many lines are requested at once',
+  'Format': 'The audio ElevenLabs sends back. PCM 44.1k is lossless (needs a Pro plan or higher)',
+  'Seed': 'Same seed + same text + same settings ≈ same take. Empty = random',
+  'Concurrent': 'How many lines are requested at once. Match your plan\'s limit',
+  'Reference voice': 'The reference recording the local engine copies the voice from',
+  'Server': 'Whether the local engine\'s server answers',
+  'CFG': 'How strongly VoxCPM follows the text and voice (higher = stricter)',
+  'Timesteps': 'VoxCPM quality steps: more is slower and usually cleaner',
+  'Steps': 'OmniVoice quality steps: more is slower and usually cleaner',
+  'Guidance': 'How strongly OmniVoice follows the text and voice',
+  'Normalize': 'Write out numbers and abbreviations before speaking',
+  'Retry bad cases': 'Regenerate automatically when the result is too long or garbled',
+  'Reference mode': 'Use the reference audio as a voice prompt (closer timbre)',
+  'Control CFG': 'How strongly the reference prompt is followed',
+};

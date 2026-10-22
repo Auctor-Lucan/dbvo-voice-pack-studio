@@ -1,6 +1,6 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton } from './lib.js';
+import { TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret } from './tagtools.js';
@@ -64,6 +64,7 @@ export async function revoiceView(id) {
 
   const view = h('div.view.work');
   const head = h('div.view-head');
+  const creditsSlot = h('span.credits-slot'); // filled by the toolbar, so the toolbar stays on one line
   const body = h('div', { style: { flex: '1', minHeight: '0', display: 'flex', flexDirection: 'column' } });
   view.append(head, body);
 
@@ -76,13 +77,14 @@ export async function revoiceView(id) {
       proj.plans.length ? { label: 'Only the new voice type pack', sub: 'Plugin + SkyPatcher + FLM + install notes', onclick: writePack } : null,
       proj.outputFolder ? { label: 'Open the output folder', sub: proj.outputFolder, onclick: () => rpc('open.path', { path: proj.outputFolder }) } : null,
     ].filter(Boolean)));
-    const tabs = segmented([['setup', 'Setup'], ['speakers', `Speakers (${proj.speakers.length})`], ['lines', `Lines (${proj.lines.length})`], ['voicetypes', `New voice types (${proj.plans.length})`]], tab, (v) => { tab = v; store.set('rv-tab:' + id, v); renderAll(); });
+    const tabs = segmented([['setup', 'Setup', 'The mod\'s files, output folder and options'], ['speakers', `Speakers (${proj.speakers.length})`, 'Who speaks: pick a voice per NPC or voice type'], ['lines', `Lines (${proj.lines.length})`, 'Every line to revoice: generate, listen and edit'], ['voicetypes', `New voice types (${proj.plans.length})`, 'Give one NPC who shares a vanilla voice type a voice type of its own']], tab, (v) => { tab = v; store.set('rv-tab:' + id, v); renderAll(); });
     clear(head).append(
       h('button.btn.ghost.sm', { title: 'Back to the project list', onclick: () => go('revoices') }, '← NPC Revoice'),
       h('h1', proj.name),
       tabs,
       helpButton({ setup: 'setup', speakers: 'speakers', lines: 'lines', voicetypes: 'new-voice-types-optional' }[tab] || 'npc-revoice-tool'),
       h('div.spacer'),
+      creditsSlot,
       switchEl(proj.voiceChanger, toggleVc, 'Voice Changer', { title: 'Convert the game\'s current recordings into the new voice instead of text-to-speech' }),
       h('button.btn', { title: 'Read the plugins and voice sources again and rebuild the line list (keeps your takes and edits)', disabled: !!app.job, onclick: scan }, proj.lastScan ? '⟳ Rescan' : 'Scan'),
       exp,
@@ -128,7 +130,7 @@ export async function revoiceView(id) {
   function renderSetup() {
     const wrap = h('div.view-body');
     const sec = (title, extra, ...rows) => h('div.section', h('div.section-head', h('h2', title), h('div.spacer'), extra), h('div.section-body', rows));
-    const srow = (label, help, control) => h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', control));
+    const srow = (label, help, control) => h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', { title: typeof help === 'string' ? help : label }, control));
     const drop = h('div.dropzone', h('div', h('b', 'Drop plugins, .bsa archives, .zip / .7z files or folders here')),
       h('div.faint', 'A plugin brings its own archives (Plugin.bsa, Plugin - Voices.bsa) and a Sound\\Voice folder next to it. Folders can be a Data folder, a mod folder (MO2\\mods\\…) or an unpacked download.'),
       h('div.row', { style: { justifyContent: 'center', marginTop: '10px' } },
@@ -286,7 +288,7 @@ export async function revoiceView(id) {
   function voiceSettingRows() {
     const v = proj.voice;
     const set = (obj, k, val) => { obj[k] = val; voiceEdits++; saveVoiceSettings(); };
-    const grp = (label, ...kids) => h('div.tgroup', h('label', label), h('div.row', ...kids));
+    const grp = (label, ...kids) => h('div.tgroup', { title: TOOL_TIPS[label] || '' }, h('label', label), h('div.row', ...kids));
     const slider = (obj, k, min, max, step, label, title) => {
       const val = h('span.mono.dim', { style: { width: '34px' } }, Number(obj[k]).toFixed(2));
       const r = h('input', { type: 'range', min, max, step, value: obj[k], title: title || '', style: { width: '96px' } });
@@ -489,7 +491,7 @@ export async function revoiceView(id) {
           h('p', 'The file name and folder come from the plugin, exactly as the game looks for them, so exported files replace the current ones (loose files beat archives).')));
       return;
     }
-    const spoken = h('textarea', { rows: 3, disabled: l.excl }, l.spoken);
+    const spoken = h('textarea', { rows: 3, disabled: l.excl, title: 'What the voice says. Edit freely and put [tags] anywhere' }, l.spoken);
     spoken.addEventListener('change', () => upd(l, 'spoken', spoken.value));
     spoken.addEventListener('focus', () => { lastEdit = { el: spoken, line: l }; });
     insp.append(
@@ -518,7 +520,7 @@ export async function revoiceView(id) {
     const sel = [...grid.selected];
     const bulkBtn = h('button.btn', { title: 'Actions for the ticked rows' }, `Ticked (${sel.length}) ▾`);
     bulkBtn.addEventListener('click', () => {
-      if (!sel.length) { toast('Tick rows first.', true); return; }
+      if (!sel.length) { toast('Tick the box of one or more rows first.', true); return; }
       popupMenu(bulkBtn, [
         { label: 'Accept suggested tags', sub: 'Use the emotion or AI tag suggestion on each ticked line', onclick: () => bulk('acceptTags', sel) },
         { label: 'Undo suggested tags', onclick: () => bulk('rejectTags', sel) },
@@ -543,7 +545,7 @@ export async function revoiceView(id) {
   function renderVbar() {
     const v = proj.voice;
     const set = (obj, k, val) => { obj[k] = val; voiceEdits++; saveVoiceSettings(); renderVbar(); };
-    const grp = (label, ...kids) => h('div.tgroup', h('label', label), h('div.row', ...kids));
+    const grp = (label, ...kids) => h('div.tgroup', { title: TOOL_TIPS[label] || '' }, h('label', label), h('div.row', ...kids));
     const slider = (obj, k, min, max, step, label) => {
       const val = h('span.mono.dim', { style: { width: '34px' } }, Number(obj[k]).toFixed(2));
       const r = h('input', { type: 'range', min, max, step, value: obj[k], style: { width: '96px' } });
@@ -564,13 +566,19 @@ export async function revoiceView(id) {
     const voiceGrp = sp ? grp('Engine · voice', voicePick(sp), h('button.icon-btn', { title: 'Reload voices and models', onclick: () => loadVoices(true) }, '⟳'))
       : grp('Voice', h('button.btn.sm.ghost', { title: 'Each speaker has its own voice: pick a speaker on the left, or set them all in the Speakers tab', onclick: () => { tab = 'speakers'; renderAll(); } }, 'Per speaker · Speakers tab →'));
     const kids = [grp('Speaker', spSel), voiceGrp];
+    // Format, seed and concurrency are set once and rarely touched: they live behind one button.
+    const outputGroup = (fields, o) => {
+      const btn = h('button.btn.sm', { title: `Output: ${o.outputFormat ? o.outputFormat + ' · ' : ''}${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once. Click to change.` }, `${({ mp3_44100_128: 'MP3 128', mp3_44100_192: 'MP3 192', pcm_44100: 'PCM 44.1k' })[o.outputFormat] || 'Seed, concurrent'} ▾`);
+      btn.onclick = () => popover(btn, fields);
+      return grp('Output', btn);
+    };
     const fmts = [['mp3_44100_128', 'MP3 44.1k 128'], ['mp3_44100_192', 'MP3 44.1k 192'], ['pcm_44100', 'PCM 44.1k (lossless)']];
     if (proj.voiceChanger) {
       const st = v.sts;
       const ms = h('select', { onchange: (e) => set(st, 'modelId', e.target.value) }, (elevenModels && elevenModels.length ? elevenModels : [{ modelId: st.modelId }]).map((m) => h('option', { value: m.modelId, selected: m.modelId === st.modelId }, m.modelId)));
       kids.push(grp('Model', ms), slider(st, 'stability', 0, 1, 0.01, 'Stability'), slider(st, 'similarity', 0, 1, 0.01, 'Similarity'), slider(st, 'style', 0, 1, 0.01, 'Style'),
         grp('Remove background noise', switchEl(st.removeBackgroundNoise, (x) => set(st, 'removeBackgroundNoise', x), '', { title: 'Strip background noise from the original before converting' })),
-        num(st, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px' }), num(st, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'Your plan\'s concurrent request limit' }));
+        outputGroup(() => [num(st, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px' }), num(st, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'Your plan\'s concurrent request limit' })], st));
     } else {
       const used = new Set(proj.speakers.filter((x) => x.voiceId && !x.skip).map((x) => x.engine || 'elevenlabs'));
       const eng = sp ? (sp.engine || 'elevenlabs') : (used.size === 1 ? [...used][0] : 'elevenlabs');
@@ -594,9 +602,10 @@ export async function revoiceView(id) {
           style ? slider(e, 'style', 0, 1, 0.01, 'Style') : null,
           boost ? grp('Speaker boost', switchEl(e.speakerBoost, (x) => set(e, 'speakerBoost', x), '', { title: 'Closer to the voice; can clip or sound harsh' })) : null,
           slider(e, 'speed', 0.7, 1.2, 0.01, 'Speed'),
-          grp('Language', lang), grp('Read numbers ⓘ', norm), grp('Format', fmt),
-          num(e, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px', title: 'Same seed + same text + same settings ≈ same take. Empty = random.' }),
-          num(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit.' }));
+          grp('Language', lang), grp('Read numbers ⓘ', norm),
+          outputGroup(() => [grp('Format', fmt),
+            num(e, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px', title: 'Same seed + same text + same settings ≈ same take. Empty = random.' }),
+            num(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit.' })], e));
       } else if (eng === 'voxcpm') {
         const o = v.voxCpm;
         kids.push(num(o, 'cfgValue', 'CFG', { step: 0.1 }), num(o, 'inferenceTimesteps', 'Timesteps', { min: 1 }),
@@ -609,7 +618,8 @@ export async function revoiceView(id) {
       }
     }
     const needs = () => proj.lines.filter((l) => !l.excl && !l.gone && ['Pending', 'Failed', 'Stale'].includes(l.status)).reduce((a, l) => a + l.spoken.length, 0);
-    clear(vbar).append(...kids, h('div.spacer'), creditsEl || (creditsEl = creditsButton(needs, 'This project')));
+    clear(vbar).append(...kids);
+    clear(creditsSlot).append(creditsEl || (creditsEl = creditsButton(needs, 'This project')));
   }
 
   // ---------------------------------------------------------------- tags (ElevenLabs audio tags, as in Phase 2)
@@ -629,14 +639,14 @@ export async function revoiceView(id) {
     } catch (e) { fail(e); }
   }
   async function autotag(ids) {
-    if (!app.state.settings.aiProvider.endpoint) { toast('Set up AI auto-tagging in Global Settings → General & tools first.', true); return; }
+    if (!aiReady()) return;
     try {
       toast(`Asking the AI for tags on ${ids.length} line(s)…`);
       const r = await rpc('revoice.autotag', { id, lineIds: ids });
       for (const nl of r.lines) replaceLine(nl, false);
       grid.setRows(visible()); renderActions(); renderInspector();
       const bad = r.results.filter((x) => x.error);
-      toast(bad.length ? `${r.results.length - bad.length} suggestion(s). ${bad.length} skipped: ${bad[0].error}` : `${r.results.length} suggestion(s) ready — accept (✓) or undo (✕) in each row.`, bad.length > 0);
+      toast(autotagSummary(r.results), r.results.some((x) => x.error));
     } catch (e) { fail(e); }
   }
   function renderTagbar() {
@@ -652,13 +662,13 @@ export async function revoiceView(id) {
       c.addEventListener('click', (e) => tagClick(t, e.shiftKey));
       return c;
     };
-    const custom = h('input', { type: 'text', placeholder: '[custom tag]', style: { width: '130px' } });
+    const custom = h('input', { type: 'text', placeholder: '[custom tag]', title: 'Type any [tag] and press Enter to add it to the ticked rows', style: { width: '130px' } });
     custom.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' || !custom.value.trim()) return;
       let t = custom.value.trim();
       if (!t.startsWith('[')) t = `[${t.replace(/[\[\]]/g, '')}]`;
       const ids = [...grid.selected];
-      if (!ids.length) { toast('Tick rows first.', true); return; }
+      if (!ids.length) { toast('Tick the box of one or more rows first.', true); return; }
       applyTags([t], 'add', ids);
       custom.value = '';
     });
@@ -666,7 +676,7 @@ export async function revoiceView(id) {
       h('span.lbl', 'Tags'),
       (proj.voice.tags || []).map(chip),
       custom,
-      h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
+      h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick the box of one or more rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
       h('button.btn.sm.ghost', { title: 'Add a [tag] to every line in the current filter…', onclick: () => bulkTagDialog({
         pool: grid.rows.filter((l) => !l.excl && !l.gone), idOf: (l) => l.id,
         original: (l) => `${l.text} ${l.notes || ''} ${l.emo || ''}`,
@@ -722,7 +732,7 @@ export async function revoiceView(id) {
   async function playOriginal(l) {
     try {
       const url = await rpc('revoice.original', { id, lineId: l.id });
-      if (!url) { toast('The current file could not be found.', true); return; }
+      if (!url) { toast('This line\'s current game file isn\'t there anymore: it was moved, renamed or deleted.', true); return; }
       audio.src = url;
       audio.play().catch(fail);
     } catch (e) { fail(e); }

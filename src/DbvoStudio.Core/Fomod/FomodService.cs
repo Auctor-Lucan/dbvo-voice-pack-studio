@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Text;
 using System.IO.Compression;
 using System.Text.Json;
 using System.Xml;
@@ -260,7 +261,7 @@ public sealed class FomodService
             var doc = XDocument.Parse(System.Text.RegularExpressions.Regex.Replace(xml, @"^\s*<\?xml[^>]*\?>", ""));
             doc.Validate(Schema(), (_, e) => Add(e.Severity == XmlSeverityType.Error ? "error" : "warning", "ModuleConfig.xml", "Schema: " + e.Message));
         }
-        catch (Exception ex) { Add("error", "ModuleConfig.xml", "Could not be written: " + ex.Message); }
+        catch (Exception ex) { Add("error", "ModuleConfig.xml", "Could not be written: " + FriendlyError.From(ex)); }
 
         if (string.IsNullOrWhiteSpace(p.RootFolder) || !Directory.Exists(p.RootFolder)) Add("error", "Project", "Set the FOMOD root folder (the folder that holds the patch folders).");
         if (!string.IsNullOrWhiteSpace(p.ReleaseFolder) && !Path.IsPathRooted(p.ReleaseFolder)) Add("error", "Project", "The release folder must be a full path, such as D:\\DBVO\\Releases.");
@@ -643,7 +644,7 @@ public sealed class FomodService
             if (p.ArchiveFormat == "7z")
             {
                 var exe = _settings.SevenZipPath;
-                if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe)) throw new InvalidOperationException("Set 7z.exe in Settings to build .7z archives, or choose .zip.");
+                if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe)) throw new InvalidOperationException(".7z archives need 7-Zip, and it isn't set. Pick 7z.exe in Global Settings → General & tools → Tools, or choose .zip.");
                 var archive = Path.Combine(p.ReleaseFolder, archiveBase + ".7z");
                 if (File.Exists(archive)) File.Delete(archive);
                 progress?.Report(new GenerationProgress(0, all.Count, 0, null, "Packing with 7-Zip (no progress shown by 7-Zip)"));

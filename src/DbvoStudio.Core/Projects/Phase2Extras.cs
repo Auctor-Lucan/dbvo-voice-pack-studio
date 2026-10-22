@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Text;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -181,7 +182,7 @@ public sealed partial class Phase2Service
                 }
             }
             catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { failed++; line.LastError = "Could not import: " + ex.Message; }
+            catch (Exception ex) { failed++; line.LastError = "Could not import: " + FriendlyError.From(ex); }
             progress?.Report(new GenerationProgress(++done, todo.Count, failed, line.FinalLine, null));
         }
         await gate.WaitAsync(CancellationToken.None);
@@ -269,15 +270,16 @@ public sealed partial class Phase2Service
         var args = new List<string> { "-y", "-hide_banner", "-loglevel", "error", "-i", input };
         if (startSec > 0.001) { args.Add("-ss"); args.Add(startSec.ToString("0.###", CultureInfo.InvariantCulture)); }
         if (endSec > startSec + 0.05) { args.Add("-to"); args.Add(endSec.ToString("0.###", CultureInfo.InvariantCulture)); }
-        args.AddRange(new[] { "-ac", "1", "-ar", "44100", "-acodec", "pcm_s16le", "-map_metadata", "-1", cut });
+        // Low rumble out, and a 15 ms fade-in so a cut never starts with a click.
+        args.AddRange(new[] { "-af", "highpass=f=70,afade=t=in:d=0.015", "-ac", "1", "-ar", "44100", "-acodec", "pcm_s16le", "-map_metadata", "-1", cut });
         var r = await ExternalTools.RunAsync(tools.FfmpegPath, args, ct);
-        if (r.ExitCode != 0 || !File.Exists(cut)) throw new ToolException("ffmpeg could not read the recording: " + r.StdErr.Trim());
+        if (r.ExitCode != 0 || !File.Exists(cut)) throw new ToolException("The recording couldn't be read. Try recording again; if it keeps failing, check the microphone in Windows sound settings.");
         if (WavSeconds(cut) < 0.2) throw new InvalidOperationException("The recording is too short (under 0.2 s after trimming).");
 
         var wav = work.File("a.wav");
         if (convert)
         {
-            if (string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey)) throw new InvalidOperationException("Converting needs your ElevenLabs API key (Global Settings).");
+            if (string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey)) throw new InvalidOperationException("Converting needs your ElevenLabs API key. Add it in Global Settings → General & tools → ElevenLabs.");
             var (voiceId, _) = RecordingTarget(voice);
             if (string.IsNullOrWhiteSpace(voiceId)) throw new InvalidOperationException("Pick a voice for this voice pack first.");
             var sts = voice.Sts;

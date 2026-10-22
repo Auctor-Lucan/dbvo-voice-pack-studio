@@ -48,12 +48,13 @@ function backgroundImage(st, save, rerender) {
       set ? h('div.row', { style: { gap: '8px', alignItems: 'center' } }, h('span.faint', 'Shade'),
         segmented([['light', 'Lighter'], ['normal', 'Normal'], ['dark', 'Darker']], ui.homeBgShade || 'normal', (x) => save({ ui: { homeBgShade: x } }))) : null));
 }
+const NAV_TIPS = { general: 'Library, tools, ElevenLabs key, appearance, AI auto-tagging and local engines', voices: 'Your voice packs: voice, engine settings, folders and names', pronunciation: 'How words are pronounced, for every voice pack', references: 'Topic files of lines every player already has, so patches can leave them out', categories: 'The categories mods and patches are sorted into', credits: 'Who made what DBVO Studio builds on' };
 function srow(label, help, control) {
-  return h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', control));
+  return h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', { title: typeof help === 'string' ? help : label }, control));
 }
 /** A switch row: the label on the left, the switch and its explanation side by side on the right. */
 function switchRow(label, help, control) {
-  return h('div.srow', h('div.lbl', h('span', label)), h('div.switch-help', control, h('div.faint', help)));
+  return h('div.srow', h('div.lbl', h('span', label)), h('div.switch-help', { title: typeof help === 'string' ? help : label }, control, h('div.faint', help)));
 }
 function status(ok, label) {
   if (label === 'found') label = ok ? 'found' : 'not found';
@@ -94,12 +95,12 @@ export async function settingsView(tab, selectedId) {
   function renderSub() {
     clear(sub);
     for (const [k, label] of TABS) {
-      sub.append(h('button.nav-item' + (k === tab ? '.active' : ''), { onclick: () => show(k) }, label));
+      sub.append(h('button.nav-item' + (k === tab ? '.active' : ''), { title: NAV_TIPS[k] || label, onclick: () => show(k) }, label));
       if (k === 'voices') {
         // The voice pack list lives under its menu item, so the editor gets the full width.
         sub.append(h('div', { style: { padding: '2px 0 8px 12px', display: 'flex', flexDirection: 'column', gap: '2px' } },
-          h('button.btn.primary.sm', { style: { justifyContent: 'center', margin: '4px 0 6px' }, onclick: () => show('voices', 'new') }, '+ New voice pack'),
-          app.state.voicePacks.map((v) => h('button.nav-item' + (tab === 'voices' && voiceSel === v.id ? '.active' : ''), { style: { padding: '5px 10px' }, onclick: () => show('voices', v.id) },
+          h('button.btn.primary.sm', { title: 'Create a new voice pack', style: { justifyContent: 'center', margin: '4px 0 6px' }, onclick: () => show('voices', 'new') }, '+ New voice pack'),
+          app.state.voicePacks.map((v) => h('button.nav-item' + (tab === 'voices' && voiceSel === v.id ? '.active' : ''), { title: `Edit the voice pack ${v.name}`, style: { padding: '5px 10px' }, onclick: () => show('voices', v.id) },
             h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: v.color || '#58a6ff', flexShrink: 0 } }),
             h('div', { style: { minWidth: 0 } }, h('div.ellipsis', v.name), h('div.faint', { style: { fontSize: '11px' } }, (v.packId || 'no pack ID') + ' · ' + (v.naming === 'Legacy' ? 'Legacy' : 'DBVO 2.0')))))));
       }
@@ -113,7 +114,7 @@ export async function settingsView(tab, selectedId) {
 async function credits() {
   const u = await rpc('reference.info', {}).catch(() => null);
   const day = (t) => (t ? new Date(t).toLocaleDateString() : '?');
-  const row = (name, sub, ...body) => h('div.srow', { style: { alignItems: 'start' } }, h('div.lbl', name, sub ? h('small', sub) : null), h('div.col', { style: { gap: '6px' } }, ...body));
+  const row = (name, sub, ...body) => h('div.srow', { style: { alignItems: 'start' } }, h('div.lbl', name, sub ? h('small', sub) : null), h('div.col', { style: { gap: '6px' }, title: typeof sub === 'string' ? sub : '' }, ...body));
   const lic = (...x) => h('div.faint', ...x);
   const nx = (user) => 'https://www.nexusmods.com/skyrimspecialedition/users/' + user;
   const pf = (name) => 'https://www.nexusmods.com/profile/' + name;
@@ -339,8 +340,8 @@ async function general(_, rerender) {
     section('WAV to LIP (Other Tools)', null, wlBox),
     section('Local voice engines', null,
       h('div.help', { style: { margin: '10px 0' } }, 'VoxCPM and OmniVoice run on your own PC, as with DBVO Voice Pack Maker 2.7.0 (same servers and settings). Start the server, then pick the engine for a voice pack (Voice packs → Engine, or the Phase 2 toolbar).'),
-      srow('VoxCPM server', 'Default http://localhost:7861', h('div.row', textInput(st.localEngines.voxCpmAddress, (x) => save({ voxCpmAddress: x }), 'http://localhost:7861'), engStatus.voxcpm, h('button.btn.sm', { onclick: () => checkEngine('voxcpm') }, 'Check'))),
-      srow('OmniVoice server', 'Default http://localhost:7862', h('div.row', textInput(st.localEngines.omniVoiceAddress, (x) => save({ omniVoiceAddress: x }), 'http://localhost:7862'), engStatus.omnivoice, h('button.btn.sm', { onclick: () => checkEngine('omnivoice') }, 'Check')))),
+      srow('VoxCPM server', 'Default http://localhost:7861', h('div.row', textInput(st.localEngines.voxCpmAddress, (x) => save({ voxCpmAddress: x }), 'http://localhost:7861'), engStatus.voxcpm, h('button.btn.sm', { title: 'See whether the VoxCPM server answers at this address', onclick: () => checkEngine('voxcpm') }, 'Check'))),
+      srow('OmniVoice server', 'Default http://localhost:7862', h('div.row', textInput(st.localEngines.omniVoiceAddress, (x) => save({ omniVoiceAddress: x }), 'http://localhost:7862'), engStatus.omnivoice, h('button.btn.sm', { title: 'See whether the OmniVoice server answers at this address', onclick: () => checkEngine('omnivoice') }, 'Check')))),
   );
 }
 
@@ -405,7 +406,7 @@ async function voices(selectedId, rerender, onSelect) {
     const renderTags = () => {
       clear(tagsBox).append(
         v.tags.map((t, i) => h('span.chip.tag-chip', t, h('button.icon-btn', { title: 'Remove', onclick: () => { v.tags.splice(i, 1); renderTags(); persistSoon(); } }, '×'))),
-        h('button.btn.sm', { onclick: async () => {
+        h('button.btn.sm', { title: 'Add tags to this voice pack\'s tag bar', onclick: async () => {
           const r = await prompt('Add tags', [{ name: 't', label: 'Tags', placeholder: '[menacing] [softly]' }]);
           if (!r) return;
           for (const m of r.t.match(/\[[^\]]+\]|[^\s\[\]][^\[\]]*[^\s\[\]]|[^\s\[\]]/g) || []) {
@@ -440,7 +441,7 @@ async function voices(selectedId, rerender, onSelect) {
     renderSwatches();
 
     clear(editor).append(
-      section('Voice pack', h('div.row', h('div.spacer'), savedEl, h('button.btn.primary.sm', { onclick: async () => { if (await persistNow()) toast('Saved.'); } }, 'Save')),
+      section('Voice pack', h('div.row', h('div.spacer'), savedEl, h('button.btn.primary.sm', { title: 'Save this voice pack now (changes also save by themselves)', onclick: async () => { if (await persistNow()) toast('Saved.'); } }, 'Save')),
         srow('Name', null, txt(v, 'name', { placeholder: 'e.g. MyVoice' })),
         srow('Colour', 'The voice pack label takes this colour everywhere, so you always see which voice you are working with.', colorIn),
         srow('DBVO voice pack ID', 'The folder name under Sound\\DBVO\\ and the voice_pack_id in the DBVO JSON.', txt(v, 'packId', { placeholder: 'e.g. vampira', after: renderPreview })),
@@ -468,7 +469,7 @@ async function voices(selectedId, rerender, onSelect) {
         srow('Gain', null, h('div.row', txt(v, 'gainDb', { type: 'number', width: '80px' }), h('span.dim', 'dB')))),
       section('Behaviour', null,
         srow('Lock engine settings', 'Prevents accidental changes in the Phase 2 toolbar.', switchEl(v.settingsLocked, (x) => { v.settingsLocked = x; persistSoon(); })),
-        packs.some((x) => x.id === v.id) ? srow('Delete', null, h('button.btn.danger.sm', { onclick: async () => {
+        packs.some((x) => x.id === v.id) ? srow('Delete', null, h('button.btn.danger.sm', { title: 'Delete this voice pack (asks first)', onclick: async () => {
           if (!(await confirmBox('Delete voice pack?', `Delete "${v.name}"? DBVO Patches using it stop working.`, 'Delete', true))) return;
           await rpc('voice.delete', { id: v.id });
           await refreshState();
@@ -541,8 +542,8 @@ export function pronTable(list, onChange) {
   const render = () => {
     clear(tbody);
     list.forEach((p, i) => {
-      const word = h('input', { type: 'text', value: p.word, placeholder: 'Alduin' });
-      const rep = h('input', { type: 'text', value: p.replacement, placeholder: p.kind === 'phoneme' ? 'ˈæl.duː.ɪn' : 'Aldooin' });
+      const word = h('input', { type: 'text', value: p.word, placeholder: 'Alduin', title: 'The word as it is written in the lines' });
+      const rep = h('input', { type: 'text', value: p.replacement, placeholder: p.kind === 'phoneme' ? 'ˈæl.duː.ɪn' : 'Aldooin', title: p.kind === 'phoneme' ? 'The pronunciation in IPA' : 'How it should sound, spelled as you would read it' });
       const kind = h('select', { title: 'Sounds like: the word is replaced by a respelling the voice reads as normal text (e.g. Aldooin). Works with every engine.\nIPA: an exact pronunciation in the International Phonetic Alphabet (e.g. ˈæl.duː.ɪn). Only ElevenLabs v3/v4 and Flash v2 read it; other engines ignore it.' },
         h('option', { value: 'alias', selected: p.kind === 'alias' }, 'Sounds like'), h('option', { value: 'phoneme', selected: p.kind === 'phoneme' }, 'IPA'));
       const upd = () => { Object.assign(p, { word: word.value, replacement: rep.value, kind: kind.value }); onChange(); };
@@ -558,7 +559,7 @@ export function pronTable(list, onChange) {
   return h('div', { style: { padding: '6px 0 12px' } },
     h('table.tbl', h('thead', h('tr', h('th', { title: 'The word as it is written in the line' }, 'Word in the line'), h('th', { title: 'Sounds like = respelling; IPA = phonetic alphabet' }, 'Kind'), h('th', 'How it\'s spoken'), h('th', { title: 'Match only the word on its own' }, 'Whole word'), h('th', { title: 'Match only with the same capitals' }, 'Match case'), h('th', ''))), tbody),
     h('div.row', { style: { marginTop: '8px' } },
-      h('button.btn.sm', { onclick: () => { list.push({ word: '', kind: 'alias', replacement: '', wholeWord: true, caseSensitive: false }); render(); } }, '+ Add word'),
+      h('button.btn.sm', { title: 'Add an empty pronunciation entry', onclick: () => { list.push({ word: '', kind: 'alias', replacement: '', wholeWord: true, caseSensitive: false }); render(); } }, '+ Add word'),
       h('span.faint', '"Sounds like" works with every engine. IPA is sent as inline /…/ to Eleven v3/v4 and Flash v2. Never changes filenames. Longer words are applied first.')));
 }
 
@@ -596,7 +597,7 @@ async function references(_, rerender) {
       h('tbody', st.references.map((r) => h('tr',
         h('td', r.name), h('td.faint', r.lineCount),
         h('td', switchEl(defaults.has(r.id), async (on) => { on ? defaults.add(r.id) : defaults.delete(r.id); await saveSettings({ defaultReferenceIds: [...defaults] }); })),
-        h('td', h('button.btn.sm.danger', { onclick: async () => { if (await confirmBox('Remove reference?', `Remove "${r.name}"?`, 'Remove', true)) { app.state = await rpc('references.remove', { id: r.id }); rerender(); } } }, 'Remove'))))))
+        h('td', h('button.btn.sm.danger', { title: 'Remove this reference (patches stop omitting its lines)', onclick: async () => { if (await confirmBox('Remove reference?', `Remove "${r.name}"?`, 'Remove', true)) { app.state = await rpc('references.remove', { id: r.id }); rerender(); } } }, 'Remove'))))))
       : h('div.faint', { style: { padding: '8px 0' } }, 'None yet.'),
     h('div', { style: { padding: '12px 0' } }, h('button.btn', { onclick: async () => {
       const file = await rpc('pick.file', { title: 'Choose a topic .txt', filter: 'Topic files|*.txt' });
@@ -624,7 +625,7 @@ async function categories(_, rerender) {
   return section('Mod categories', null,
     h('div.help', { style: { margin: '10px 0' } }, 'Used to sort mods and DBVO Patches, and as the default FOMOD pages in Phase 3. You pick a mod\'s category in Phase 1, or drag a patch to another category. Categories never change folder paths.'),
     list,
-    h('div', { style: { padding: '12px 0' } }, h('button.btn', { onclick: async () => { const r = await prompt('New category', [{ name: 'n', label: 'Name' }]); if (r && r.n.trim()) { cats.push(r.n.trim()); save(); } } }, '+ Add category')));
+    h('div', { style: { padding: '12px 0' } }, h('button.btn', { title: 'Add a mod category', onclick: async () => { const r = await prompt('New category', [{ name: 'n', label: 'Name' }]); if (r && r.n.trim()) { cats.push(r.n.trim()); save(); } } }, '+ Add category')));
 }
 
 // ------------------------------------------------------------------ library
@@ -642,12 +643,28 @@ function librarySection() {
     srow('Location', 'Your current library.',
       h('div.row', h('span.mono', st.libraryRoot),
         h('button.btn.sm', { title: 'Open the library folder in Explorer', onclick: () => rpc('library.open') }, 'Open'),
-        h('button.btn.sm', { onclick: async () => {
+        h('button.btn.sm', { title: 'Move the library to another folder (or use one that already holds a library)', onclick: async () => {
           const folder = await rpc('pick.folder', { title: 'New library location (an empty folder, or an existing DBVO Studio library)' });
           if (!folder) return;
           if (!(await confirmBox('Change library location?', `An empty folder gets a copy of your current library; a folder that already holds a library is used as it is. The app restarts afterwards.\n\n${folder}`, 'Change and restart'))) return;
           try { await rpc('library.change', { path: folder }); } catch (e) { fail(e); }
         } }, 'Change…'))),
     srow('Backups to keep', 'Made automatically before imports, deletes, generation and FOMOD builds (generation and build backups at most every 10 minutes, kept separately).', h('div.row', keep,
-      h('button.btn.sm', { title: 'Zip all projects and settings into the backups folder now', onclick: async () => { const p = await rpc('backup.now', { reason: 'manual' }); toast('Backup: ' + p); } }, 'Back up now'))));
+      h('button.btn.sm', { title: 'Zip all projects and settings into the backups folder now', onclick: async () => { const p = await rpc('backup.now', { reason: 'manual' }); toast('Backup: ' + p); } }, 'Back up now'))),
+    fuzCacheRow());
+}
+
+/** The .fuz cache is shared by every patch, so it is managed here rather than in a patch. */
+function fuzCacheRow() {
+  const info = h('span.faint', '…');
+  const load = () => rpc('cache.fuzInfo').then((i) => { info.textContent = i.files ? `${i.files} file(s), ${(i.bytes / 1e6).toFixed(1)} MB` : 'Empty'; }).catch(() => { info.textContent = ''; });
+  load();
+  return srow('.fuz cache', 'Every .fuz built is kept here, so a later build of an unchanged take is copied instead of encoded again. Clear it after updating xWMAEncode. Imported .fuz files are not in it.',
+    h('div.row', info, h('button.btn.sm', { title: 'Delete the cached .fuz files; the next builds encode every take again', onclick: async () => {
+      try {
+        if (!(await confirmBox('Clear the .fuz cache?', 'The next build of each patch encodes every take again. Your exported files and takes are not touched.', 'Clear'))) return;
+        const r = await rpc('cache.fuzClear');
+        toast(`${r.files} file(s) removed.`); load();
+      } catch (e) { fail(e); }
+    } }, 'Clear…')));
 }

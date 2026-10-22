@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Text;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
@@ -69,7 +70,7 @@ public sealed partial class Backend
         catch (Exception ex)
         {
             App.Log($"{method} failed: {ex}");
-            _post(new { id, error = ex.Message });
+            _post(new { id, error = FriendlyError.From(ex) });
         }
     }
 
@@ -334,7 +335,7 @@ public sealed partial class Backend
             case "patch.delete":
                 return await Locked(() =>
                 {
-                    if (_jobCts != null) throw new InvalidOperationException("Stop the running job first.");
+                    if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Press Cancel there first.");
                     _lib.Backup("before-delete-patch", _settings.BackupsToKeep);
                     ForgetPatch(S(p, "id"));
                     Directory.Delete(_lib.PatchFolder(S(p, "id")), true);
@@ -368,7 +369,7 @@ public sealed partial class Backend
                 return await Locked(() =>
                 {
                     var patch = LoadPatch(S(p, "id"));
-                    return new Phase2Service(_lib, Runtime()).StaleExports(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods());
+                    return new Phase2Service(_lib, Runtime()).StaleExportReasons(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods()).Select(x => new { path = x.Path, why = x.Why }).ToList();
                 });
             case "patch.writeFixPlugins": return await Locked(() => WritePatchFixPlugins(p));
             case "patch.fixConflicts": return await Locked(() => FixConflicts(LoadPatch(S(p, "id"))));
@@ -494,14 +495,14 @@ public sealed partial class Backend
     private ElevenLabsClient Client()
     {
         var key = Secrets.Unprotect(_settings.ElevenLabsApiKey);
-        if (string.IsNullOrEmpty(key)) throw new InvalidOperationException("Enter your ElevenLabs API key in Settings.");
+        if (string.IsNullOrEmpty(key)) throw new InvalidOperationException("ElevenLabs needs your API key, and none is saved. Add it in Global Settings → General & tools → ElevenLabs.");
         return new ElevenLabsClient(key);
     }
 
     private ExternalTools Tools()
     {
-        if (!File.Exists(_settings.FfmpegPath)) throw new InvalidOperationException("ffmpeg.exe was not found. Set it in Settings.");
-        if (!File.Exists(_settings.FaceFxWrapperPath)) throw new InvalidOperationException("FaceFXWrapper.exe was not found. Set it in Settings.");
+        if (!File.Exists(_settings.FfmpegPath)) throw new InvalidOperationException("ffmpeg.exe wasn't found. Pick it in Global Settings → General & tools → Tools.");
+        if (!File.Exists(_settings.FaceFxWrapperPath)) throw new InvalidOperationException("Making .lip files needs FaceFXWrapper.exe, and it wasn't found. Pick it in Global Settings → General & tools → Tools.");
         return new ExternalTools
         {
             FfmpegPath = _settings.FfmpegPath,
@@ -1018,7 +1019,7 @@ public sealed partial class Backend
 
     private object StartGenerate(JsonElement p)
     {
-        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         var id = S(p, "id");
         var mode = S(p, "mode", "missing");
         List<string>? ids = p.TryGetProperty("lineIds", out var li) && li.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds") : null;
@@ -1033,7 +1034,7 @@ public sealed partial class Backend
                 _lib.Backup("before-generate-" + patch.Name, _settings.BackupsToKeep, routine: true);
                 var lines = SelectLines(patch, p);
                 var svc = new Phase2Service(_lib, Runtime());
-                var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "generate", g.Done, g.Total, g.Failed, g.Current, g.Message }));
+                var progress = new DirectProgress<GenerationProgress>(g => Emit("progress", new { kind = "generate", g.Done, g.Total, g.Failed, g.Current, g.Message }));
                 Emit("progress", new { kind = "generate", done = 0, total = lines.Count, failed = 0, current = (string?)null, message = (string?)null });
                 Task OnLine(Phase2Line l) { Emit("line2", new { patchId = patch.Id, line = Line2Dto(l, voice) }); return Task.CompletedTask; }
                 if (patch.Kind == "vc")
@@ -1054,7 +1055,7 @@ public sealed partial class Backend
             catch (Exception ex)
             {
                 App.Log("Generate failed: " + ex);
-                Emit("jobDone", new { kind = "generate", patchId = id, ok = false, message = ex.Message });
+                Emit("jobDone", new { kind = "generate", patchId = id, ok = false, message = FriendlyError.From(ex) });
             }
             finally
             {
@@ -1066,7 +1067,7 @@ public sealed partial class Backend
 
     private object StartFuz(JsonElement p)
     {
-        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         var id = S(p, "id");
         var custom = S(p, "customFolder");
         var keepFix = B(p, "keepFix");
@@ -1090,7 +1091,7 @@ public sealed partial class Backend
                 }
                 finally { _gate.Release(); }
                 if (removed > 0) files.Insert(0, $"{removed} file(s) from earlier exports removed (lines no longer exported).");
-                var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "fuz", g.Done, g.Total, g.Failed, g.Current }));
+                var progress = new DirectProgress<GenerationProgress>(g => Emit("progress", new { kind = "fuz", g.Done, g.Total, g.Failed, g.Current }));
                 var rep = await svc.ExportFuzAsync(patch, voice, _lib.LoadMods(), Tools(), string.IsNullOrWhiteSpace(custom) ? null : custom, progress, ct, _gate);
                 Emit("jobDone", new { kind = "fuz", patchId = id, ok = rep.Failed == 0, report = rep, files, reminders = Phase2Service.EndOfPhaseReminders(patch, voice, _lib.LoadMods()) });
             }
@@ -1101,7 +1102,7 @@ public sealed partial class Backend
             catch (Exception ex)
             {
                 App.Log("Fuz failed: " + ex);
-                Emit("jobDone", new { kind = "fuz", patchId = id, ok = false, message = ex.Message });
+                Emit("jobDone", new { kind = "fuz", patchId = id, ok = false, message = FriendlyError.From(ex) });
             }
             finally
             {
@@ -1200,7 +1201,7 @@ public sealed partial class Backend
     private object ChangeLibrary(string target)
     {
         if (string.IsNullOrWhiteSpace(target)) throw new InvalidOperationException("Choose a folder.");
-        if (_jobCts != null) throw new InvalidOperationException("Stop the running job first.");
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Press Cancel there first.");
         target = Path.GetFullPath(target);
         if (string.Equals(target.TrimEnd('\\'), _lib.Root.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) return new { changed = false };
         bool existingLibrary = File.Exists(Path.Combine(target, "settings.json"));

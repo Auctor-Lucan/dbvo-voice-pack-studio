@@ -1,5 +1,5 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton } from './lib.js';
+import { TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret } from './tagtools.js';
 import { recordTake } from './recorder.js';
@@ -42,7 +42,7 @@ export function voiceChip(name, color) {
 /** The ElevenLabs credits button (ring + popover). needs(): characters the current page still needs, label: what needs them. */
 export function creditsButton(needs, label = 'This patch') {
   const ring = h('span.row', ringIcon(1, { size: 15 }));
-  const btn = h('button.btn.sm.credits-btn', { title: '' }, ring, h('b', '…'), h('span.faint', 'credits'));
+  const btn = h('button.btn.sm.credits-btn', { title: 'ElevenLabs credits left this period (hover for details)' }, ring, h('b', '…'), h('span.faint', 'credits'));
   let data = null, err = null, pop = null, hideT = 0;
   const fill = (c) => {
     data = c;
@@ -62,7 +62,7 @@ export function creditsButton(needs, label = 'This patch') {
         h('div.faint', `${c.characterCount.toLocaleString()} of ${c.characterLimit.toLocaleString()} used · ${c.tier}`))),
       c.nextReset ? h('div.faint', 'Resets ' + new Date(c.nextReset * 1000).toLocaleString()) : null,
       h('div', `${label} still needs ≈ ${pend.toLocaleString()}`, h('div.faint', pend > left ? 'More than you have left this period' : 'Fits in what you have left')),
-      h('div.row', h('div.spacer'), h('button.btn.sm.ghost', { onclick: async () => { creditsCache = null; try { fill(await loadCredits(true)); err = null; } catch (e) { err = e; } if (pop) clear(pop).append(...body()); } }, '⟳ Refresh')),
+      h('div.row', h('div.spacer'), h('button.btn.sm.ghost', { title: 'Ask ElevenLabs again for the credits left', onclick: async () => { creditsCache = null; try { fill(await loadCredits(true)); err = null; } catch (e) { err = e; } if (pop) clear(pop).append(...body()); } }, '⟳ Refresh')),
     ];
   };
   const close = () => { clearTimeout(hideT); hideT = setTimeout(() => { if (pop) { pop.remove(); pop = null; } }, 180); };
@@ -103,11 +103,11 @@ export async function patchesView(kind = 'tts') {
   if (!patches.length && vcPage) {
     body.append(h('div.empty', h('h2', 'No Voice Changer patches yet'),
       h('div', 'Pick a Phase 1 mod, the voice pack to make, and the folder with the WAV or .fuz files of another voice pack for the same mod.'),
-      h('div', { style: { marginTop: '14px' } }, h('button.btn.primary', { onclick: () => newPatch('vc') }, '+ New Voice Changer patch'))));
+      h('div', { style: { marginTop: '14px' } }, h('button.btn.primary', { title: 'A patch that converts another voice pack\'s recordings into this voice', onclick: () => newPatch('vc') }, '+ New Voice Changer patch'))));
     return view;
   }
   if (!s.voicePacks.length) {
-    body.append(h('div.empty', h('h2', 'Create a voice pack first'), h('div', { style: { marginTop: '14px' } }, h('button.btn.primary', { onclick: () => go('settings', { tab: 'voices', id: 'new' }) }, '+ New voice pack'))));
+    body.append(h('div.empty', h('h2', 'Create a voice pack first'), h('div', { style: { marginTop: '14px' } }, h('button.btn.primary', { title: 'Create a voice pack in Global Settings → Voice packs', onclick: () => go('settings', { tab: 'voices', id: 'new' }) }, '+ New voice pack'))));
     return view;
   }
   let dragId = null;
@@ -198,14 +198,14 @@ async function addCategory() {
 async function newPatch(kind = 'tts') {
   const s = await refreshState();
   const vc = kind === 'vc';
-  if (!s.voicePacks.length) { toast('Create a voice pack first.', true); go('settings', { tab: 'voices', id: 'new' }); return; }
+  if (!s.voicePacks.length) { toast('Create a voice pack first, in Global Settings → Voice packs.', true); go('settings', { tab: 'voices', id: 'new' }); return; }
   if (!s.mods.length) { toast('Create a mod in Phase 1 first.', true); go('mods'); return; }
   const name = h('input', { type: 'text', placeholder: vc ? 'leave empty for "<mod> (Voice Changer)"' : 'leave empty for the mod\'s name' });
   const voice = h('select', s.voicePacks.map((v) => h('option', { value: v.id, selected: v.id === s.settings.lastVoicePackId }, v.name)));
   const modBoxes = s.mods.map((m) => ({ m, box: h('input', { type: 'checkbox' }) }));
   const sources = [];
   const srcList = h('div.col');
-  const renderSrc = () => clear(srcList).append(sources.length ? sources.map((f, i) => h('div.row', h('span.mono.grow.ellipsis', f), h('button.icon-btn', { onclick: () => { sources.splice(i, 1); renderSrc(); } }, '×'))) : h('div.faint', 'No folder yet.'));
+  const renderSrc = () => clear(srcList).append(sources.length ? sources.map((f, i) => h('div.row', h('span.mono.grow.ellipsis', f), h('button.icon-btn', { title: 'Remove this source folder', onclick: () => { sources.splice(i, 1); renderSrc(); } }, '×'))) : h('div.faint', 'No folder yet.'));
   renderSrc();
   const ok = await modal(vc ? 'New Voice Changer patch' : 'New DBVO Patch', [
     h('div.col', h('div.field-label', vc ? 'Voice pack to make (the target voice)' : 'Voice pack'), voice),
@@ -247,6 +247,7 @@ export async function patchView(id) {
   let focusedId = null;
   let voices = [], models = [], localVoices = [];
   let creditsEl = null; // one credits button per page, updated in place
+  const creditsSlot = h('span.credits-slot');
   { const c = engineCache.get(vc ? 'sts' : voice.engine || 'elevenlabs'); if (c) ({ voices, models, localVoices } = c); }
   let showInsp = store.get('insp2', true);
   let lastEdit = null; // { el, line } — the last spoken-text box the user was in
@@ -282,9 +283,11 @@ export async function patchView(id) {
   const qaText = (q) => q ? [q.score != null ? `Words match ${(q.score * 100).toFixed(0)}%` : null, q.heard ? `Heard: "${q.heard}"` : null,
     q.lufs != null ? `Loudness ${q.lufs.toFixed(1)} LUFS` : null, q.truePeak != null ? `Peak ${q.truePeak.toFixed(1)} dBTP` : null].filter(Boolean).join('\n') : '';
   const QA_WHY = { words: 'words differ', quiet: 'too quiet', clipping: 'clipping', error: 'not checked' };
-  const qaFlagged = (l) => { const t = selTake(l); return !!(t && t.qa && t.qa.flags.length); };
+  // A line is flagged when its take in use, or a kept ★ variant, was flagged by Check takes.
+  const flaggedTake = (l) => { const s = selTake(l); return [s, ...l.takes.filter((t) => t.kept && t !== s)].find((t) => t && t.qa && t.qa.flags.length); };
+  const qaFlagged = (l) => !!flaggedTake(l);
   function qaBadge(l) {
-    const t = selTake(l);
+    const t = flaggedTake(l) || selTake(l);
     if (!t || !t.qa) return null;
     const q = t.qa;
     return q.flags.length
@@ -369,7 +372,7 @@ export async function patchView(id) {
   async function playSource(l) {
     try {
       const url = await rpc('audio.preview', { path: l.sourceWav });
-      if (!url) { toast('The source file is gone.', true); return; }
+      if (!url) { toast('This line\'s source file isn\'t there anymore: it was moved, renamed or deleted.', true); return; }
       audio.src = url;
       audio.play().catch(fail);
     } catch (e) { fail(e); }
@@ -450,7 +453,7 @@ export async function patchView(id) {
 
   const isTagModel = (m) => /^eleven_v[34]/i.test(m || '');
   const modelInfo = (m) => models.find((x) => x.modelId === m) || {};
-  const grp = (label, ...kids) => h('div.tgroup', h('label', label), h('div.row', ...kids));
+  const grp = (label, ...kids) => h('div.tgroup', { title: TOOL_TIPS[label] || '' }, h('label', label), h('div.row', ...kids));
   const slider = (obj, key, min, max, step, label, locked) => {
     const val = h('span.mono.dim', { style: { width: '34px' } }, Number(obj[key]).toFixed(2));
     const r = h('input', { type: 'range', min, max, step, value: obj[key], disabled: locked, style: { width: '96px' } });
@@ -471,6 +474,15 @@ export async function patchView(id) {
     return grp(label, sel, h('button.icon-btn', { title: 'Reload voices and models', onclick: () => loadEngine(true) }, '⟳'));
   };
 
+  // Format, seed and concurrency are set once and rarely touched: they live behind one button.
+  const FORMAT_NAME = { mp3_44100_128: 'MP3 128', mp3_44100_192: 'MP3 192', pcm_44100: 'PCM 44.1k', pcm_24000: 'PCM 24k', pcm_22050: 'PCM 22k', pcm_16000: 'PCM 16k' };
+  function outputGroup(fields, o) {
+    const sum = `${FORMAT_NAME[o.outputFormat] || o.outputFormat || '—'} · ${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once`;
+    const btn = h('button.btn.sm', { title: `Output: ${sum}. Click to change the audio format, seed and how many lines are requested at once.` }, `${FORMAT_NAME[o.outputFormat] || 'Format'} ▾`);
+    btn.onclick = () => popover(btn, fields);
+    return grp('Output', btn);
+  }
+
   function renderToolbar() {
     const locked = voice.settingsLocked;
     const eng = engine();
@@ -487,8 +499,8 @@ export async function patchView(id) {
         slider(st, 'stability', 0, 1, 0.01, 'Stability', locked), slider(st, 'similarity', 0, 1, 0.01, 'Similarity', locked), slider(st, 'style', 0, 1, 0.01, 'Style', locked),
         grp('Speaker boost', switchEl(st.speakerBoost, (v) => setIn(st, 'speakerBoost', v), '', { disabled: locked, title: 'Boosts similarity to the target voice; slightly slower' })),
         grp('Remove background noise', switchEl(st.removeBackgroundNoise, (v) => setIn(st, 'removeBackgroundNoise', v), '', { disabled: locked, title: 'Strip background noise from the source before converting' })),
-        grp('Format', fmt), numIn(st, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px' }),
-        numIn(st, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'Your ElevenLabs plan\'s concurrency limit' }));
+        outputGroup(() => [grp('Format', fmt), numIn(st, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px' }),
+          numIn(st, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'Your ElevenLabs plan\'s concurrency limit' })], st));
     } else if (eng === 'voxcpm' || eng === 'omnivoice') {
       const o = eng === 'voxcpm' ? voice.voxCpm : voice.omniVoice;
       const vsel = h('select', { disabled: locked, onchange: (ev) => setIn(o, 'voice', ev.target.value) },
@@ -533,13 +545,16 @@ export async function patchView(id) {
         supportsStyle ? slider(e, 'style', 0, 1, 0.01, 'Style', locked) : null,
         supportsBoost ? grp('Speaker boost', switchEl(e.speakerBoost, (v) => setE('speakerBoost', v), '', { disabled: locked, title: 'Boosts similarity to the voice; slightly slower' })) : null,
         slider(e, 'speed', 0.7, 1.2, 0.01, 'Speed', locked),
-        grp('Language', lang), grp('Read numbers ⓘ', norm), grp('Format', fmt),
-        numIn(e, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px', title: 'Same seed + same text + same settings ≈ same take. Empty = random.' }),
-        numIn(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit; the app slows down automatically on "too many requests".' }));
+        grp('Language', lang), grp('Read numbers ⓘ', norm),
+        outputGroup(() => [grp('Format', fmt),
+          numIn(e, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px', title: 'Same seed + same text + same settings ≈ same take. Empty = random.' }),
+          numIn(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit; the app slows down automatically on "too many requests".' })], e));
     }
     if (locked) tb.append(h('span.badge.b-toolong', { title: 'Unlock in Global Settings → Voice packs' }, '🔒 locked'));
     tb.append(helpButton('the-toolbar'));
-    if (eng === 'elevenlabs' || eng === 'sts') tb.append(h('div.spacer'), creditsEl || (creditsEl = creditsButton(() => patch.lines.filter(pendingLine).reduce((a, l) => a + l.spoken.length, 0))));
+    // The credits sit in the page head, so the toolbar stays on one line.
+    clear(creditsSlot);
+    if (eng === 'elevenlabs' || eng === 'sts') creditsSlot.append(creditsEl || (creditsEl = creditsButton(() => patch.lines.filter(pendingLine).reduce((a, l) => a + l.spoken.length, 0))));
   }
 
   function folderButton() {
@@ -550,7 +565,7 @@ export async function patchView(id) {
         patch.finalRoot ? { label: 'Final folder (.fuz)', sub: patch.finalRoot, onclick: () => rpc('open.path', { path: patch.finalRoot }).catch(fail) } : null,
         patch.fixFolder ? { label: 'DBVO Fix folder', sub: patch.fixFolder, onclick: () => rpc('open.path', { path: patch.fixFolder }).catch(fail) } : null,
       ].filter(Boolean);
-      if (!items.length) { toast('Set the folders in Folders & options first.', true); return; }
+      if (!items.length) { toast('This patch has no export folders yet. Set them in Folders & options (top right).', true); return; }
       popupMenu(btn, items);
     });
     return btn;
@@ -612,13 +627,13 @@ export async function patchView(id) {
       c.addEventListener('click', (e) => tagClick(t, e.shiftKey));
       return c;
     };
-    const custom = h('input', { type: 'text', placeholder: '[custom tag]', style: { width: '130px' } });
+    const custom = h('input', { type: 'text', placeholder: '[custom tag]', title: 'Type any [tag] and press Enter to add it to the ticked rows', style: { width: '130px' } });
     custom.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' || !custom.value.trim()) return;
       let t = custom.value.trim();
       if (!t.startsWith('[')) t = `[${t.replace(/[\[\]]/g, '')}]`;
       const ids = [...grid.selected];
-      if (!ids.length) { toast('Tick rows first.', true); return; }
+      if (!ids.length) { toast('Tick the box of one or more rows first.', true); return; }
       applyTags([t], 'add', ids);
       custom.value = '';
     });
@@ -626,17 +641,14 @@ export async function patchView(id) {
       h('span.lbl', 'Tags'), helpButton('spoken-text-and-tags'),
       voice.tags.map(chip),
       custom,
-      h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
+      h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick the box of one or more rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
       h('button.btn.sm.ghost', { title: 'Add a [tag] to every line in the current filter…', onclick: () => bulkTagDialog() }, 'Add a [tag] to all shown…'),
       h('div.spacer'),
       folderButton());
   }
 
   async function autotag(ids) {
-    if (!app.state.settings.aiProvider.endpoint) {
-      toast('Set up AI auto-tagging in Global Settings → General & tools first.', true);
-      return;
-    }
+    if (!aiReady()) return;
     try {
       toast(`Asking the AI for tags on ${ids.length} line(s)…`);
       const r = await rpc('patch.autotag', { id, lineIds: ids });
@@ -645,7 +657,7 @@ export async function patchView(id) {
       grid.setRows(visible());
       renderCounts();
       const bad = r.results.filter((x) => x.error);
-      toast(bad.length ? `${r.results.length - bad.length} suggestion(s). ${bad.length} skipped: ${bad[0].error}` : `${r.results.length} suggestion(s) ready — accept or undo in each row.`, bad.length > 0);
+      toast(autotagSummary(r.results), r.results.some((x) => x.error));
     } catch (e) { fail(e); }
   }
 
@@ -699,15 +711,15 @@ export async function patchView(id) {
     const c = counts();
     const chip = (key, label, title) => h('span.chip' + (filter === key ? '.on' : ''), { title, onclick: () => { filter = key; store.set('patch:' + id, { filter }); renderCounts(); grid.setRows(visible()); } }, label, h('span.n', c[key]));
     const had = filters.querySelector('input[type=text]');
-    const q = had || h('input', { type: 'text', placeholder: 'Search…', value: search });
+    const q = had || h('input', { type: 'text', placeholder: 'Search…', value: search, title: 'Search the original line, spoken text and file name' });
     if (!had) q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 150));
     // Only filters that match at least one line (the open one always stays).
     const opt = (key, label, title) => (key === 'all' || filter === key || c[key] ? chip(key, label, title) : null);
-    clear(filters).append(opt('all', 'All'), opt('pending', vc ? 'To convert' : 'To generate', 'Lines without a take yet, failed ones, and lines whose spoken text changed since their take'), opt('generated', vc ? 'Converted' : 'Generated'),
+    clear(filters).append(opt('all', 'All', 'Every line of this patch'), opt('pending', vc ? 'To convert' : 'To generate', 'Lines without a take yet, failed ones, and lines whose spoken text changed since their take'), opt('generated', vc ? 'Converted' : 'Generated', 'Lines with a take that matches their spoken text'),
       opt('failed', 'Failed', 'The last attempt made no usable take (engine error, credits, offline local engine, LIP or WAV step). The error is shown at the top of the line\'s panel; Generate missing retries these.'),
       opt('marked', 'Flagged', 'Flagged to revisit'), opt('excluded', 'Excluded', 'Won\'t generate or export'),
       opt('omitted', 'Omitted', 'Left out because a ticked reference topic file (e.g. the base game pack) already has the line'),
-      vc ? opt('nosource', 'No source file') : null, opt('p1', 'Edited in Phase 1', 'The in-game line was edited in Phase 1'),
+      vc ? opt('nosource', 'No source file', 'No file of the other voice pack was found for these lines') : null, opt('p1', 'Edited in Phase 1', 'The in-game line was edited in Phase 1'),
       opt('suggestions', 'AI suggestions', 'AI tag suggestions waiting for Accept or Undo'),
       opt('qa', 'QA flagged', 'Check takes flagged the take in use: the words differ from the line, it is too quiet, or it clips'),
       opt('approved', 'Approved', 'Approved in Review'), review || filter === 'unapproved' ? opt('unapproved', 'Not approved', 'Lines with a take that are not approved yet') : null,
@@ -729,7 +741,7 @@ export async function patchView(id) {
           h('p', 'Keys: ↑/↓ move, Space ticks, Ctrl+A ticks all shown.')));
       return;
     }
-    const spoken = h('textarea', { rows: 3, disabled: l.omitted }, l.spoken);
+    const spoken = h('textarea', { rows: 3, disabled: l.omitted, title: 'What the voice says. Edit freely and put [tags] anywhere; the file name doesn\'t change' }, l.spoken);
     spoken.addEventListener('change', () => { if (spoken.value !== l.spoken) upd(l, 'spoken', spoken.value); });
     trackCaret(spoken, l);
     insp.append(
@@ -741,7 +753,7 @@ export async function patchView(id) {
       h('div', h('div.field-label', 'Original line (from the mod)'), h('div.box', l.originalLine)),
       h('div', h('div.field-label', 'In-game line'), h('div.box', l.finalLine)),
       h('div', h('div.field-label', 'File'), h('div.box.mono', { style: { wordBreak: 'break-all' } }, l.stem + '.wav / .lip / .fuz')),
-      vc ? h('div', h('div.field-label', 'Source WAV'), l.hasSource ? h('div.row', h('button.btn.sm', { onclick: () => playSource(l) }, '▶ Play source'), h('span.mono.faint.ellipsis', { title: l.sourceWav }, l.sourceWav)) : h('div.banner.bad', { style: { margin: 0 } }, 'No source WAV found with this name.')) : null,
+      vc ? h('div', h('div.field-label', 'Source WAV'), l.hasSource ? h('div.row', h('button.btn.sm', { title: 'Play the original recording this line is converted from', onclick: () => playSource(l) }, '▶ Play source'), h('span.mono.faint.ellipsis', { title: l.sourceWav }, l.sourceWav)) : h('div.banner.bad', { style: { margin: 0 } }, 'No source WAV found with this name.')) : null,
       h('div', h('div.field-label', vc ? 'Text for the LIP' : 'Spoken text (tags allowed)'), spoken,
         h('div.row', { style: { marginTop: '6px', flexWrap: 'wrap', rowGap: '6px' } },
           vc || engine() !== 'elevenlabs' ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.omitted, onclick: () => autotag([l.lineId]) }, 'AI Auto Tag'),
@@ -781,11 +793,11 @@ export async function patchView(id) {
       { label: 'WAV + LIP to the WAV + LIP folder', sub: 'Also writes the DBVO Fix plugins and topic file to their folders', onclick: exportWavLip },
       { label: 'Build .fuz into the final folder', sub: 'Also writes the DBVO Fix plugins and topic file', onclick: () => buildFuz(false) },
       { label: 'Build .fuz to another folder…', sub: 'Only the .fuz files', onclick: () => buildFuz(true) },
-      { label: 'Only DBVO Fix plugins + topic file', onclick: writeFix },
+      { label: 'Only DBVO Fix plugins + topic file', sub: 'No audio: just the plugin with the edited lines and the topic file', onclick: writeFix },
     ].filter(Boolean)));
     const takesBtn = h('button.btn', { disabled: busy, title: 'Clean up takes you no longer need' }, 'Takes ▾');
     takesBtn.addEventListener('click', () => popupMenu(takesBtn, [
-      { label: `Keep only the used take · ticked lines (${sel.length})`, sub: 'Deletes the other takes and their files (kept ★ takes stay)', onclick: () => sel.length ? purge(sel) : toast('Tick rows first.', true) },
+      { label: `Keep only the used take · ticked lines (${sel.length})`, sub: 'Deletes the other takes and their files (kept ★ takes stay)', onclick: () => sel.length ? purge(sel) : toast('Tick the box of one or more rows first.', true) },
       { label: 'Keep only the used take · all lines', sub: 'Deletes every take that is not in use or kept ★', onclick: () => purge(null) },
     ]));
     const more = h('button.btn', { disabled: busy, title: 'Import an earlier pack, check takes, edit text in a spreadsheet, merge takes' }, 'More ▾');
@@ -793,21 +805,16 @@ export async function patchView(id) {
       { label: 'Import an earlier voice pack…', sub: 'DBVO 1 (Legacy names) or DBVO 2.0 folder: fills lines without takes, .fuz kept as it is', onclick: legacyImport },
       { label: 'Merge takes from another patch…', sub: 'Its takes for the same lines are added; yours are never replaced', onclick: mergeTakes },
       { label: `Check takes · ${sel.length ? `ticked lines (${sel.length})` : 'all lines'}`, sub: 'Whisper compares what is said with the line; loudness and clipping too. Flags only, deletes nothing', onclick: () => qaRun(sel.length ? sel : null) },
-      c.qa || patch.lines.some((l) => l.takes.some((t) => t.qa)) ? { label: 'Clear check results', onclick: clearQa } : null,
+      c.qa || patch.lines.some((l) => l.takes.some((t) => t.qa)) ? { label: 'Clear check results', sub: 'Remove every ⚠ / ✓ from Check takes (the takes stay)', onclick: clearQa } : null,
       { label: 'Spoken text to a spreadsheet (CSV)…', sub: 'Edit it in Excel or any editor, then import it back', onclick: exportCsv },
       { label: 'Spoken text from a spreadsheet (CSV)…', sub: 'Shows every change first; you pick which to apply', onclick: importCsv },
-      { label: 'Clear the .fuz cache…', sub: 'Builds re-encode every take next time (after updating xWMAEncode)', onclick: clearFuzCache },
     ].filter(Boolean)));
     const reviewBtn = h('button.btn' + (review ? '.review-on' : ''), { title: review ? 'End Review (Esc)' : 'Listen through the lines with the keyboard: Space plays, A approves and moves on, R makes a new take, F flags', onclick: () => setReview(!review) }, review ? '■ End review' : '▶ Review');
     clear(actions).append(
       helpButton('generating'),
       h('span.stat', h('b', c.generated), ` / ${c.active} ${vc ? 'converted' : 'generated'}`, c.approved ? ` · ${c.approved} approved` : '', patch.exportApprovedOnly ? h('span', { title: 'Folders & options → Export: only approved lines are exported' }, ' · exporting approved only') : '', c.omitted ? ` · ${c.omitted} omitted` : '', c.excluded ? ` · ${c.excluded} excluded` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} changed since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
       h('div.spacer'),
-      sel.length ? h('button.btn.sm.ghost', { title: 'Untick all rows', onclick: () => grid.selectAll(false) }, 'Clear ticks') : null,
-      sel.length ? h('button.btn.sm.ghost', { title: 'Exclude the ticked lines from generate and export (they stop counting as missing)', onclick: () => bulkExclude(sel, true) }, '🚫 Exclude ticked') : null,
-      sel.length && sel.some((x) => (index.get(x) || {}).excluded) ? h('button.btn.sm.ghost', { title: 'Include the ticked lines again', onclick: () => bulkExclude(sel, false) }, 'Include ticked') : null,
-      sel.length ? h('button.btn.sm.ghost', { title: 'Flag the ticked lines to revisit', onclick: () => bulkMark(sel, true) }, 'Flag ticked') : null,
-      c.marked ? h('button.btn.sm.ghost', { title: 'Clear every flag', onclick: () => bulkMark(patch.lines.filter((l) => l.marked).map((l) => l.lineId), false) }, 'Clear flags') : null,
+      sel.length || c.marked ? tickedMenu(sel, c) : null,
       reviewBtn,
       more,
       takesBtn,
@@ -818,9 +825,22 @@ export async function patchView(id) {
       h('button.btn.primary', { disabled: busy || !c.pending, title: 'Lines without a take yet, failed ones, and lines whose spoken text changed since their take', onclick: () => generate('missing') }, `${verb} missing (${c.pending})`));
   }
 
+  // One menu for what to do with the ticked rows (and flags), so the status bar stays on one line.
+  function tickedMenu(sel, c) {
+    const btn = h('button.btn.sm.ghost', { title: sel.length ? `Exclude, include, flag or untick the ${sel.length} ticked line(s)` : 'Clear every flag' }, sel.length ? `Ticked (${sel.length}) ▾` : 'Flags ▾');
+    btn.onclick = () => popupMenu(btn, [
+      sel.length ? { label: '🚫 Exclude ticked', sub: 'Not generated or exported; they stop counting as missing', onclick: () => bulkExclude(sel, true) } : null,
+      sel.length && sel.some((x) => (index.get(x) || {}).excluded) ? { label: 'Include ticked', sub: 'Generate and export them again', onclick: () => bulkExclude(sel, false) } : null,
+      sel.length ? { label: '⚑ Flag ticked', sub: 'Mark them to revisit; Flagged lines makes new takes of them', onclick: () => bulkMark(sel, true) } : null,
+      sel.length ? { label: 'Clear ticks', sub: 'Untick all rows', onclick: () => grid.selectAll(false) } : null,
+      c.marked ? { label: `Clear all flags (${c.marked})`, sub: 'Unflag every flagged line', onclick: () => bulkMark(patch.lines.filter((l) => l.marked).map((l) => l.lineId), false) } : null,
+    ].filter(Boolean));
+    return btn;
+  }
+
   // ---- 7.0: record, review, check takes, earlier packs, merge, spreadsheet, cache
   async function record(l) {
-    if (app.job) { toast('Wait for the running job, or cancel it.', true); return; }
+    if (app.job) { toast('Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.', true); return; }
     await recordTake({ patchId: id, line: l, onSaved: (nl) => { replaceLine(nl); play(nl); } });
   }
 
@@ -963,16 +983,6 @@ export async function patchView(id) {
     } catch (e) { fail(e); }
   }
 
-  async function clearFuzCache() {
-    try {
-      const info = await rpc('cache.fuzInfo');
-      if (!info.files) { toast('The .fuz cache is empty.'); return; }
-      if (!(await confirmBox('Clear the .fuz cache?', `${info.files} built .fuz file(s), ${(info.bytes / 1e6).toFixed(1)} MB. The next build encodes every take again. Imported .fuz files are not in the cache and stay as they are.`, 'Clear'))) return;
-      const r = await rpc('cache.fuzClear');
-      toast(`${r.files} file(s) removed.`);
-    } catch (e) { fail(e); }
-  }
-
   async function bulkExclude(ids, value) {
     try {
       patch = await rpc('line2.bulkExclude', { id, lineIds: ids, value });
@@ -1062,10 +1072,16 @@ export async function patchView(id) {
   async function staleChoice() {
     const stale = await rpc('patch.staleExports', { id }).catch(() => []);
     if (!stale.length) return { removeStale: false };
+    const groups = new Map();
+    for (const f of stale) { if (!groups.has(f.why)) groups.set(f.why, []); groups.get(f.why).push(f.path); }
     const v = await modal('Files from earlier exports', [
-      h('div', `${stale.length} file(s) this patch exported earlier belong to lines that are no longer exported: excluded, omitted, removed or changed in Phase 1. Left in place they still play in game and go into the FOMOD.`),
-      h('div.box.mono', { style: { whiteSpace: 'pre', maxHeight: '220px', overflow: 'auto', fontSize: '12px' } }, stale.slice(0, 200).join('\n') + (stale.length > 200 ? `\n… +${stale.length - 200} more` : '')),
-    ], [{ label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' }, { label: 'Delete them', primary: true, value: 'delete' }], { wide: true, help: 'exporting' });
+      h('div', `This patch exported ${stale.length} file(s) earlier for lines it no longer exports. Left in place they still play in game and go into the FOMOD.`),
+      h('div', h('b', 'Delete these files'), ' removes exactly the files listed below, and nothing else: no takes, no other files in those folders. ', h('b', 'Keep them'), ' leaves them where they are; this export still writes everything else.'),
+      patch.exportApprovedOnly ? h('div.banner.warn', { style: { margin: 0 } }, 'Export is set to approved lines only (Folders & options), so lines you haven\'t approved count as not exported. Turn that off to export every line; approving is optional.') : null,
+      h('div.stale-groups', [...groups].map(([why, paths]) => h('details', { open: groups.size === 1 },
+        h('summary', h('b', `${paths.length} file(s)`), `: ${why}`),
+        h('div.box.mono', { style: { whiteSpace: 'pre', maxHeight: '180px', overflow: 'auto', fontSize: '12px' } }, paths.slice(0, 300).join('\n') + (paths.length > 300 ? `\n… +${paths.length - 300} more` : ''))))),
+    ], [{ label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' }, { label: `Delete these ${stale.length} file(s)`, primary: true, value: 'delete' }], { wide: true, help: 'exporting' });
     return v == null ? null : { removeStale: v === 'delete' };
   }
 
@@ -1111,7 +1127,7 @@ export async function patchView(id) {
       if (missing.length) banners.append(h('div.banner.bad', h('span.row', { style: { gap: '6px', flexWrap: 'wrap' } }, 'Missing:', ...missing.map(([n, k], i) => h('span.row', { style: { gap: '2px' } }, n + (i < missing.length - 1 ? ',' : ''), k ? needInfo(k) : null))), h('div.spacer'), h('button.btn.sm', { title: 'Set the tool paths', onclick: () => go('settings', { tab: 'general' }) }, 'Open Global Settings')));
       const unset = [!patch.wavLipFolder && 'WAV + LIP folder', !patch.finalRoot && 'final folder', !patch.fixFolder && 'DBVO Fix folder', vc && !patch.sourceFolders.length && 'source WAV folder'].filter(Boolean);
       if (unset.length) banners.append(h('div.banner.warn', h('span', 'Not set for this patch: ' + unset.join(', ') + '.'), h('div.spacer'), h('button.btn.sm', { title: 'Choose where files go for this patch', onclick: openOptions }, 'Set folders')));
-      for (const w of c.pathWarnings) banners.append(h('div.banner.warn', h('b', 'Path length: '), h('span', `${w.where} reaches ${w.length} of ${w.limit} characters with the longest line — tools like Yakitori fail past 260.`), h('div.spacer'), h('button.btn.sm', { onclick: openOptions }, 'Shorten folders')));
+      for (const w of c.pathWarnings) banners.append(h('div.banner.warn', h('b', 'Path length: '), h('span', `${w.where} reaches ${w.length} of ${w.limit} characters with the longest line — tools like Yakitori fail past 260.`), h('div.spacer'), h('button.btn.sm', { title: 'Open Folders & options to pick shorter folders', onclick: openOptions }, 'Shorten folders')));
       if (vc) {
         const noSrc = patch.lines.filter((l) => !l.omitted && !l.hasSource).length;
         banners.append(h('div.banner.info', h('div.col', { style: { gap: '4px' } },
@@ -1131,23 +1147,23 @@ export async function patchView(id) {
     const vs = app.state.voicePacks;
     const voiceSel = h('select', { title: 'Switch voice pack: opens the same mods with another voice' }, vs.map((v) => h('option', { value: v.id, selected: v.id === voice.id }, v.name)));
     voiceSel.addEventListener('change', async () => {
-      if (app.job) { toast('Wait for the running job, or cancel it.', true); voiceSel.value = voice.id; return; }
+      if (app.job) { toast('Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.', true); voiceSel.value = voice.id; return; }
       try { const r = await rpc('patch.switchVoice', { id, voicePackId: voiceSel.value }); go('patch', { id: r.id }); } catch (e) { fail(e); }
     });
     clear(head).append(
-      h('button.btn.ghost.sm', { onclick: () => go('patches') }, '← DBVO Patches'),
+      h('button.btn.ghost.sm', { title: 'Back to the list of DBVO Patches', onclick: () => go('patches') }, '← DBVO Patches'),
       h('h1', patch.name),
       helpButton('the-patch-page'),
       voiceChip(voice.name, voice.color),
       h('span.badge.b-skip', patch.category),
       switchEl(vc, (on) => toggleVc(on), 'Voice Changer', { title: 'Convert another voice pack\'s WAV / .fuz files of this mod into this voice (ElevenLabs speech-to-speech) instead of text-to-speech. Only useful when the mod is already DBVO-patched with another voice.' }),
       h('div.spacer'),
-      h('span.faint', 'Voice pack'),
+      creditsSlot,
       voiceSel,
       h('button.icon-btn', { title: 'Edit this voice pack (Global Settings)', onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, '✎'),
-      h('span.faint', voice.naming === 'Legacy' ? 'Legacy names' : 'DBVO 2.0 hash names'),
+      h('span.badge.b-skip', { title: voice.naming === 'Legacy' ? 'File names: Legacy (DBVO 1.0), from the line text. Set per voice pack.' : 'File names: DBVO 2.0 hashes. Set per voice pack.' }, voice.naming === 'Legacy' ? 'Legacy names' : 'DBVO 2.0 names'),
       h('button.btn.sm', { title: 'Output folders, DBVO Fix folder, reference topic files and overwrite options', onclick: openOptions }, 'Folders & options…'),
-      h('button.btn.sm.ghost', { title: 'Re-read Phase 1 now (also happens every time you open this patch)', onclick: sync }, '⟳ Refresh from Phase 1'),
+      h('button.btn.sm.ghost', { title: 'Re-read Phase 1 now (also happens every time you open this patch)', onclick: sync }, '⟳ Refresh'),
       h('button.btn.sm.ghost.danger', { title: 'Delete this patch and its takes', onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes its takes too. Files already exported stay where they are. A backup of the project is made first.', 'Delete', true)) { await rpc('patch.delete', { id }); go('patches'); } } }, 'Delete'));
   }
 
@@ -1165,7 +1181,7 @@ export async function patchView(id) {
   }
 
   async function toggleVc(on) {
-    if (app.job) { toast('Wait for the running job, or cancel it.', true); renderHead(); return; }
+    if (app.job) { toast('Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.', true); renderHead(); return; }
     try {
       if (!on) {
         if (!(await confirmBox('Turn off the Voice Changer?', 'Lines are generated with text-to-speech again. Converted takes stay as they are, and the source folders are remembered for later.', 'Turn off'))) { renderHead(); return; }
@@ -1241,10 +1257,10 @@ export async function patchView(id) {
         h('div', h('span.faint', '.fuz files → '), `${root}\\${sub}\\`));
     }
     const srcList = h('div.col');
-    const renderSrc = () => clear(srcList).append(sources.length ? sources.map((f, i) => h('div.row', h('span.mono.grow.ellipsis', f), h('button.icon-btn', { onclick: () => { sources.splice(i, 1); renderSrc(); } }, '×'))) : h('div.faint', 'No folder yet.'));
+    const renderSrc = () => clear(srcList).append(sources.length ? sources.map((f, i) => h('div.row', h('span.mono.grow.ellipsis', f), h('button.icon-btn', { title: 'Remove this source folder', onclick: () => { sources.splice(i, 1); renderSrc(); } }, '×'))) : h('div.faint', 'No folder yet.'));
     renderSrc();
     renderPreview();
-    const row = (label, hint, ...field) => h('div.opt-row', h('div.opt-label', label), h('div.col', { style: { gap: '5px', minWidth: 0 } }, ...field, hint ? h('div.opt-hint', hint) : null));
+    const row = (label, hint, ...field) => h('div.opt-row', h('div.opt-label', label), h('div.col', { style: { gap: '5px', minWidth: 0 }, title: typeof hint === 'string' ? hint : label }, ...field, hint ? h('div.opt-hint', hint) : null));
     const ok = await modal(h('span.row', 'Folders & options — ', voiceChip(voice.name + ' voice pack', voice.color)), [
       h('div.opt-grid',
         row('Patch name', null, name),
@@ -1258,8 +1274,8 @@ export async function patchView(id) {
         row('Overwrite', 'Files this patch exported are always updated when their line has a new take. Off: other files already there (e.g. from another tool) are left alone; for DBVO Fix you are asked',
           h('div.row', { style: { gap: '18px' } }, switchEl(owWav, (v) => { owWav = v; }, 'WAV + LIP'), switchEl(owFuz, (v) => { owFuz = v; }, '.fuz'),
             switchEl(owFix, (v) => { owFix = v; }, 'DBVO Fix', { title: 'DBVO Fix plugins in the final folder. Off: you are asked before one with the same name is replaced. The working copy in the DBVO Fix folder is always replaced.' }))),
-        row('Export', 'Off: every line with a take. On: only lines approved in Review (▶ Review, then A)',
-          switchEl(apprOnly, (v) => { apprOnly = v; }, 'Only lines approved in Review')),
+        row('Export', 'Off (the usual): every line with a take is exported; approving is optional. On: only lines approved in Review (▶ Review, then A). Files of lines not approved that earlier exports wrote are listed before anything is deleted.',
+          switchEl(apprOnly, (v) => { apprOnly = v; }, 'Only lines approved in Review', { title: 'Export and build .fuz for approved lines only. Approving never changes anything else.' })),
         row('Omit lines users have', 'Only packs every user installs',
           s.references.length ? h('div.col', { style: { gap: '4px' } }, s.references.map((r) => switchEl(refOn.has(r.id), (v) => { if (v) refOn.add(r.id); else refOn.delete(r.id); }, `${r.name}  ·  ${r.lineCount} lines`)))
             : h('div.faint', 'None yet: Global Settings → Omit references.'))),

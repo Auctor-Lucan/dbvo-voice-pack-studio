@@ -53,7 +53,7 @@ export async function fomodsView() {
 
 async function newFomod() {
   const s = app.state;
-  if (!s.voicePacks.length) { toast('Create a voice pack first.', true); go('settings', { tab: 'voices', id: 'new' }); return; }
+  if (!s.voicePacks.length) { toast('Create a voice pack first, in Global Settings → Voice packs.', true); go('settings', { tab: 'voices', id: 'new' }); return; }
   const voice = h('select', s.voicePacks.map((v) => h('option', { value: v.id, selected: v.id === s.settings.lastVoicePackId }, v.name)));
   const name = h('input', { type: 'text', placeholder: 'e.g. DBVO MyVoice' });
   const root = h('input', { type: 'text', placeholder: 'the final folder of your patches, e.g. D:\\DBVO MyVoice FOMOD' });
@@ -140,7 +140,7 @@ export async function fomodView(id) {
       { label: 'Stage only', sub: 'Builds the installer folder without packing, to check it or test it in MO2 / Vortex', onclick: () => runBuild(false) },
     ]));
     clear(head).append(
-      h('button.btn.ghost.sm', { onclick: () => go('fomods') }, '← FOMODs'),
+      h('button.btn.ghost.sm', { title: 'Back to the list of FOMOD projects', onclick: () => go('fomods') }, '← FOMODs'),
       h('h1', proj.name || proj.info.name || 'FOMOD'),
       helpButton('3-edit-pages-groups-and-options'),
       voiceChip(dto.voiceName || '—', voice && voice.color),
@@ -200,13 +200,13 @@ export async function fomodView(id) {
         });
       });
     });
-    tree.append(h('div.row', { style: { padding: '10px 8px' } }, h('button.btn.sm', { onclick: () => { const st = { id: newId(), name: 'New page', visibleXml: null, groupsOrder: 'Explicit', groups: [{ id: newId(), name: 'New group', type: 'SelectAny', order: 'Explicit', options: [] }] }; proj.steps.push(st); changed(); select(st.id); } }, '+ Page'),
+    tree.append(h('div.row', { style: { padding: '10px 8px' } }, h('button.btn.sm', { title: 'Add an installer page', onclick: () => { const st = { id: newId(), name: 'New page', visibleXml: null, groupsOrder: 'Explicit', groups: [{ id: newId(), name: 'New group', type: 'SelectAny', order: 'Explicit', options: [] }] }; proj.steps.push(st); changed(); select(st.id); } }, '+ Page'),
       h('span.faint', 'Drag options between groups.')));
   }
 
   // ---- editor panels
   const sec = (title, extra, ...rows) => h('div.section', h('div.section-head', h('h2', title), extra), h('div.section-body', rows));
-  const srow = (label, help, control) => h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', control));
+  const srow = (label, help, control) => h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', { title: typeof help === 'string' ? help : label }, control));
   const txt = (obj, key, opts = {}) => {
     const i = opts.area ? h('textarea', { rows: opts.rows || 6, placeholder: opts.placeholder || '' }, obj[key] ?? '') : h('input', { type: 'text', value: obj[key] ?? '', placeholder: opts.placeholder || '', style: { width: '100%' } });
     i.addEventListener('input', () => { obj[key] = i.value; changed(opts.tree); if (opts.after) opts.after(); });
@@ -250,7 +250,7 @@ export async function fomodView(id) {
     return h('div.col', h('div.path-input', i, h('button.btn.sm', { onclick: async () => {
       const f = await rpc('pick.file', { title: 'Choose an image', filter: 'Images|*.png;*.jpg;*.jpeg;*.gif;*.bmp' });
       if (f) { i.value = relPath(f); obj[key] = i.value; changed(); load(); }
-    } }, 'Browse'), obj[key] ? h('button.btn.sm.ghost', { onclick: () => { i.value = ''; obj[key] = ''; changed(); load(); } }, 'Remove') : null), prev);
+    } }, 'Browse'), obj[key] ? h('button.btn.sm.ghost', { title: 'Remove this image from the installer (the file itself stays)', onclick: () => { i.value = ''; obj[key] = ''; changed(); load(); } }, 'Remove') : null), prev);
   };
 
   function renderEditor() {
@@ -323,12 +323,12 @@ export async function fomodView(id) {
     return h('div', sec('Page (install step)', h('div.row', h('div.spacer'),
       h('button.btn.sm', { title: 'Move up', disabled: si === 0, onclick: () => move(proj.steps, si, -1) }, '↑'),
       h('button.btn.sm', { title: 'Move down', disabled: si === proj.steps.length - 1, onclick: () => move(proj.steps, si, 1) }, '↓'),
-      h('button.btn.sm.danger', { onclick: async () => { if (await confirmBox('Delete page?', `Delete "${st.name}" and its ${st.groups.reduce((a, g) => a + g.options.length, 0)} option(s)?`, 'Delete', true)) { proj.steps.splice(si, 1); changed(); select('project'); } } }, 'Delete')),
+      h('button.btn.sm.danger', { title: 'Delete this page and its groups (asks first)', onclick: async () => { if (await confirmBox('Delete page?', `Delete "${st.name}" and its ${st.groups.reduce((a, g) => a + g.options.length, 0)} option(s)?`, 'Delete', true)) { proj.steps.splice(si, 1); changed(); select('project'); } } }, 'Delete')),
       srow('Name', null, txt(st, 'name', { tree: true })),
       srow('Visibility', 'Optional conditions (flags / plugins) for showing this page. Kept from imports; edit as XML.', st.visibleXml != null ? txt(st, 'visibleXml', { area: true, rows: 4 })
-        : h('button.btn.sm', { onclick: () => { st.visibleXml = '<visible operator="And">\n  <fileDependency file="Example.esp" state="Active" />\n</visible>'; changed(); renderEditor(); } }, '+ Add a condition')),
+        : h('button.btn.sm', { title: 'Show this page only when a condition is met (starts with an example you can edit)', onclick: () => { st.visibleXml = '<visible operator="And">\n  <fileDependency file="Example.esp" state="Active" />\n</visible>'; changed(); renderEditor(); } }, '+ Add a condition')),
       srow('Groups', null, h('div.col', st.groups.map((g) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); select(g.id); } }, `${g.name} · ${g.options.length} option(s)`)),
-        h('button.btn.sm', { style: { alignSelf: 'flex-start' }, onclick: () => { const g = { id: newId(), name: 'New group', type: 'SelectAny', order: 'Explicit', options: [] }; st.groups.push(g); changed(); select(g.id); } }, '+ Group')))));
+        h('button.btn.sm', { title: 'Add a group of options to this page', style: { alignSelf: 'flex-start' }, onclick: () => { const g = { id: newId(), name: 'New group', type: 'SelectAny', order: 'Explicit', options: [] }; st.groups.push(g); changed(); select(g.id); } }, '+ Group')))));
   }
 
   function groupPanel(st, g) {
@@ -339,13 +339,13 @@ export async function fomodView(id) {
     return h('div', sec('Group', h('div.row', h('div.spacer'),
       h('button.btn.sm', { title: 'Move up', disabled: gi === 0, onclick: () => move(st.groups, gi, -1) }, '↑'),
       h('button.btn.sm', { title: 'Move down', disabled: gi === st.groups.length - 1, onclick: () => move(st.groups, gi, 1) }, '↓'),
-      h('button.btn.sm.danger', { onclick: async () => { if (await confirmBox('Delete group?', `Delete "${g.name}" and its ${g.options.length} option(s)?`, 'Delete', true)) { st.groups.splice(gi, 1); changed(); select(st.id); } } }, 'Delete')),
+      h('button.btn.sm.danger', { title: 'Delete this group and its options (asks first)', onclick: async () => { if (await confirmBox('Delete group?', `Delete "${g.name}" and its ${g.options.length} option(s)?`, 'Delete', true)) { st.groups.splice(gi, 1); changed(); select(st.id); } } }, 'Delete')),
       srow('Name', null, txt(g, 'name', { tree: true })),
       srow('Selection', null, h('div.col', typeSel, typeHelp)),
       srow('Order', 'Explicit keeps your order; Ascending sorts A–Z in the installer.', segmented([['Explicit', 'As listed'], ['Ascending', 'A–Z'], ['Descending', 'Z–A']], g.order, (x) => { g.order = x; changed(); renderEditor(); })),
       srow('Options', null, h('div.col',
-        h('div.row', h('button.btn.sm', { onclick: () => { const o = blankOption(); g.options.push(o); changed(); select(o.id); } }, '+ Option'),
-          h('button.btn.sm', { onclick: () => { g.options.sort((a, b) => (a.mode === 'Required' ? -1 : 0) - (b.mode === 'Required' ? -1 : 0) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })); changed(true); renderEditor(); } }, 'Sort A–Z')),
+        h('div.row', h('button.btn.sm', { title: 'Add an empty option to this group', onclick: () => { const o = blankOption(); g.options.push(o); changed(); select(o.id); } }, '+ Option'),
+          h('button.btn.sm', { title: 'Put Required options first, then sort the rest by name', onclick: () => { g.options.sort((a, b) => (a.mode === 'Required' ? -1 : 0) - (b.mode === 'Required' ? -1 : 0) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })); changed(true); renderEditor(); } }, 'Sort A–Z')),
         g.options.map((o) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); select(o.id); } }, o.name || '(option)'))))));
   }
 
@@ -391,15 +391,15 @@ export async function fomodView(id) {
     const renderPlugins = () => {
       const add = h('input', { type: 'text', placeholder: 'Plugin.esp, then Enter', style: { width: '200px' } });
       add.addEventListener('keydown', (e) => { if (e.key === 'Enter' && add.value.trim()) { o.plugins.push(add.value.trim()); changed(true); renderPlugins(); } });
-      clear(pluginsBox).append(o.plugins.map((p, i) => h('span.chip', h('span.mono', p), h('button.icon-btn', { onclick: () => { o.plugins.splice(i, 1); changed(true); renderPlugins(); } }, '×'))), add);
+      clear(pluginsBox).append(o.plugins.map((p, i) => h('span.chip', h('span.mono', p), h('button.icon-btn', { title: 'Remove this plugin from the option', onclick: () => { o.plugins.splice(i, 1); changed(true); renderPlugins(); } }, '×'))), add);
     };
     renderPlugins();
     return h('div',
       sec('Option', h('div.row', h('div.spacer'),
         h('button.btn.sm', { title: 'Move up', disabled: oi === 0, onclick: () => move(g.options, oi, -1) }, '↑'),
         h('button.btn.sm', { title: 'Move down', disabled: oi === g.options.length - 1, onclick: () => move(g.options, oi, 1) }, '↓'),
-        h('button.btn.sm', { onclick: () => { const c = structuredClone(o); c.id = newId(); c.name += ' (copy)'; c.carriesJson = false; g.options.splice(oi + 1, 0, c); changed(); select(c.id); } }, 'Duplicate'),
-        h('button.btn.sm.danger', { onclick: async () => { if (await confirmBox('Delete option?', `Delete "${o.name}"?`, 'Delete', true)) { g.options.splice(oi, 1); changed(); select(g.id); } } }, 'Delete')),
+        h('button.btn.sm', { title: 'Make a copy of this option in the same group', onclick: () => { const c = structuredClone(o); c.id = newId(); c.name += ' (copy)'; c.carriesJson = false; g.options.splice(oi + 1, 0, c); changed(); select(c.id); } }, 'Duplicate'),
+        h('button.btn.sm.danger', { title: 'Delete this option (asks first)', onclick: async () => { if (await confirmBox('Delete option?', `Delete "${o.name}"?`, 'Delete', true)) { g.options.splice(oi, 1); changed(); select(g.id); } } }, 'Delete')),
         h('div.faint', { style: { padding: '8px 0 0' } }, `${st.name} › ${g.name}`),
         srow('Name', null, txt(o, 'name', { tree: true })),
         srow('Description', 'Shown when the user hovers the option. Links can be copied from here by your users.', descArea(o, 'description', 7)),

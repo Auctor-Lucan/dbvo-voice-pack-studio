@@ -61,7 +61,7 @@ export async function modsView() {
       h('div', { style: { marginTop: '14px' } }, h('button.btn.primary', { title: 'Create a mod project and add its plugins', onclick: newMod }, '+ New mod'))));
     return view;
   }
-  const q = h('input', { type: 'text', placeholder: 'Filter mods…', style: { width: '260px', marginBottom: '12px' } });
+  const q = h('input', { type: 'text', placeholder: 'Filter mods…', title: 'Show only mods whose name contains this', style: { width: '260px', marginBottom: '12px' } });
   const listEl = h('div');
   const render = () => {
     const f = q.value.toLowerCase();
@@ -214,7 +214,7 @@ async function batchAdd(initial) {
   }
 
   const status = h('div.faint');
-  const createBtn = h('button.btn.primary', { onclick: create }, 'Create mods and import');
+  const createBtn = h('button.btn.primary', { title: 'Create one mod per row and read its plugins', onclick: create }, 'Create mods and import');
   async function create() {
     const p = check();
     if (!rows.length) { toast('Add plugins first.', true); return; }
@@ -252,7 +252,7 @@ async function batchAdd(initial) {
     drop, table, summary, problems,
     h('details.batch-paste', h('summary', 'Paste names and categories'),
       h('div.faint', { style: { margin: '6px 0' } }, 'One line per plugin: ', h('span.mono', 'Plugin.esp | Mod Name | Category'), '. Order doesn\'t matter; the plugin file name finds the row. A new category is created.'),
-      paste, h('div.row', { style: { marginTop: '6px' } }, h('button.btn.sm', { onclick: applyPaste }, 'Apply list'), pasteMsg)),
+      paste, h('div.row', { style: { marginTop: '6px' } }, h('button.btn.sm', { title: 'Turn the pasted list into rows above', onclick: applyPaste }, 'Apply list'), pasteMsg)),
     h('div.row', status, h('div.spacer'), createBtn),
   ], [{ label: 'Cancel', value: false }], { wide: true, help: 'add-mods' });
 }
@@ -423,13 +423,13 @@ export async function modView(id) {
       { label: 'Topic files + DBVO Fix plugins to a folder…', sub: 'Only for using them outside this app. Phase 2 writes them for you.', onclick: exportOutputs },
     ]));
     clear(head).append(
-      h('button.btn.ghost.sm', { onclick: () => go('mods') }, '← Mods'),
+      h('button.btn.ghost.sm', { title: 'Back to the list of mods', onclick: () => go('mods') }, '← Mods'),
       h('h1', mod.name),
       helpButton('add-or-update-files-in-a-mod'),
       mod.version ? h('span.sub', 'v' + mod.version) : null,
       h('button.icon-btn', { title: 'Rename / version', onclick: editMeta }, '✎'),
       h('span.faint', 'Mod Category'),
-      categorySelect(mod.category, async (c) => { try { await rpc('mod.setCategory', { id, category: c }); mod.category = c; await refreshState(); renderHead(); } catch (e) { fail(e); } }),
+      h('span', { title: 'The category this mod and its patches are listed under' }, categorySelect(mod.category, async (c) => { try { await rpc('mod.setCategory', { id, category: c }); mod.category = c; await refreshState(); renderHead(); } catch (e) { fail(e); } })),
       h('div.spacer'),
       addBtn,
       exportBtn,
@@ -454,14 +454,14 @@ export async function modView(id) {
       banners.append(h('div.banner.warn',
         h('b', 'Missing masters:'),
         plugin.missingMasters.map((m) => h('span.row', h('span.mono', m.fileName),
-          m.nexusSearchUrl ? h('a', { href: '#', onclick: (e) => { e.preventDefault(); rpc('open.url', { url: m.nexusSearchUrl }); } }, 'find on Nexus') : h('span.faint', '(set the base game folder in Settings)'))),
+          m.nexusSearchUrl ? h('a', { href: '#', onclick: (e) => { e.preventDefault(); rpc('open.url', { url: m.nexusSearchUrl }); } }, 'find on Nexus') : h('span.faint', '(set the base game folder in Global Settings → General & tools → Plugins)'))),
         h('div.spacer'),
         h('button.btn.sm', { title: 'Upload the master files this plugin needs so its lines can be read', onclick: uploadMasters }, 'Upload masters…')));
     }
     for (const n of plugin.notices) banners.append(h('div.banner.bad', h('span', n), h('div.spacer'), h('button.btn.sm', { title: 'Add the .strings files of a localized plugin', onclick: uploadStrings }, 'Add strings files…')));
     if (mod.uploadedMasters.length) {
       banners.append(h('div.banner.info', h('span', `Uploaded masters kept in this mod: ${mod.uploadedMasters.join(', ')}`), h('div.spacer'),
-        h('button.btn.sm', { onclick: async () => { if (await confirmBox('Delete uploaded masters?', 'They are only needed for reading the plugin. You can upload them again for the next update.', 'Delete', true)) { await rpc('mod.deleteMasters', { id }); reload(); } } }, 'Delete to save space')));
+        h('button.btn.sm', { title: 'Delete the master plugins you added for reading this mod (your own copies elsewhere are untouched)', onclick: async () => { if (await confirmBox('Delete uploaded masters?', 'They are only needed for reading the plugin. You can upload them again for the next update.', 'Delete', true)) { await rpc('mod.deleteMasters', { id }); reload(); } } }, 'Delete to save space')));
     }
   }
 
@@ -513,13 +513,13 @@ export async function modView(id) {
     const chip = (key, label, title) => h('span.chip' + (filter === key ? '.on' : ''), { title: title || '', onclick: () => { filter = key; save(); renderFilters(); grid.setRows(visibleLines()); } }, label, h('span.n', c[key]));
     clear(filters);
     if (!plugin) return;
-    const q = h('input', { type: 'text', placeholder: 'Search text, FormID, EditorID…', value: search });
+    const q = h('input', { type: 'text', placeholder: 'Search text, FormID, EditorID…', value: search, title: 'Search the text, FormID or EditorID' });
     q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visibleLines()); }, 150));
     // Only filters that match at least one line (the open one always stays).
     const opt = (key, label, title) => (key === 'all' || filter === key || c[key] ? chip(key, label, title) : null);
-    filters.append(h('div.filter-chips', opt('all', 'All'), opt('fixes', 'In DBVO Fix'), opt('notvoiced', 'Not voiced'), opt('flagged', 'Flagged'), opt('unreviewed', 'Not reviewed'),
-      opt('stage', 'Stage directions'), opt('player', 'Player names'),
-      opt('changed', 'Changed in mod'), opt('edited', 'Edited by you'), opt('hidden', 'Hidden by prompts'), opt('excluded', 'Excluded'), opt('removed', 'Removed')),
+    filters.append(h('div.filter-chips', opt('all', 'All', 'Every player line of this plugin'), opt('fixes', 'In DBVO Fix', 'Lines whose in-game text goes into the DBVO Fix plugin'), opt('notvoiced', 'Not voiced', 'Lines that won\'t be voiced in Phase 2'), opt('flagged', 'Flagged', 'BROKEN or TOO LONG WILL CTD lines to review'), opt('unreviewed', 'Not reviewed', 'Lines you haven\'t looked at yet'),
+      opt('stage', 'Stage directions', 'Lines that are only an action, such as (Intimidate)'), opt('player', 'Player names', 'Lines with the player\'s name, voiced in a player-name patch'),
+      opt('changed', 'Changed in mod', 'Lines a newer version of the mod changed'), opt('edited', 'Edited by you', 'Lines whose in-game text you edited'), opt('hidden', 'Hidden by prompts', 'Topic texts the player never sees, because each of their responses shows its own prompt instead'), opt('excluded', 'Excluded', 'Lines left out of voicing'), opt('removed', 'Removed', 'Lines a newer version of the mod removed')),
       h('div.filter-tools',
         h('div.legend',
           h('span.legend-note', 'Review ', h('b', 'BROKEN'), ' and ', h('b', 'TOO LONG WILL CTD'), ' lines before Phase 2.'),
@@ -554,7 +554,7 @@ export async function modView(id) {
       sel.length ? h('button.btn.sm', { title: 'Mark the ticked rows as looked at, without changing anything', onclick: () => bulk('review') }, 'Mark reviewed') : null,
       sel.length ? h('button.btn.sm', { title: 'Leave the ticked lines out of the topic file and DBVO Fix plugin', onclick: () => bulk('exclude') }, 'Exclude') : null,
       sel.length ? h('button.btn.sm', { title: 'Bring excluded lines back', onclick: () => bulk('include') }, 'Include') : null,
-      h('button.btn.sm.ghost', { onclick: () => grid.selectAll(!sel.length) }, sel.length ? 'Clear selection' : 'Select all shown'),
+      h('button.btn.sm.ghost', { title: 'Tick or untick every row in the current filter', onclick: () => grid.selectAll(!sel.length) }, sel.length ? 'Clear selection' : 'Select all shown'),
       h('button.btn.primary', { title: 'Write the topic files and DBVO Fix plugins, then open the DBVO Patches', onclick: toPhase2 }, 'Continue to Phase 2 →'));
   }
 
@@ -650,7 +650,7 @@ export async function modView(id) {
           h('div.spacer'),
           h('button.btn.sm', { title: l.excluded ? 'Bring this line back' : 'Leave this line out of the topic file and DBVO Fix plugin', onclick: () => act(l, 'exclude', !l.excluded) }, l.excluded ? 'Include' : 'Exclude'))),
       approvalPanel(l),
-      l.isPlayerName ? h('div.row', h('button.btn.primary.sm', { onclick: () => exportPlayerNames([l.key]) }, 'Export this line to Downloads'),
+      l.isPlayerName ? h('div.row', h('button.btn.primary.sm', { title: 'Write this player-name line to your Downloads folder, to voice it in a player-name patch', onclick: () => exportPlayerNames([l.key]) }, 'Export this line to Downloads'),
         l.playerNameExported ? h('span.badge.b-valid', 'exported') : null) : null,
       l.hasOtherAlias && !l.isPlayerName ? variantsEditor(l) : null,
       l.hiddenByPrompts ? h('label.row', h('input', { type: 'checkbox', checked: l.includeAnyway, onchange: (e) => act(l, 'includeHidden', e.target.checked) }),
@@ -814,7 +814,7 @@ export async function modView(id) {
     try {
       const r = await rpc('patch.openFor', { modId: mod.id });
       if (r.needVoicePack) {
-        toast('Create a voice pack first (Settings → Voice packs). Phase 2 opens right after.', true);
+        toast('Create a voice pack first (Global Settings → Voice packs). Phase 2 opens right after.', true);
         go('settings', { tab: 'voices', id: 'new' });
         return;
       }

@@ -14,11 +14,11 @@ const CHOICES = [
 // The welcome: the first one on the very first launch, then the next one each time DBVO Studio opens, looping.
 const GREETINGS = [
   ['Hello voice artist!', 'Let’s give the Dragonborn a voice.'],
-  ['Hello voice artist!', 'Welcome back to the studio.'],
-  ['Welcome, voice artist!', 'Let’s give Skyrim something new to say.'],
-  ['Good to see you, voice artist!', 'The studio is all yours.'],
+  ['Hello voice director!', 'Welcome back to the studio.'],
+  ['Welcome, voice producer!', 'Let’s give Skyrim something new to say.'],
+  ['Good to see you, voice creator!', 'The studio is all yours.'],
   ['Welcome back to the studio!', 'Your audience in Skyrim is waiting.'],
-  ['Hello voice artist!', 'Let’s make some noise in Nirn.'],
+  ['Hello voice producer!', 'Let’s make some noise in Nirn.'],
 ];
 let greeting = null; // picked once per launch
 function pickGreeting() {
@@ -105,9 +105,9 @@ export async function homeView() {
     shortPath ? root : `${root}\nA shorter path, near the top of a drive, keeps DBVO file paths under Windows' 260-character limit.`, settings));
   const tools = [['FonixData.cdf', t.fonix], ['xWMAEncode.exe', t.xwma], ['ffmpeg.exe', t.ffmpeg], ['FaceFXWrapper.exe', t.faceFx], ['7z.exe', t.sevenZip]];
   const missing = tools.filter(([, ok]) => !ok).map(([n]) => n);
-  checks.append(chip(!missing.length, missing.length ? `${missing.length} of 5 tools missing` : 'All 5 tools found', missing.length ? 'Missing: ' + missing.join(', ') : '', settings));
+  checks.append(chip(!missing.length, missing.length ? `${missing.length} of 5 tools missing` : 'All 5 tools found', missing.length ? 'Missing: ' + missing.join(', ') : 'FonixData, xWMAEncode, ffmpeg, FaceFXWrapper and 7-Zip are all set (Global Settings → General & tools)', settings));
   if (!s.voicePacks.length) checks.append(chip(false, 'No voice pack yet', 'Create one in Global Settings → Voice packs', () => go('settings', { tab: 'voices', id: 'new' })));
-  const eleven = chip(s.settings.hasApiKey, s.settings.hasApiKey ? 'ElevenLabs key saved' : 'ElevenLabs key not set', '', settings);
+  const eleven = chip(s.settings.hasApiKey, s.settings.hasApiKey ? 'ElevenLabs key saved' : 'ElevenLabs key not set', 'Your ElevenLabs API key (Global Settings → General & tools)', settings);
   checks.append(eleven);
   if (s.settings.hasApiKey) {
     rpc('eleven.subscriptionInfo').then((c) => {
@@ -124,7 +124,7 @@ export async function homeView() {
     stats, checks);
 
   // ---- right: what to do
-  const cards = h('div.home-cards', CHOICES.map((c, i) => h('button.home-card' + (i === 0 ? '.first' : ''), { style: { '--c': c.color }, onclick: c.go },
+  const cards = h('div.home-cards', CHOICES.map((c, i) => h('button.home-card' + (i === 0 ? '.first' : ''), { title: c.sub, style: { '--c': c.color }, onclick: c.go },
     h('span.home-ic', icon(c.icon, { size: 20 })), h('b', c.title), h('small', c.sub))));
   const right = h('section.home-start', h('div.home-lbl', 'Start something'), cards);
 

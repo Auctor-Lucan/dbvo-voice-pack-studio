@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Text;
 using DbvoStudio.Core.Audio;
 using DbvoStudio.Core.ElevenLabs;
 using DbvoStudio.Core.Engines;
@@ -301,7 +302,7 @@ public sealed partial class Phase2Service
                 finally { gate.Release(); }
             }
             catch (OperationCanceledException) { throw; }
-            catch (Exception ex) { failed++; line.LastError = "Could not import the .fuz: " + ex.Message; }
+            catch (Exception ex) { failed++; line.LastError = "Could not import the .fuz: " + FriendlyError.From(ex); }
             progress?.Report(new GenerationProgress(++done, todo.Count, failed, line.FinalLine, null));
         }
         await gate.WaitAsync(CancellationToken.None);
@@ -376,7 +377,7 @@ public sealed partial class Phase2Service
         switch (engine)
         {
             case "sts":
-                if (string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey)) throw new InvalidOperationException("Enter your ElevenLabs API key in Settings.");
+                if (string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey)) throw new InvalidOperationException("ElevenLabs needs your API key, and none is saved. Add it in Global Settings → General & tools → ElevenLabs.");
                 if (string.IsNullOrWhiteSpace(sts.VoiceId)) throw new InvalidOperationException("Pick the target voice for the Voice Changer.");
                 client = new ElevenLabsClient(_settings.ElevenLabsApiKey);
                 concurrency = sts.Concurrency;
@@ -392,7 +393,7 @@ public sealed partial class Phase2Service
                 concurrency = voice.OmniVoice.Concurrency;
                 break;
             default:
-                if (string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey)) throw new InvalidOperationException("Enter your ElevenLabs API key in Settings.");
+                if (string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey)) throw new InvalidOperationException("ElevenLabs needs your API key, and none is saved. Add it in Global Settings → General & tools → ElevenLabs.");
                 if (string.IsNullOrWhiteSpace(es.VoiceId)) throw new InvalidOperationException("Pick a voice for this voice pack.");
                 client = new ElevenLabsClient(_settings.ElevenLabsApiKey);
                 concurrency = es.Concurrency;
@@ -529,7 +530,7 @@ public sealed partial class Phase2Service
             catch (Exception ex)
             {
                 line.Status = Phase2Status.Failed;
-                line.LastError = ex.Message;
+                line.LastError = FriendlyError.From(ex);
                 Interlocked.Increment(ref failed);
             }
             finally
@@ -711,6 +712,30 @@ public sealed partial class Phase2Service
         return patch.Exported.Keys.Where(k => !planned.Contains(k) && File.Exists(k)).OrderBy(k => k).ToList();
     }
 
+    /// <summary>Each stale file with the reason its line is no longer exported, in plain words.</summary>
+    public List<(string Path, string Why)> StaleExportReasons(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods)
+    {
+        var byStem = new Dictionary<string, Phase2Line>(StringComparer.OrdinalIgnoreCase);
+        foreach (var l in patch.Lines) byStem.TryAdd(l.FileStem ?? LineNaming.Stem(l.FinalLine, voice.Naming), l);
+        var list = new List<(string, string)>();
+        foreach (var f in StaleExports(patch, voice, mods))
+        {
+            var stem = System.IO.Path.GetFileNameWithoutExtension(f);
+            var variant = false;
+            if (!byStem.ContainsKey(stem) && int.TryParse(stem, out _)) { stem = System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(f)) ?? stem; variant = true; }
+            string why;
+            if (!byStem.TryGetValue(stem, out var line)) why = "its line is no longer in this patch (removed or renamed in Phase 1, or the naming mode changed)";
+            else if (line.Excluded) why = "the line is excluded";
+            else if (line.IsOmitted) why = "the line is omitted (players already have it)";
+            else if (patch.ExportApprovedOnly && !line.Approved) why = "the line isn't approved, and Export is set to approved lines only";
+            else if (line.Takes.Count == 0) why = "the line's takes were deleted";
+            else if (variant) why = "an older variant of the line (fewer ★ takes are kept now)";
+            else why = "the line is now exported under another name or folder";
+            list.Add((f, why));
+        }
+        return list;
+    }
+
     /// <summary>Delete the stale exported files (and empty folders they leave). Returns how many were removed.</summary>
     public int RemoveStaleExports(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods, List<string>? errors = null)
     {
@@ -725,7 +750,7 @@ public sealed partial class Phase2Service
                 var dir = Path.GetDirectoryName(f);
                 if (dir != null && Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
             }
-            catch (Exception ex) { errors?.Add($"{f}: not removed ({ex.Message})"); }
+            catch (Exception ex) { errors?.Add($"{f}: not removed ({FriendlyError.From(ex)})"); }
         }
         // forget entries whose files are gone
         foreach (var k in patch.Exported.Keys.Where(k => !File.Exists(k)).ToList()) patch.Exported.Remove(k);
@@ -757,7 +782,7 @@ public sealed partial class Phase2Service
             catch (Exception ex)
             {
                 rep.Failed++;
-                rep.Errors.Add($"{stem}: {ex.Message}");
+                rep.Errors.Add($"{stem}: {FriendlyError.From(ex)}");
             }
         }
         _lib.Save(patch);
@@ -850,7 +875,7 @@ public sealed partial class Phase2Service
                 lock (rep)
                 {
                     rep.Failed++;
-                    rep.Errors.Add($"{line.FinalLine}: {ex.Message}");
+                    rep.Errors.Add($"{line.FinalLine}: {FriendlyError.From(ex)}");
                 }
             }
             finally

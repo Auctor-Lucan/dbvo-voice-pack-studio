@@ -428,7 +428,14 @@ public class Phase2Line
     /// <summary>Generate even though a reference already has it.</summary>
     public bool OverrideOmit { get; set; }
     public List<Take> Takes { get; set; } = new();
-    public string? SelectedTakeId { get; set; }
+    private string? _selectedTakeId;
+    /// <summary>The take in use. Choosing another one (a new take, Use, a deleted take) clears the Review approval:
+    /// an approval is for the take that was heard.</summary>
+    public string? SelectedTakeId
+    {
+        get => _selectedTakeId;
+        set { if (_selectedTakeId != value && _selectedTakeId != null) Approved = false; _selectedTakeId = value; }
+    }
     public string? LastError { get; set; }
     /// <summary>Pending AI auto-tag suggestion shown inline until accepted or undone.</summary>
     public string? TagSuggestion { get; set; }

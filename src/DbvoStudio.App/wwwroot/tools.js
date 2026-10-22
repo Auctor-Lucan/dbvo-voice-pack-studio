@@ -23,7 +23,7 @@ export async function wavLipView() {
     el.addEventListener('change', () => onchange(el.value));
     return el;
   };
-  const tools = h('div.section', h('div.section-head', h('h2', 'Lip-generation tools'), h('div.spacer'), h('button.btn.sm', { onclick: () => go('settings', { tab: 'general' }) }, 'Change in Global Settings')),
+  const tools = h('div.section', h('div.section-head', h('h2', 'Lip-generation tools'), h('div.spacer'), h('button.btn.sm', { title: 'Open Global Settings → General & tools', onclick: () => go('settings', { tab: 'general' }) }, 'Change in Global Settings')),
     h('div.section-body',
       h('div.srow.tool-path', h('div.lbl', h('span.row', { style: { gap: '4px' } }, 'FaceFXWrapper.exe', needInfo('facefx'))), h('div.row', h('span.mono.grow.ellipsis', st.faceFxWrapperPath || '— not set —'), h('span.badge.' + (st.tools.faceFx ? 'b-valid' : 'b-broken'), st.tools.faceFx ? '✓' : '✕'))),
       h('div.srow.tool-path', h('div.lbl', h('span.row', { style: { gap: '4px' } }, 'FonixData.cdf', needInfo('fonix'))), h('div.row', h('span.mono.grow.ellipsis', st.fonixDataPath || '— not set —'), h('span.badge.' + (st.tools.fonix ? 'b-valid' : 'b-broken'), st.tools.fonix ? '✓' : '✕'))),
@@ -32,11 +32,11 @@ export async function wavLipView() {
   const whisperBody = h('div.section-body');
   const renderWhisper = () => clear(whisperBody).append(
     h('div.row.wrap', { style: { padding: '10px 0', gap: '14px' } },
-      h('div.tgroup', h('label', 'Engine'), sel(w.engine, [['builtin', 'Built in (Whisper.net)'], ['faster-whisper', 'My faster-whisper (Python)']], async (v) => { w.engine = v; await save(); renderWhisper(); })),
-      h('div.tgroup', h('label', 'Model'), sel(w.model, [['large-v3', 'large-v3'], ['medium', 'medium'], ['small', 'small'], ['base', 'base']], async (v) => { w.model = v; await save(); })),
-      h('div.tgroup', h('label', 'Language'), sel(w.language, [['auto', 'auto'], ['en', 'en'], ['sv', 'sv'], ['de', 'de'], ['fr', 'fr'], ['es', 'es'], ['it', 'it'], ['pl', 'pl'], ['ru', 'ru']], async (v) => { w.language = v; await save(); })),
-      h('div.tgroup', h('label', 'Device'), sel(w.device, w.engine === 'builtin' ? [['cuda', 'GPU (Vulkan)'], ['cpu', 'CPU']] : [['cuda', 'cuda'], ['cpu', 'cpu']], async (v) => { w.device = v; await save(); })),
-      h('div.tgroup', h('label', 'Compute'), sel(w.compute, [['float16', 'float16'], ['int8_float16', 'int8_float16'], ['int8', 'int8']], async (v) => { w.compute = v; await save(); }))),
+      h('div.tgroup', { title: 'Built in needs nothing installed; My faster-whisper uses your own Python environment' }, h('label', 'Engine'), sel(w.engine, [['builtin', 'Built in (Whisper.net)'], ['faster-whisper', 'My faster-whisper (Python)']], async (v) => { w.engine = v; await save(); renderWhisper(); })),
+      h('div.tgroup', { title: 'The Whisper model: large-v3 hears best, smaller ones are faster' }, h('label', 'Model'), sel(w.model, [['large-v3', 'large-v3'], ['medium', 'medium'], ['small', 'small'], ['base', 'base']], async (v) => { w.model = v; await save(); })),
+      h('div.tgroup', { title: 'The language spoken in the WAV files, or auto to detect it' }, h('label', 'Language'), sel(w.language, [['auto', 'auto'], ['en', 'en'], ['sv', 'sv'], ['de', 'de'], ['fr', 'fr'], ['es', 'es'], ['it', 'it'], ['pl', 'pl'], ['ru', 'ru']], async (v) => { w.language = v; await save(); })),
+      h('div.tgroup', { title: 'Run Whisper on the graphics card (fast) or the processor' }, h('label', 'Device'), sel(w.device, w.engine === 'builtin' ? [['cuda', 'GPU (Vulkan)'], ['cpu', 'CPU']] : [['cuda', 'cuda'], ['cpu', 'cpu']], async (v) => { w.device = v; await save(); })),
+      h('div.tgroup', { title: 'Number precision: float16 is the most accurate, int8 is smaller and faster' }, h('label', 'Compute'), sel(w.compute, [['float16', 'float16'], ['int8_float16', 'int8_float16'], ['int8', 'int8']], async (v) => { w.compute = v; await save(); }))),
     h('div.col', { style: { paddingBottom: '10px' } },
       switchEl(w.cpuFallback, async (v) => { w.cpuFallback = v; await save(); }, w.engine === 'builtin' ? 'If GPU initialization fails, retry transcription on CPU' : 'If CUDA initialization fails, retry transcription on CPU/int8'),
       h('div.faint', w.engine === 'builtin'
@@ -86,8 +86,8 @@ export async function wavLipView() {
   tool.append(h('div.tool-top', whisper, tools),
     h('div.tool-bottom', h('div.section', { style: { maxWidth: 'none' } }, h('div.section-head', h('h2', 'WAV files'), counter), h('div.section-body', { style: { padding: '10px 16px' } }, list,
       h('div.row', { style: { marginTop: '10px' } },
-        h('button.btn', { onclick: async () => addPaths(await rpc('pick.files', { title: 'Select WAV files', filter: 'WAV audio|*.wav' })) }, 'Add WAV files…'),
-        h('button.btn', { onclick: async () => { const f = await rpc('pick.folder', { title: 'Select folder containing WAV files' }); if (f) addPaths([f]); } }, 'Add folder…'),
+        h('button.btn', { title: 'Choose WAV files to make .lip files for', onclick: async () => addPaths(await rpc('pick.files', { title: 'Select WAV files', filter: 'WAV audio|*.wav' })) }, 'Add WAV files…'),
+        h('button.btn', { title: 'Add the WAV files in a folder', onclick: async () => { const f = await rpc('pick.folder', { title: 'Select folder containing WAV files' }); if (f) addPaths([f]); } }, 'Add folder…'),
         h('button.btn', { title: 'Remove the selected files from the list (not from disk)', onclick: () => { files = files.filter((_, i) => !selected.has(i)); selected.clear(); renderList(); } }, 'Remove selected'),
         h('button.btn.ghost', { title: 'Empty the list (files stay on disk)', onclick: () => { files = []; selected.clear(); renderList(); } }, 'Clear'),
         h('div.spacer'), startBtn))),

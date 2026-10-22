@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Text;
 using System.IO;
 using System.Text.Json;
 using DbvoStudio.App.Tools;
@@ -72,7 +73,7 @@ public sealed partial class Backend
             case "revoice.delete":
                 return await Locked(() =>
                 {
-                    if (_jobCts != null) throw new InvalidOperationException("Stop the running job first.");
+                    if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Press Cancel there first.");
                     var id = S(p, "id");
                     _lib.Backup("before-delete-revoice", _settings.BackupsToKeep);
                     lock (_rv) _rv.Remove(id);
@@ -585,7 +586,7 @@ public sealed partial class Backend
 
     private object StartRvScan(string id)
     {
-        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         _jobCts = new CancellationTokenSource();
         _ = Task.Run(async () =>
         {
@@ -593,7 +594,7 @@ public sealed partial class Backend
             {
                 var proj = LoadRv(id);
                 Emit("progress", new { kind = "revoice", done = 0, total = 1, failed = 0, message = "Reading plugins" });
-                var prog = new Progress<string>(msg => Emit("progress", new { kind = "revoice", done = 0, total = 1, failed = 0, message = msg }));
+                var prog = new DirectProgress<string>(msg => Emit("progress", new { kind = "revoice", done = 0, total = 1, failed = 0, message = msg }));
                 var s = RvSession(proj, prog);
                 RevoiceScanReport rep = null!;
                 await _gate.WaitAsync();
@@ -608,7 +609,7 @@ public sealed partial class Backend
             catch (Exception ex)
             {
                 App.Log("Revoice scan failed: " + ex);
-                Emit("jobDone", new { kind = "revoice-scan", id, ok = false, message = ex.Message });
+                Emit("jobDone", new { kind = "revoice-scan", id, ok = false, message = FriendlyError.From(ex) });
             }
             finally { _jobCts = null; }
         });
@@ -624,7 +625,7 @@ public sealed partial class Backend
     /// <summary>Transcribe orphaned files that found no line by name, with the WAV to LIP Whisper settings, and match them to silent lines.</summary>
     private object StartRvWhisper(string id)
     {
-        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         _jobCts = new CancellationTokenSource();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
@@ -676,7 +677,7 @@ public sealed partial class Backend
             catch (Exception ex)
             {
                 App.Log("Orphan transcription failed: " + ex);
-                Emit("jobDone", new { kind = "revoice-orphans", id, ok = false, message = ex.Message });
+                Emit("jobDone", new { kind = "revoice-orphans", id, ok = false, message = FriendlyError.From(ex) });
             }
             finally
             {
@@ -716,7 +717,7 @@ public sealed partial class Backend
 
     private object StartRvGenerate(JsonElement p)
     {
-        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         var id = S(p, "id");
         var proj = LoadRv(id);
         var all = RvSelect(proj, p);
@@ -768,7 +769,7 @@ public sealed partial class Backend
             catch (Exception ex)
             {
                 App.Log("Revoice generate failed: " + ex);
-                Emit("jobDone", new { kind = "generate", revoiceId = id, ok = false, message = ex.Message });
+                Emit("jobDone", new { kind = "generate", revoiceId = id, ok = false, message = FriendlyError.From(ex) });
             }
             finally
             {
@@ -782,7 +783,7 @@ public sealed partial class Backend
 
     private object StartRvExport(JsonElement p)
     {
-        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         var id = S(p, "id");
         var proj = LoadRv(id);
         bool overwrite = !p.TryGetProperty("overwrite", out var ow) || ow.ValueKind != JsonValueKind.False;
@@ -804,7 +805,7 @@ public sealed partial class Backend
             catch (Exception ex)
             {
                 App.Log("Revoice export failed: " + ex);
-                Emit("jobDone", new { kind = "revoice-export", id, ok = false, message = ex.Message });
+                Emit("jobDone", new { kind = "revoice-export", id, ok = false, message = FriendlyError.From(ex) });
             }
             finally { _jobCts = null; }
         });

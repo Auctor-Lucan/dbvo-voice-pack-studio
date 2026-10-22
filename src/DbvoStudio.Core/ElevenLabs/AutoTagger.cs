@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Text;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -36,7 +37,7 @@ public sealed class AutoTagger : IDisposable
 
     public AutoTagger(string endpoint, string apiKey, string model, HttpClient? http = null)
     {
-        if (string.IsNullOrWhiteSpace(endpoint)) throw new InvalidOperationException("Set an AI provider endpoint in Settings to use auto-tagging.");
+        if (string.IsNullOrWhiteSpace(endpoint)) throw new InvalidOperationException("AI Auto Tag needs an AI provider, and none is set up yet. Choose one in " + FriendlyError.AiPlace + ".");
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
         _http.BaseAddress = new Uri(endpoint.TrimEnd('/') + "/");
         if (!string.IsNullOrWhiteSpace(apiKey))
@@ -64,7 +65,7 @@ public sealed class AutoTagger : IDisposable
             };
             using var resp = await _http.PostAsJsonAsync("chat/completions", body, ct);
             var text = await resp.Content.ReadAsStringAsync(ct);
-            if (!resp.IsSuccessStatusCode) return new AutoTagResult(lineId, null, $"AI provider error {(int)resp.StatusCode}: {Trim(text)}");
+            if (!resp.IsSuccessStatusCode) return new AutoTagResult(lineId, null, FriendlyError.Http("Your AI provider", (int)resp.StatusCode, text, FriendlyError.AiPlace));
             using var doc = JsonDocument.Parse(text);
             var content = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()?.Trim() ?? "";
             content = content.Trim('"', '“', '”').Trim();
@@ -74,7 +75,9 @@ public sealed class AutoTagger : IDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return new AutoTagResult(lineId, null, ex.Message);
+            return new AutoTagResult(lineId, null, ex is JsonException or KeyNotFoundException or IndexOutOfRangeException
+                ? "The AI provider answered in a form DBVO Studio doesn't understand. Check that the endpoint is OpenAI-compatible (it usually ends in /v1)."
+                : FriendlyError.From(ex, "Your AI provider"));
         }
     }
 

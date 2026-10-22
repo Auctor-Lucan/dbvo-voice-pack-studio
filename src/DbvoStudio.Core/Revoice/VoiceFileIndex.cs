@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Text;
 using System.IO.Compression;
 using DbvoStudio.Core.Archives;
 
@@ -55,7 +56,7 @@ public sealed class VoiceFileIndex : IDisposable
         foreach (var s in sources.OrderBy(s => s.Priority).ThenBy(s => s.Kind == "folder" ? 1 : 0))
         {
             try { idx.Scan(s); }
-            catch (Exception ex) { idx.Errors.Add($"{s.Path}: {ex.Message}"); }
+            catch (Exception ex) { idx.Errors.Add($"{s.Path}: {FriendlyError.From(ex)}"); }
         }
         return idx;
     }

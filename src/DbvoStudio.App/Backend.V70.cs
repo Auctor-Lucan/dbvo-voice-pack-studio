@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Text;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -44,7 +45,7 @@ public sealed partial class Backend
                 {
                     var patch = LoadPatch(S(p, "id"));
                     var voice = LoadVoice(patch.VoicePackId);
-                    var rows = patch.Lines.Where(l => !l.IsOmitted).Select(l => new SpokenCsv.Row(l.LineId, LineNaming.Stem(l.FinalLine, voice.Naming), l.FinalLine, l.Spoken)).ToList();
+                    var rows = patch.Lines.Where(l => !l.IsOmitted).Select(l => new SpokenCsv.Row(l.LineId, l.FileStem ?? LineNaming.Stem(l.FinalLine, voice.Naming), l.FinalLine, l.Spoken)).ToList();
                     var path = S(p, "path");
                     File.WriteAllText(path, SpokenCsv.Write(rows), new UTF8Encoding(true));
                     return new { lines = rows.Count, path };
@@ -56,7 +57,7 @@ public sealed partial class Backend
                     var voice = LoadVoice(patch.VoicePackId);
                     var rows = SpokenCsv.Read(File.ReadAllText(S(p, "path")));
                     var byId = patch.Lines.ToDictionary(l => l.LineId);
-                    var byName = patch.Lines.GroupBy(l => LineNaming.Stem(l.FinalLine, voice.Naming), StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+                    var byName = patch.Lines.GroupBy(l => l.FileStem ?? LineNaming.Stem(l.FinalLine, voice.Naming), StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
                     var changes = new List<object>();
                     int unmatched = 0, same = 0;
                     foreach (var r in rows)
@@ -96,14 +97,14 @@ public sealed partial class Backend
             }
             case "cache.fuzClear":
             {
-                if (_jobCts != null) throw new InvalidOperationException("Wait for the running job to finish.");
+                if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
                 var (files, bytes) = new FuzCache(_lib.FuzCacheFolder).Clear();
                 return new { files, bytes };
             }
             case "patch.mergeTakes":
                 return await Locked(() =>
                 {
-                    if (_jobCts != null) throw new InvalidOperationException("Wait for the running job to finish.");
+                    if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
                     var patch = LoadPatch(S(p, "id"));
                     var other = LoadPatch(S(p, "sourceId"));
                     _lib.Backup("before merging takes");
@@ -112,7 +113,7 @@ public sealed partial class Backend
                 });
             case "patch.record":
             {
-                if (_jobCts != null) throw new InvalidOperationException("Wait for the running job to finish.");
+                if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
                 var patch = LoadPatch(S(p, "id"));
                 var voice = LoadVoice(patch.VoicePackId);
                 var line = patch.Lines.FirstOrDefault(l => l.LineId == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
@@ -135,7 +136,7 @@ public sealed partial class Backend
 
     private object StartImportLegacy(string id, string folder)
     {
-        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         if (!Directory.Exists(folder)) throw new InvalidOperationException("That folder was not found.");
         _jobCts = new CancellationTokenSource();
         var ct = _jobCts.Token;
@@ -146,7 +147,7 @@ public sealed partial class Backend
                 _lib.Backup("before importing a pack");
                 var patch = LoadPatch(id);
                 var voice = LoadVoice(patch.VoicePackId);
-                var progress = new Progress<GenerationProgress>(g => Emit("progress", new { kind = "import", g.Done, g.Total, g.Failed, g.Current }));
+                var progress = new DirectProgress<GenerationProgress>(g => Emit("progress", new { kind = "import", g.Done, g.Total, g.Failed, g.Current }));
                 int n = await new Phase2Service(_lib, Runtime()).ImportLegacyAsync(patch, voice, folder, Tools(), progress, ct, _gate);
                 Emit("jobDone", new { kind = "import", patchId = id, ok = true, message = $"{n} line(s) imported from the earlier pack." });
             }
@@ -154,7 +155,7 @@ public sealed partial class Backend
             catch (Exception ex)
             {
                 App.Log("Pack import failed: " + ex);
-                Emit("jobDone", new { kind = "import", patchId = id, ok = false, message = ex.Message });
+                Emit("jobDone", new { kind = "import", patchId = id, ok = false, message = FriendlyError.From(ex) });
             }
             finally { _jobCts = null; }
         });
@@ -162,12 +163,12 @@ public sealed partial class Backend
     }
 
     /// <summary>
-    /// Check takes: Whisper transcribes the selected take of each line and the transcript is compared with the text the
+    /// Check takes: Whisper transcribes the take in use of each line (and its kept variants with DBVO 2.0 naming) and the transcript is compared with the text the
     /// take was made from; ffmpeg measures loudness and true peak. Results are stored on the take. Nothing is deleted.
     /// </summary>
     private object StartQa(string id, List<string>? lineIds)
     {
-        if (_jobCts != null) throw new InvalidOperationException("A job is already running.");
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         _jobCts = new CancellationTokenSource();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
@@ -177,8 +178,10 @@ public sealed partial class Backend
             {
                 var patch = LoadPatch(id);
                 var only = lineIds?.ToHashSet();
+                var naming = LoadVoice(patch.VoicePackId).Naming;
+                // The take in use, and with DBVO 2.0 naming every kept (★) take too, since each is exported as a variant.
                 var todo = patch.Lines.Where(l => !l.IsOmitted && !l.Excluded && l.SelectedTake != null && (only == null || only.Contains(l.LineId)))
-                    .Select(l => (Line: l, Take: l.SelectedTake!)).ToList();
+                    .SelectMany(l => Phase2Service.ExportTakes(l, naming).Select(x => x.Take).Append(l.SelectedTake!).Distinct().Select(t => (Line: l, Take: t))).ToList();
                 if (todo.Count == 0) { Emit("jobDone", new { kind = "qa", patchId = id, ok = true, message = "No takes to check." }); return; }
                 Emit("progress", new { kind = "qa", done = 0, total = todo.Count, failed = 0, message = "Loading Whisper" });
                 var tool = new WavToLip(_settings.WavToLip, Tools(), WhisperModelsFolder(), e =>
@@ -206,7 +209,7 @@ public sealed partial class Backend
                         if (qa.TruePeak is { } tp && tp > QaPeakDbtp) qa.Flags.Add("clipping");
                     }
                     catch (OperationCanceledException) { throw; }
-                    catch (Exception ex) { failed++; qa.Flags.Add("error"); qa.Heard = "Could not check: " + ex.Message; }
+                    catch (Exception ex) { failed++; qa.Flags.Add("error"); qa.Heard = "Could not check: " + FriendlyError.From(ex); }
                     if (qa.Flags.Count > 0) flagged++;
                     await _gate.WaitAsync(CancellationToken.None);
                     try { take.Qa = qa; } finally { _gate.Release(); }
@@ -227,10 +230,20 @@ public sealed partial class Backend
             catch (Exception ex)
             {
                 App.Log("Check takes failed: " + ex);
-                Emit("jobDone", new { kind = "qa", patchId = id, ok = false, message = ex.Message });
+                Emit("jobDone", new { kind = "qa", patchId = id, ok = false, message = FriendlyError.From(ex) });
             }
             finally { _jobCts = null; }
         });
         return true;
     }
+}
+
+/// <summary>
+/// Reports progress on the reporting thread, in order. (Progress&lt;T&gt; posts each report to the thread pool, so a
+/// report could reach the page after the job's "done" message and bring the job bar back.)
+/// </summary>
+internal sealed class DirectProgress<T>(Action<T> report) : IProgress<T>
+{
+    private readonly object _lock = new();
+    public void Report(T value) { lock (_lock) report(value); }
 }

@@ -54,7 +54,9 @@ function wireLinks(el, onAnchor) {
 let drawer = null;
 function closeDrawer() { if (drawer) { drawer.remove(); drawer = null; } }
 
-export async function openHelp(anchor) {
+export async function openHelp(anchor, { toggle = false } = {}) {
+  // A second click on the same ? closes the panel again.
+  if (toggle && drawer && drawer.dataset.anchor === String(anchor)) { closeDrawer(); return; }
   let root;
   try { root = await load(); } catch (e) { alertMissing(e); return; }
   const nodes = sectionNodes(root, anchor) || sectionNodes(root, 'introduction');
@@ -69,16 +71,17 @@ export async function openHelp(anchor) {
       h('button.btn.sm', { title: 'Open the whole guide at this section', onclick: () => { closeDrawer(); document.getElementById('modal').classList.add('hidden'); go('help', { anchor }); } }, 'Open in the guide'),
       h('button.icon-btn', { title: 'Close (Esc)', onclick: closeDrawer }, icon('x', { size: 16 }))),
     body);
+  drawer.dataset.anchor = String(anchor);
   document.body.append(drawer);
 }
 
 function alertMissing(e) {
   closeDrawer();
-  drawer = h('aside.help-drawer', h('div.help-head', h('b.grow', 'Help'), h('button.icon-btn', { onclick: closeDrawer }, icon('x', { size: 16 }))), h('div.help-body', String(e.message || e)));
+  drawer = h('aside.help-drawer', h('div.help-head', h('b.grow', 'Help'), h('button.icon-btn', { title: 'Close (Esc)', onclick: closeDrawer }, icon('x', { size: 16 }))), h('div.help-body', String(e.message || e)));
   document.body.append(drawer);
 }
 
-document.addEventListener('open-help', (e) => openHelp(e.detail.anchor));
+document.addEventListener('open-help', (e) => openHelp(e.detail.anchor, { toggle: !!e.detail.toggle }));
 // Esc closes the panel first (and only the panel, not a dialog under it).
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && drawer) { e.stopImmediatePropagation(); e.preventDefault(); closeDrawer(); }
@@ -97,7 +100,7 @@ export async function helpView(anchor) {
   const content = h('article.guide.help-content');
   content.append(...[...root.childNodes].map((n) => n.cloneNode(true)));
   const heads = headings(content);
-  const q = h('input', { type: 'search', placeholder: 'Search the guide…', spellcheck: false });
+  const q = h('input', { type: 'search', placeholder: 'Search the guide…', title: 'Find sections that contain every word you type', spellcheck: false });
   const toc = h('nav.help-toc');
   const results = h('div.help-results.hidden');
 
