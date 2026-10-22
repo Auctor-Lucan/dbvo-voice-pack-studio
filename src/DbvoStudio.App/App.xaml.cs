@@ -11,7 +11,7 @@ public partial class App : Application
     /// <summary>The splash shows at once, before the window and the web page load, so a slow start is visibly a start.</summary>
     public App()
     {
-        try { _splash = new SplashScreen("Assets/splash.png"); _splash.Show(false, true); }
+        try { _splash = new SplashScreen("assets/splash.png"); _splash.Show(false, true); }
         catch (Exception ex) { Log("Splash: " + ex.Message); _splash = null; }
     }
 
