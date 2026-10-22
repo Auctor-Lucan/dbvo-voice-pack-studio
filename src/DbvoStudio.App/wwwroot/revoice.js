@@ -943,7 +943,7 @@ export async function revoiceView(id) {
         h('div.spacer'),
         h('span.faint', 'Plugin: ', h('span.mono', proj.voiceTypePlugin)),
         h('button.btn.sm', { title: 'Name of the ESL plugin that holds the voice types', onclick: async () => { const r = await prompt('Voice type plugin', [{ name: 'n', label: 'File name', value: proj.voiceTypePlugin }]); if (r && r.n.trim()) save({ voiceTypePlugin: r.n.trim() }); } }, 'Rename…'),
-        switchEl(proj.referenceByEditorId, (v) => save({ referenceByEditorId: v }), 'Refer by EditorID', { title: 'On: SkyPatcher / FLM lines use EditorIDs (readable, as Aela Revoiced does). Off: Plugin|FormID.' })));
+        switchEl(proj.referenceByEditorId, (v) => save({ referenceByEditorId: v }), 'Refer by EditorID', { title: 'On: the voice type and the form lists are written by EditorID (readable, as Aela Revoiced does). Off: Plugin|FormID. NPCs are always written as Plugin|FormID, which SkyPatcher always finds.' })));
     for (const plan of proj.plans) {
       const n = proj.lines.filter((l) => l.plan === plan.id);
       wrap.append(h('div.section', h('div.section-head', h('h2', plan.editorId), h('span.faint', `${n.length} voice files · ${n.filter((l) => l.sel).length} generated`), h('div.spacer'),

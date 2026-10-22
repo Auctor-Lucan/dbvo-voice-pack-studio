@@ -698,12 +698,8 @@ public sealed class RevoiceService
         File.WriteAllBytes(espPath, bytes);
         written.Add(espPath);
 
-        string Ref(string key, string? editorId)
-        {
-            var k = ParseKey(key);
-            var spelled = s?.Dialogue.Spelling.TryGetValue(k.Plugin, out var sp) == true ? sp : k.Plugin;
-            return p.ReferenceByEditorId && !string.IsNullOrEmpty(editorId) ? editorId : $"{spelled}|{k.Id:X}";
-        }
+        // NPCs are always referred to as Plugin|FormID: NPC EditorIDs are not kept in memory by the game, so SkyPatcher
+        // can't always find an NPC by them. Lists and the voice type follow "Refer by EditorID".
         string FlmRef(string key, string? editorId)
         {
             var k = ParseKey(key);

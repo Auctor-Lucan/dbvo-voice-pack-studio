@@ -717,7 +717,7 @@ export async function patchView(id) {
     // Only filters that match at least one line (the open one always stays).
     const opt = (key, label, title) => (key === 'all' || filter === key || c[key] ? chip(key, label, title) : null);
     clear(filters).append(opt('all', 'All', 'Every line of this patch'), opt('pending', vc ? 'To convert' : 'To generate', 'Lines without a take yet, failed ones, and lines whose spoken text changed since their take'), opt('generated', vc ? 'Converted' : 'Generated', 'Lines with a take that matches their spoken text'),
-      opt('failed', 'Failed', 'The last attempt made no usable take (engine error, credits, offline local engine, LIP or WAV step). The error is shown at the top of the line\'s panel; Generate missing retries these.'),
+      opt('failed', 'Failed', 'The last attempt made no usable take (engine error, credits, offline local engine, LIP or WAV step). The error is shown at the top of the line\'s panel; Generate options ▾ → Missing retries these.'),
       opt('marked', 'Flagged', 'Flagged to revisit'), opt('excluded', 'Excluded', 'Won\'t generate or export'),
       opt('omitted', 'Omitted', 'Left out because a ticked reference topic file (e.g. the base game pack) already has the line'),
       vc ? opt('nosource', 'No source file', 'No file of the other voice pack was found for these lines') : null, opt('p1', 'Edited in Phase 1', 'The in-game line was edited in Phase 1'),
@@ -987,7 +987,7 @@ export async function patchView(id) {
       const path = await rpc('pick.save', { title: 'Save the spoken text', filter: 'CSV (Excel)|*.csv', name: `${patch.name} - spoken text.csv` });
       if (!path) return;
       const r = await rpc('patch.exportCsv', { id, path });
-      const v = await modal('Spoken text saved', [h('div', `${r.lines} line(s) saved. Edit the "Spoken text" column (tags allowed) and keep the other columns, then use More ▾ → Spoken text from a spreadsheet.`), h('div.mono.faint', { style: { wordBreak: 'break-all' } }, r.path)],
+      const v = await modal('Spoken text saved', [h('div', `${r.lines} line(s) saved. Edit the "Spoken text" column (tags allowed) and keep the other columns, then use Import ▾ → Spoken text from a spreadsheet.`), h('div.mono.faint', { style: { wordBreak: 'break-all' } }, r.path)],
         [{ label: 'Open it', value: 'open' }, { label: 'OK', primary: true, value: true }]);
       if (v === 'open') rpc('open.path', { path: r.path });
     } catch (e) { fail(e); }
@@ -1009,7 +1009,7 @@ export async function patchView(id) {
       const changes = r.changes.filter((_, i) => ticks[i]).map((c) => ({ lineId: c.lineId, spoken: c.incoming }));
       const res = await rpc('patch.applyCsv', { id, changes });
       patch = res.patch; reindex(); renderAll();
-      toast(`${res.applied} line(s) changed. They show as changed since their take: Generate missing makes new takes.`);
+      toast(`${res.applied} line(s) changed. They show as changed since their take: Generate options ▾ → Missing makes new takes.`);
     } catch (e) { fail(e); }
   }
 
@@ -1167,7 +1167,7 @@ export async function patchView(id) {
           h('span', h('b', 'Voice Changer is on. '), 'Lines are converted from another voice pack\'s recordings of this mod (the source folders in Folders & options), so delivery and timing come from the source. Only worth it when the mod is already DBVO-patched with another voice.'),
           noSrc ? h('span', h('b', `${noSrc} line(s) have no source file`), ' — usually lines added by a mod update after the source pack was made, or lines it never voiced. Generate them with text-to-speech (the voice pack\'s ', h('b', voice.engine === 'elevenlabs' ? 'ElevenLabs' : voice.engine), ' settings; turn the Voice Changer off to adjust those), or leave them unvoiced.') : h('span.dim', 'Every line has a source file.')),
           h('div.spacer'),
-          noSrc ? switchEl(!!patch.ttsForMissing, async (on) => { try { patch = await rpc('patch.saveMeta', { id, ttsForMissing: on }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Generate lines without a source with text-to-speech', { title: 'Off: lines without a source stay unvoiced. On: Generate missing also voices them with text-to-speech.' }) : null));
+          noSrc ? switchEl(!!patch.ttsForMissing, async (on) => { try { patch = await rpc('patch.saveMeta', { id, ttsForMissing: on }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Generate lines without a source with text-to-speech', { title: 'Off: lines without a source stay unvoiced. On: Generate options ▾ → Missing also voices them with text-to-speech.' }) : null));
       }
       if (c.fuzOnly) banners.append(h('div.banner.info', h('span', `${c.fuzOnly} line(s) have no WAV + LIP here but a .fuz in the final folder. Import them as takes so they count as done and can be played.`),
         h('div.spacer'), h('button.btn.sm', { title: 'Unpack the .fuz files into WAV + LIP takes so they show as generated', disabled: !!app.job, onclick: async () => { try { await rpc('patch.importFuz', { id }); } catch (e) { fail(e); } } }, 'Import from .fuz')));
