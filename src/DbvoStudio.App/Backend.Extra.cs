@@ -42,6 +42,34 @@ public sealed partial class Backend
                 _owner.Dispatcher.Invoke(() => WindowChrome.Apply(_owner, S(p, "caption"), S(p, "text"), B(p, "dark")));
                 return true;
 
+            // ---- the landing page background (kept per computer, served as https://user.dbvo/)
+            case "home.setBackground":
+                return await Locked(() =>
+                {
+                    var src = S(p, "path");
+                    var ext = Path.GetExtension(src).ToLowerInvariant();
+                    if (ext is not (".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" or ".bmp"))
+                        throw new InvalidOperationException("Pick a PNG, JPG, WebP, GIF or BMP image.");
+                    if (!File.Exists(src)) throw new InvalidOperationException("That image was not found.");
+                    if (new FileInfo(src).Length > 30_000_000) throw new InvalidOperationException("That image is over 30 MB. Use a smaller copy.");
+                    RemoveBackgroundFiles();
+                    var name = "landing-background" + ext;
+                    File.Copy(src, Path.Combine(UserFilesDir, name), true);
+                    _settings.Ui["homeBg"] = name;
+                    _settings.Ui["homeBgV"] = DateTime.UtcNow.Ticks.ToString();
+                    _lib.Save(_settings);
+                    return State();
+                });
+            case "home.resetBackground":
+                return await Locked(() =>
+                {
+                    RemoveBackgroundFiles();
+                    _settings.Ui.Remove("homeBg");
+                    _settings.Ui.Remove("homeBgV");
+                    _lib.Save(_settings);
+                    return State();
+                });
+
             // ---- small files for the page (images, source audio) as data URLs
             case "file.dataUrl":
             {
@@ -552,5 +580,22 @@ public sealed partial class Backend
             finally { _jobCts = null; }
         });
         return true;
+    }
+
+    /// <summary>Files the user gives the app itself (the landing page background), per computer, outside the library.</summary>
+    public static string UserFilesDir
+    {
+        get
+        {
+            var d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DBVOStudio", "UserFiles");
+            Directory.CreateDirectory(d);
+            return d;
+        }
+    }
+
+    private static void RemoveBackgroundFiles()
+    {
+        foreach (var f in Directory.GetFiles(UserFilesDir, "landing-background.*"))
+            try { File.Delete(f); } catch (IOException) { } // in use: the next pick overwrites or the name differs
     }
 }

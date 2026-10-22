@@ -521,3 +521,19 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .help-content > h1 { display: none; }
 .help-flash { animation: help-flash 1.4s ease-out; border-radius: 4px; }
 @keyframes help-flash { from { background: var(--accent-soft); } to { background: transparent; } }
+
+/* Landing page with the user's own background: each part keeps its usual shade, see-through */
+.view.home.has-bg { --s-hero: 78%; --s-start: 42%; --s-card: 82%; --s-recent: 84%; --s-rc: 80%;
+  background: var(--home-bg) center / cover no-repeat, var(--deep); }
+.view.home.has-bg.shade-light { --s-hero: 62%; --s-start: 22%; --s-card: 70%; --s-recent: 70%; --s-rc: 66%; }
+.view.home.has-bg.shade-dark { --s-hero: 90%; --s-start: 62%; --s-card: 92%; --s-recent: 93%; --s-rc: 90%; }
+.has-bg .home-hero { background: radial-gradient(120% 90% at 0% 100%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%), color-mix(in srgb, var(--deep) var(--s-hero), transparent); }
+.has-bg .home-start { background: color-mix(in srgb, var(--bg) var(--s-start), transparent); }
+.has-bg .home-card { background: color-mix(in srgb, var(--panel) var(--s-card), transparent); backdrop-filter: blur(8px); }
+.has-bg .home-card:hover { background: color-mix(in srgb, var(--c) 8%, color-mix(in srgb, var(--panel) var(--s-card), transparent)); }
+.has-bg .home-recent { background: color-mix(in srgb, var(--panel) var(--s-recent), transparent); backdrop-filter: blur(8px); }
+.has-bg .home-rc { background: color-mix(in srgb, var(--bg) var(--s-rc), transparent); }
+.has-bg .home-hero h1, .has-bg .home-stats b { text-shadow: 0 1px 12px color-mix(in srgb, var(--deep) 70%, transparent); }
+.has-bg .home-chip { background: color-mix(in srgb, var(--deep) 55%, transparent); }
+.bg-thumb { width: 64px; height: 36px; border-radius: 6px; border: 1px solid var(--line); background: center / cover no-repeat; flex: none; }
+.has-bg .home-lbl, .has-bg .home-ask, .has-bg .home-stats span { color: var(--dim); text-shadow: 0 1px 8px color-mix(in srgb, var(--deep) 85%, transparent), 0 0 2px color-mix(in srgb, var(--deep) 70%, transparent); }

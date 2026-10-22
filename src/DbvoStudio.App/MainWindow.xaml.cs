@@ -29,6 +29,7 @@ public partial class MainWindow : Window
             var www = Path.Combine(AppContext.BaseDirectory, "wwwroot");
             core.SetVirtualHostNameToFolderMapping("app.dbvo", www, CoreWebView2HostResourceAccessKind.Allow);
             core.SetVirtualHostNameToFolderMapping("media.dbvo", _backend.LibraryRoot, CoreWebView2HostResourceAccessKind.Allow);
+            core.SetVirtualHostNameToFolderMapping("user.dbvo", Backend.UserFilesDir, CoreWebView2HostResourceAccessKind.Allow);
             core.Settings.AreDevToolsEnabled = true;
             core.Settings.IsZoomControlEnabled = true;
             core.Settings.AreDefaultContextMenusEnabled = true;

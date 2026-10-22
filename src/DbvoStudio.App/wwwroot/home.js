@@ -27,6 +27,11 @@ export async function homeView() {
   const s = await refreshState();
   const revoices = await rpc('revoice.list').catch(() => []);
   const view = h('div.view.home');
+  const ui = s.settings.ui || {};
+  if (ui.homeBg) {
+    view.classList.add('has-bg', 'shade-' + (ui.homeBgShade || 'normal'));
+    view.style.setProperty('--home-bg', `url("https://user.dbvo/${encodeURIComponent(ui.homeBg)}?v=${ui.homeBgV || ''}")`);
+  }
 
   // ---- left: welcome, counts and the studio check
   const voiced = s.patches.reduce((a, p) => a + (p.generated || 0), 0);
