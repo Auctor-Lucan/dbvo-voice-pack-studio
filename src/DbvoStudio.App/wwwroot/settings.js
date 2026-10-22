@@ -2,7 +2,7 @@
 import { VOICE_COLORS, voiceChip } from './phase2.js';
 import { THEMES, applyTheme } from './themes.js';
 import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, switchEl, segmented, popupMenu, needInfo, helpButton } from './lib.js';
-import { app, go, refreshState } from './app.js';
+import { app, go, refreshState, applyBackground } from './app.js';
 
 const TABS = [
   ['general', 'General & tools'],
@@ -15,7 +15,7 @@ const TABS = [
 
 /** The user guide section each settings section is explained in (its ? button). */
 const SECTION_HELP = {
-  'Library': '2-choose-the-library-location-first', 'ElevenLabs': '4-add-your-elevenlabs-key', 'Appearance': 'other-switches', 'Start page': 'start-page',
+  'Library': '2-choose-the-library-location-first', 'ElevenLabs': '4-add-your-elevenlabs-key', 'Appearance': 'background-image', 'Start page': 'start-page',
   'Voice lines with Player Names (<Alias=Player>)': 'player-name-lines', 'Confirmation message when mass-generating lines': 'generating',
   'Tools': '3-check-the-tools', 'Plugins': '3-check-the-tools', 'AI auto-tagging': 'ai-auto-tagging', 'WAV to LIP (Other Tools)': 'wav-to-lip-tool',
   'Local voice engines': 'the-toolbar', 'Voice pack': '5-create-a-voice-pack', 'Defaults for new DBVO Patches': '5-create-a-voice-pack',
@@ -26,21 +26,21 @@ function section(title, extra, ...rows) {
   const help = SECTION_HELP[title];
   return h('div.section', h('div.section-head', h('h2', title), help ? helpButton(help, { label: title }) : null, extra), h('div.section-body', rows));
 }
-/** The landing page background: an image of your own behind the whole page, or the standard look. */
-function landingBackground(st, save, rerender) {
+/** A background image of your own behind every page, or the standard look. */
+function backgroundImage(st, save, rerender) {
   const ui = st.ui || {};
   const set = !!ui.homeBg;
   const pick = async () => {
     try {
       const path = await rpc('pick.file', { title: 'Landing page background', filter: 'Images|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp' });
       if (!path) return;
-      app.state = await rpc('home.setBackground', { path }); toast('Saved.'); rerender();
+      app.state = await rpc('home.setBackground', { path }); applyBackground(app.state.settings.ui || {}); toast('Saved.'); rerender();
     } catch (e) { fail(e); }
   };
-  const reset = async () => { try { app.state = await rpc('home.resetBackground'); toast('Reset.'); rerender(); } catch (e) { fail(e); } };
+  const reset = async () => { try { app.state = await rpc('home.resetBackground'); applyBackground(app.state.settings.ui || {}); toast('Reset.'); rerender(); } catch (e) { fail(e); } };
   const thumb = set ? h('span.bg-thumb', { style: { backgroundImage: `url("https://user.dbvo/${encodeURIComponent(ui.homeBg)}?v=${ui.homeBgV || ''}")` } }) : null;
-  return srow('Landing page background',
-    'An image of your own behind the whole landing page. Each part keeps its usual shade over it, so the text stays readable. Wide images (16:9 or wider) fit best; the image is cropped to fill the window. Reset brings back the standard look.',
+  return srow('Background image',
+    'An image of your own behind every page. Each page keeps its usual shade over it, and cards, lists and line grids stay solid, so the text stays readable. Shade shows more or less of the image. Wide images (16:9 or wider) fit best; the image is cropped to fill the window. Reset brings back the plain background.',
     h('div.col', { style: { gap: '8px' } },
       h('div.row', { style: { gap: '8px', alignItems: 'center' } }, thumb,
         h('button.btn.sm', { title: 'Choose a PNG, JPG, WebP, GIF or BMP image', onclick: pick }, set ? 'Change image…' : 'Choose image…'),
@@ -196,6 +196,7 @@ async function credits() {
 
 async function saveSettings(patchObj) {
   app.state = await rpc('settings.save', { settings: patchObj });
+  applyBackground(app.state.settings.ui || {});
   return app.state;
 }
 
@@ -297,11 +298,11 @@ async function general(_, rerender) {
           h('div.tp-bar', { style: { background: v.deep } }, h('span', { style: { background: v.accent } }), h('span', { style: { background: v.panel } })),
           h('div.tp-body', h('span', { style: { background: v.raised, borderColor: v.line } }), h('span', { style: { background: v.ok } }), h('span', { style: { background: v.warn } }), h('span', { style: { background: v.bad } })),
           h('div.tp-name', t.name + (t.id === 'github-dark' ? ' (default)' : '')));
-      })))),
+      }))),
+      backgroundImage(st, save, rerender)),
     section('Start page', null,
       switchRow('When DBVO Studio opens', 'Landing page (default): the welcome page with what to do, the studio check and your recent work. Where I left off: the page you had open last time. The DBVO Studio logo at the top left always opens the landing page.',
-        segmented([['home', 'Landing page'], ['last', 'Where I left off']], (st.ui || {}).startPage === 'last' ? 'last' : 'home', (x) => save({ ui: { startPage: x } }))),
-      landingBackground(st, save, rerender)),
+        segmented([['home', 'Landing page'], ['last', 'Where I left off']], (st.ui || {}).startPage === 'last' ? 'last' : 'home', (x) => save({ ui: { startPage: x } })))),
     section('Voice lines with Player Names (<Alias=Player>)', null,
       switchRow('Voice player-name lines', 'Off (default): lines with <Alias=Player> are left out of the topic files (♪ off), so they are not generated by accident when you voice them in a dedicated Player Names patch. They stay listed under "Player names" in Phase 1 and can still be exported there. On: they are voiced in Phase 2 like any other line. A ♪ you set by hand on a line always wins.',
         switchEl(!!st.playerNameLinesVoiced, (x) => save({ playerNameLinesVoiced: x }), null, { title: 'Voice <Alias=Player> lines in Phase 2' }))),

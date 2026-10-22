@@ -254,7 +254,7 @@ export async function patchView(id) {
   // With the Voice Changer on, a line needs a source file, unless text-to-speech for such lines is turned on.
   const canGen = (l) => !vc || l.hasSource || !!patch.ttsForMissing;
 
-  const view = h('div.view');
+  const view = h('div.view.work');
   const head = h('div.view-head');
   const tb = h('div.toolbar');
   const tagbar = h('div.tagbar');

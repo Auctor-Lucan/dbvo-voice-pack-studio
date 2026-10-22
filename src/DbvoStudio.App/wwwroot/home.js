@@ -29,6 +29,50 @@ function pickGreeting() {
   return (greeting = GREETINGS[i]);
 }
 
+// Under the welcome: a word from M'aiq the Liar (UESP). The first launch shows the snowflakes; then the rest in a shuffled
+// order, each once, before the snowflakes come round again.
+const MAIQ = [
+  'Snow falls. Why worry where it goes? M\'aiq thinks the snowflakes are pretty.',
+  'M\'aiq knows much, and tells some. M\'aiq knows many things others do not.',
+  'M\'aiq knows many things, no?',
+  'It does not matter to M\'aiq how strong or smart one is. It only matters what one can do.',
+  'Much snow in Skyrim. Enough snow. M\'aiq does not want any more.',
+  'M\'aiq once walked to High Hrothgar. So many steps, he lost count.',
+  'Too much magic can be dangerous. M\'aiq once had two spells and burned his sweetroll.',
+  'What does this mean, to combine magic? Magic plus magic is still magic.',
+  'Dragons were never gone. They were just invisible and very, very quiet.',
+  'Some say Alduin is Akatosh. Some say M\'aiq is a Liar. Don\'t you believe either of those things.',
+  'M\'aiq hears many stories of war... yet few of them are true.',
+  'How does one know there was a city of Winterhold? M\'aiq did not see it with his eyes. Did you?',
+  'M\'aiq knows why Falmer are blind. It has nothing to do with the Dwemer disappearing. Really.',
+  'M\'aiq is always in search of calipers, yet finds none. Where could they have gone?',
+  'M\'aiq is very practical. He has no need for mysticism.',
+  'M\'aiq\'s father was also called M\'aiq. As was M\'aiq\'s father\'s father. At least, that\'s what his father said.',
+  'Nords are so serious about beards. So many beards. M\'aiq thinks they wish they had glorious manes like Khajiit.',
+  'Nords\' armor has lots of fur. This sometimes makes M\'aiq nervous.',
+  'M\'aiq can travel fast across the land. Some lazy types take carriages. It is all the same to M\'aiq.',
+  'M\'aiq carries two weapons, to be safe. What if one breaks? That would be most unlucky.',
+  'Don\'t try blocking if you have two weapons. You will only get confused. Much better to hit twice anyway.',
+  'Some like taking friends on adventures. M\'aiq thinks being alone is better. Less arguing about splitting treasure.',
+  'Once M\'aiq got in trouble in Riften, and fled to Windhelm. It is good that nobody there cared.',
+  'M\'aiq saw a mudcrab the other day. Horrible creatures.',
+  'Werebears? Where? Bears? Men that are bears?',
+  'Skyrim was once the land of many butterflies. Now, not so much.',
+];
+let maiq = null; // picked once per launch
+function pickMaiq() {
+  if (maiq != null) return maiq;
+  let deck = store.get('maiqDeck', null);
+  let i;
+  if (!Array.isArray(deck) || !deck.length || deck.some((x) => !Number.isInteger(x) || x < 1 || x >= MAIQ.length)) {
+    i = 0; // the first launch, and the start of every round
+    deck = [...Array(MAIQ.length - 1).keys()].map((x) => x + 1);
+    for (let k = deck.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [deck[k], deck[j]] = [deck[j], deck[k]]; }
+  } else i = deck.shift();
+  store.set('maiqDeck', deck);
+  return (maiq = MAIQ[i]);
+}
+
 const WAVE = [18, 30, 52, 40, 70, 88, 60, 94, 72, 46, 80, 100, 64, 38, 58, 84, 50, 28, 44, 22, 36, 16];
 const RECENT_KEY = 'recent';
 const RECENT_VIEWS = ['mod', 'patch', 'fomod', 'revoice'];
@@ -45,11 +89,6 @@ export async function homeView() {
   const s = await refreshState();
   const revoices = await rpc('revoice.list').catch(() => []);
   const view = h('div.view.home');
-  const ui = s.settings.ui || {};
-  if (ui.homeBg) {
-    view.classList.add('has-bg', 'shade-' + (ui.homeBgShade || 'normal'));
-    view.style.setProperty('--home-bg', `url("https://user.dbvo/${encodeURIComponent(ui.homeBg)}?v=${ui.homeBgV || ''}")`);
-  }
 
   // ---- left: welcome, counts and the studio check
   const voiced = s.patches.reduce((a, p) => a + (p.generated || 0), 0);
@@ -81,7 +120,7 @@ export async function homeView() {
   const left = h('section.home-hero',
     h('div.home-wave', WAVE.map((x) => h('i', { style: { height: x + '%' } }))),
     h('h1', pickGreeting()[0], h('br'), pickGreeting()[1]),
-    h('p.home-ask', 'What do you want to do today?'),
+    h('figure.home-quote', h('blockquote', '“' + pickMaiq().replace(/'/g, '’') + '”'), h('figcaption', '— M’aiq the Liar')),
     stats, checks);
 
   // ---- right: what to do

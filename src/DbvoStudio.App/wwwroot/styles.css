@@ -47,7 +47,7 @@ a:hover { text-decoration: underline; }
 .crumb { white-space: nowrap; flex-shrink: 0; background: none; border: 0; color: var(--dim); font-size: 15px; font-weight: 600; padding: 7px 12px; border-radius: var(--radius); cursor: pointer; display: flex; gap: 8px; align-items: center; }
 .crumb .num { font-size: 11px; font-weight: 700; color: var(--faint); border: 1px solid var(--line); border-radius: 50%; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; }
 .crumb:hover { color: var(--text); background: var(--panel); }
-.crumb.active { color: var(--text); background: var(--raised); box-shadow: inset 3px 0 0 var(--accent); border-radius: 0 var(--radius) var(--radius) 0; }
+.crumb.active { color: var(--text); background: var(--raised); box-shadow: inset 3px 0 0 var(--accent); border-radius: 8px; }
 .crumb.active .num { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
 .tool-crumb { margin-left: 18px; }
 .crumb-sep { color: var(--accent); font-size: 18px; font-weight: 700; padding: 0 2px; }
@@ -398,10 +398,12 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .credits-pop { position: fixed; z-index: 60; min-width: 260px; max-width: 340px; background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.35); padding: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
 .credits-pop .row { gap: 10px; align-items: center; }
 .section.compact .srow { padding: 6px 0; grid-template-columns: 130px 1fr; }
-.tool-bottom { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
+.tool-bottom { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
 .tool-bottom > .section { margin-bottom: 0; }
-.tool-log { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.tool-log .log { flex: 1; min-height: 260px; max-height: 52vh; }
+.tool-log { display: flex; flex-direction: column; min-width: 0; margin-bottom: 0; }
+.tool-log > .section-body { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; min-height: 0; }
+.tool-log .log { flex: 1; min-height: 220px; max-height: 52vh; }
+.tool-status { color: var(--text); font-size: 12.5px; overflow-wrap: anywhere; }
 @media (max-width: 1000px) { .tool-top, .tool-bottom { grid-template-columns: 1fr; } }
 
 /* batch add mods */
@@ -446,9 +448,10 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .need-steps { margin: 10px 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 8px; line-height: 1.5; }
 
 /* ------------------------------------------------------------------ landing page */
-.brand { cursor: pointer; border-radius: 8px 0 0 8px; padding-left: 6px; margin-left: -6px; }
+.brand { cursor: pointer; border-radius: 8px; padding: 0 12px; margin-left: -12px; margin-right: 12px; border-right: 0; position: relative; height: 34px; }
+.brand::after { content: ''; position: absolute; right: -7px; top: 8px; bottom: 8px; width: 1px; background: var(--line); }
 .brand:hover .brand-name { color: var(--link); }
-.brand.active { background: var(--raised); box-shadow: inset 0 -2px 0 var(--accent); }
+.brand.active { background: var(--raised); box-shadow: inset 3px 0 0 var(--accent); }
 .brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .view.home { overflow: auto; display: flex; flex-direction: column; }
 .home-top { display: grid; grid-template-columns: minmax(340px, 1fr) 1.45fr; flex: 1; min-height: 0; }
@@ -458,7 +461,9 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .home-wave i { flex: 0 0 8px; border-radius: 5px; background: linear-gradient(color-mix(in srgb, var(--accent) 55%, #fff), var(--accent-strong)); }
 .home-hero { container-type: inline-size; }
 .home-hero h1 { font-size: clamp(20px, 5.1cqi, 29px); line-height: 1.2; margin: 0 0 8px; font-weight: 600; letter-spacing: -.2px; text-wrap: balance; }
-.home-ask { color: var(--dim); font-size: 16.5px; margin: 0 0 22px; }
+.home-quote { margin: 4px 0 24px; max-width: 34em; }
+.home-quote blockquote { margin: 0; color: var(--dim); font-size: 15.5px; font-style: italic; line-height: 1.45; text-wrap: pretty; }
+.home-quote figcaption { margin-top: 5px; color: var(--faint); font-size: 12px; letter-spacing: .2px; }
 .home-stats { display: flex; gap: 30px; }
 .home-stats b { display: block; font-size: 24px; font-weight: 650; }
 .home-stats span { color: var(--faint); font-size: 12px; }
@@ -524,10 +529,16 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 @keyframes help-flash { from { background: var(--accent-soft); } to { background: transparent; } }
 
 /* Landing page with the user's own background: each part keeps its usual shade, see-through */
-.view.home.has-bg { --s-hero: 78%; --s-start: 42%; --s-card: 82%; --s-recent: 84%; --s-rc: 80%;
-  background: var(--home-bg) center / cover no-repeat, var(--deep); }
-.view.home.has-bg.shade-light { --s-hero: 62%; --s-start: 22%; --s-card: 70%; --s-recent: 70%; --s-rc: 66%; }
-.view.home.has-bg.shade-dark { --s-hero: 90%; --s-start: 62%; --s-card: 92%; --s-recent: 93%; --s-rc: 90%; }
+html.has-bg { --s-page: 70%; --s-hero: 78%; --s-start: 42%; --s-card: 82%; --s-recent: 84%; --s-rc: 80%; }
+html.has-bg.shade-light { --s-page: 52%; --s-hero: 62%; --s-start: 22%; --s-card: 70%; --s-recent: 70%; --s-rc: 66%; }
+html.has-bg.shade-dark { --s-page: 84%; --s-hero: 90%; --s-start: 62%; --s-card: 92%; --s-recent: 93%; --s-rc: 90%; }
+/* The image sits behind every page; each page lays its usual background over it, see-through. Cards, sections and line
+   grids keep their solid colours so the work itself always reads cleanly. */
+html.has-bg #main { background: var(--app-bg) center / cover no-repeat, var(--deep); }
+html.has-bg .view { background: color-mix(in srgb, var(--bg) var(--s-page), transparent); }
+html.has-bg .view.home { background: none; }
+html.has-bg .view-head { background: color-mix(in srgb, var(--panel) 86%, transparent); backdrop-filter: blur(8px); }
+html.has-bg .vgrid { background: var(--bg); }
 .has-bg .home-hero { background: radial-gradient(120% 90% at 0% 100%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%), color-mix(in srgb, var(--deep) var(--s-hero), transparent); }
 .has-bg .home-start { background: color-mix(in srgb, var(--bg) var(--s-start), transparent); }
 .has-bg .home-card { background: color-mix(in srgb, var(--panel) var(--s-card), transparent); backdrop-filter: blur(8px); }
@@ -537,4 +548,10 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .has-bg .home-hero h1, .has-bg .home-stats b { text-shadow: 0 1px 12px color-mix(in srgb, var(--deep) 70%, transparent); }
 .has-bg .home-chip { background: color-mix(in srgb, var(--deep) 55%, transparent); }
 .bg-thumb { width: 64px; height: 36px; border-radius: 6px; border: 1px solid var(--line); background: center / cover no-repeat; flex: none; }
-.has-bg .home-lbl, .has-bg .home-ask, .has-bg .home-stats span { color: var(--dim); text-shadow: 0 1px 8px color-mix(in srgb, var(--deep) 85%, transparent), 0 0 2px color-mix(in srgb, var(--deep) 70%, transparent); }
+.has-bg .home-lbl, .has-bg .home-quote blockquote, .has-bg .home-quote figcaption, .has-bg .home-stats span { color: var(--dim); text-shadow: 0 1px 8px color-mix(in srgb, var(--deep) 85%, transparent), 0 0 2px color-mix(in srgb, var(--deep) 70%, transparent); }
+
+/* Over a background image: the one section label on the landing page in white, so it reads on any picture */
+.has-bg .home-start > .home-lbl { color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, .7); }
+/* Pages you work in (a mod's lines, a patch, a revoice project, the FOMOD editor, the guide) stay solid over a background image */
+html.has-bg .view.work, html.has-bg .view.help-page { background: var(--bg); }
+.tool-top .section-head, .tool-bottom .section-head { min-height: 58px; padding-top: 8px; padding-bottom: 8px; }

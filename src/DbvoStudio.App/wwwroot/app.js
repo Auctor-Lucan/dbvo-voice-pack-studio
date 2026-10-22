@@ -17,9 +17,21 @@ export const app = {
 
 const main = document.getElementById('main');
 
+/** The user's background image behind every page (Global Settings → Appearance), or none. */
+export function applyBackground(ui) {
+  const root = document.documentElement;
+  root.classList.toggle('has-bg', !!ui.homeBg);
+  root.classList.remove('shade-light', 'shade-normal', 'shade-dark');
+  if (ui.homeBg) {
+    root.classList.add('shade-' + (ui.homeBgShade || 'normal'));
+    root.style.setProperty('--app-bg', `url("https://user.dbvo/${encodeURIComponent(ui.homeBg)}?v=${ui.homeBgV || ''}")`);
+  } else root.style.removeProperty('--app-bg');
+}
+
 export async function refreshState() {
   app.state = await rpc('state');
   { const th = (app.state.settings.ui || {}).theme; if (th) applyTheme(th); }
+  applyBackground(app.state.settings.ui || {});
   // A job indicator left over from a job that ended without telling the page (e.g. after a crash) must not block buttons.
   if (!app.state.jobRunning && app.job) { app.job = null; document.getElementById('job').classList.add('hidden'); }
   return app.state;

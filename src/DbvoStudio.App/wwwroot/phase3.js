@@ -103,7 +103,7 @@ export async function fomodView(id) {
   const collapsed = store.get('fomodCollapsed:' + id, {});
   const savedEl = h('span.saved.ok', 'Saved ✓');
 
-  const view = h('div.view');
+  const view = h('div.view.work');
   const head = h('div.view-head');
   const tree = h('div.ftree');
   const edit = h('div.fedit');

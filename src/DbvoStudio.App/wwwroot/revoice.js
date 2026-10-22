@@ -62,7 +62,7 @@ export async function revoiceView(id) {
   const reindex = () => { index = new Map(proj.lines.map((l) => [l.id, l])); };
   reindex();
 
-  const view = h('div.view');
+  const view = h('div.view.work');
   const head = h('div.view-head');
   const body = h('div', { style: { flex: '1', minHeight: '0', display: 'flex', flexDirection: 'column' } });
   view.append(head, body);

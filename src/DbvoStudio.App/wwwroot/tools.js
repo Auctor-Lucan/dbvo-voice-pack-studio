@@ -74,7 +74,7 @@ export async function wavLipView() {
   });
   renderList();
 
-  const statusEl = h('div.dim', statusText || `Tools root: ${st.faceFxWrapperPath ? st.faceFxWrapperPath.replace(/\\[^\\]*$/, '') : '—'}`);
+  const statusEl = h('div.tool-status', statusText || `Tools root: ${st.faceFxWrapperPath ? st.faceFxWrapperPath.replace(/\\[^\\]*$/, '') : '—'}`);
   const bar = h('div.bar', h('div.bar-fill', { style: { width: '0%' } }));
   const logEl = h('div.log', logLines.join('\n'));
   const log = (t) => { logLines.push(t); if (logLines.length > 2000) logLines.shift(); logEl.textContent = logLines.join('\n'); logEl.scrollTop = logEl.scrollHeight; };
@@ -91,7 +91,8 @@ export async function wavLipView() {
         h('button.btn', { title: 'Remove the selected files from the list (not from disk)', onclick: () => { files = files.filter((_, i) => !selected.has(i)); selected.clear(); renderList(); } }, 'Remove selected'),
         h('button.btn.ghost', { title: 'Empty the list (files stay on disk)', onclick: () => { files = []; selected.clear(); renderList(); } }, 'Clear'),
         h('div.spacer'), startBtn))),
-    h('div.tool-log', bar, statusEl, logEl)));
+    h('div.section.tool-log', { style: { maxWidth: 'none' } }, h('div.section-head', h('h2', 'Progress')),
+      h('div.section-body', bar, statusEl, logEl))));
 
   async function start() {
     if (app.job) return;

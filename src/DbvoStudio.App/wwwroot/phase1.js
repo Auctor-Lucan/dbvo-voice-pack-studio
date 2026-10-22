@@ -286,7 +286,7 @@ export async function modView(id) {
   let focusedKey = null;
   let showInsp = store.get('insp1', true);
 
-  const view = h('div.view');
+  const view = h('div.view.work');
   const head = h('div.view-head');
   const hint = h('div.hint', h('b', 'Review flagged lines'), ' (BROKEN LINE, TOO LONG WILL CTD, PLAYER NAME), then ', h('b', 'Continue to Phase 2'), '. ',
     'A DBVO Fix plugin is only made when at least one line needs fixing; a clean plugin gets none. ',

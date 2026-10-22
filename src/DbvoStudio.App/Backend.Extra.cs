@@ -42,7 +42,7 @@ public sealed partial class Backend
                 _owner.Dispatcher.Invoke(() => WindowChrome.Apply(_owner, S(p, "caption"), S(p, "text"), B(p, "dark")));
                 return true;
 
-            // ---- the landing page background (kept per computer, served as https://user.dbvo/)
+            // ---- the background image behind every page (kept per computer, served as https://user.dbvo/)
             case "home.setBackground":
                 return await Locked(() =>
                 {
@@ -53,7 +53,7 @@ public sealed partial class Backend
                     if (!File.Exists(src)) throw new InvalidOperationException("That image was not found.");
                     if (new FileInfo(src).Length > 30_000_000) throw new InvalidOperationException("That image is over 30 MB. Use a smaller copy.");
                     RemoveBackgroundFiles();
-                    var name = "landing-background" + ext;
+                    var name = "background" + ext;
                     File.Copy(src, Path.Combine(UserFilesDir, name), true);
                     _settings.Ui["homeBg"] = name;
                     _settings.Ui["homeBgV"] = DateTime.UtcNow.Ticks.ToString();
@@ -582,7 +582,7 @@ public sealed partial class Backend
         return true;
     }
 
-    /// <summary>Files the user gives the app itself (the landing page background), per computer, outside the library.</summary>
+    /// <summary>Files the user gives the app itself (the background image), per computer, outside the library.</summary>
     public static string UserFilesDir
     {
         get
@@ -595,7 +595,8 @@ public sealed partial class Backend
 
     private static void RemoveBackgroundFiles()
     {
-        foreach (var f in Directory.GetFiles(UserFilesDir, "landing-background.*"))
-            try { File.Delete(f); } catch (IOException) { } // in use: the next pick overwrites or the name differs
+        foreach (var pattern in new[] { "background.*", "landing-background.*" }) // the second: build 6.7's name
+            foreach (var f in Directory.GetFiles(UserFilesDir, pattern))
+                try { File.Delete(f); } catch (IOException) { } // in use: the next pick overwrites it
     }
 }
