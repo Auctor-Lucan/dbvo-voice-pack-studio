@@ -696,6 +696,10 @@ export function popover(anchor, content) {
   document.addEventListener('mousedown', onDown, true);
   window.addEventListener('keydown', onKey, true);
   document.body.append(el);
+  // Near the bottom of the window (a status bar), open upwards instead.
+  const pr = el.getBoundingClientRect();
+  if (pr.bottom > window.innerHeight - 8) el.style.top = `${Math.max(8, r.top - 6 - pr.height)}px`;
+  if (pr.right > window.innerWidth - 8) el.style.left = `${Math.max(8, window.innerWidth - 8 - pr.width)}px`;
   openPop = { el, anchor, close };
 }
 

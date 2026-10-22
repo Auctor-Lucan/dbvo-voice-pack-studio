@@ -392,15 +392,15 @@ export async function bookProjectView(id) {
     columns: [
       { id: 'sel', title: '', width: 32, resizable: false, render: (b) => grid.checkbox(b) },
       { id: 'excl', title: '', width: 30, resizable: false, render: (b) => h('button.act-btn.excl-btn' + (b.excl ? '.on.bad' : ''), { title: b.excl ? `Left out (${b.exReason || 'by you'}) - click to include` : 'Leave this book out', onclick: (e) => { e.stopPropagation(); bookAct(b, b.excl ? 'include' : 'exclude'); } }, icon('ban', { size: 14 })) },
-      { id: 'title', title: 'Title', flex: 1, width: 240, render: (b) => h('span.ellipsis', { title: `${b.title}\n${b.edid} · ${b.plugin}${b.records > 1 ? ` (+${b.records - 1} more records share this text)` : ''}` }, b.updated ? h('span.mark.warn', { title: 'An updated text is available from the built-in set' }, '★ ') : null, b.title || h('i.faint', b.stem)) },
-      { id: 'stem', title: 'File', width: 170, render: (b) => h('span.mono.faint.ellipsis', { title: `sound\\fx\\voicedbooksofskyrim\\${b.stem}.xwm` }, b.stem) },
-      { id: 'reader', title: 'Read by', width: 190, render: (b) => readerCell(b) },
-      { id: 'author', title: 'Author / sender', width: 150, render: (b) => b.author ? h('span.ellipsis', { title: `${b.author}${b.npcName ? ' → NPC ' + b.npcName : ''}\nFound in ${SRC[b.authorSrc] || b.authorSrc}\n${CERT_TIP[b.authorCert] || ''}` }, b.author) : h('span.faint', '—') },
-      { id: 'kind', title: 'Kind', width: 70, render: (b) => h('span.faint', b.kind) },
-      { id: 'chars', title: 'Characters', width: 86, align: 'right', render: (b) => h('span.mono.faint', { title: `${b.chars.toLocaleString()} characters ≈ credits per voice · ${b.parts} part(s)` }, b.chars.toLocaleString()) },
-      { id: 'parts', title: 'Parts', width: 52, render: (b) => h('span.mono.faint', String(b.parts || '—')) },
-      { id: 'checks', title: 'Checks', width: 66, render: (b) => b.serious ? h('span.badge.b-broken', { title: `${b.serious} serious problem(s): open the editor to see them` }, `⚠ ${b.serious}`) : b.notes ? h('span.faint', { title: `${b.notes} note(s): open the editor to see them` }, `· ${b.notes}`) : h('span.faint', '✓') },
-      { id: 'status', title: 'Audio', width: 90, render: (b) => h('span.row', { style: { gap: '4px' } }, b.voices.length ? b.voices.map((v) => h('span.dot.' + DOT[v.status], { title: `${voiceName(v.v)}: ${DOT_TIP[v.status]}` })) : h('span.faint', '—')) },
+      { id: 'title', title: 'Title', flex: 1, width: 200, render: (b) => h('span.ellipsis', { title: `${b.title}\n${b.edid} · ${b.plugin}${b.records > 1 ? ` (+${b.records - 1} more records share this text)` : ''}` }, b.updated ? h('span.mark.warn', { title: 'An updated text is available from the built-in set' }, '★ ') : null, b.title || h('i.faint', b.stem)) },
+      { id: 'stem', title: 'File', width: 130, render: (b) => h('span.mono.faint.ellipsis', { title: `sound\\fx\\voicedbooksofskyrim\\${b.stem}.xwm` }, b.stem) },
+      { id: 'reader', title: 'Read by', width: 165, render: (b) => readerCell(b) },
+      { id: 'author', title: 'Author / sender', width: 130, render: (b) => b.author ? h('span.ellipsis', { title: `${b.author}${b.npcName ? ' → NPC ' + b.npcName : ''}\nFound in ${SRC[b.authorSrc] || b.authorSrc}\n${CERT_TIP[b.authorCert] || ''}` }, b.author) : h('span.faint', '—') },
+      { id: 'kind', title: 'Kind', width: 60, render: (b) => h('span.faint', b.kind) },
+      { id: 'chars', title: 'Chars', width: 66, align: 'right', render: (b) => h('span.mono.faint', { title: `${b.chars.toLocaleString()} characters ≈ credits per voice · ${b.parts} part(s)` }, b.chars.toLocaleString()) },
+      { id: 'parts', title: 'Parts', width: 46, render: (b) => h('span.mono.faint', String(b.parts || '—')) },
+      { id: 'checks', title: 'Checks', width: 58, render: (b) => b.serious ? h('span.badge.b-broken', { title: `${b.serious} serious problem(s): open the editor to see them` }, `⚠ ${b.serious}`) : b.notes ? h('span.faint', { title: `${b.notes} note(s): open the editor to see them` }, `· ${b.notes}`) : h('span.faint', '✓') },
+      { id: 'status', title: 'Audio', width: 62, render: (b) => h('span.row', { style: { gap: '4px' } }, b.voices.length ? b.voices.map((v) => h('span.dot.' + DOT[v.status], { title: `${voiceName(v.v)}: ${DOT_TIP[v.status]}` })) : h('span.faint', '—')) },
       { id: 'act', title: '', width: 118, resizable: false, render: (b) => h('span.row.icon-bar', { style: { gap: '2px' } },
         h('button.act-btn' + (inFlight.has(b.stem) ? '.spinning' : ''), { title: genBlock(b) || 'Generate this book\'s missing parts (every voice that reads it)', disabled: !!genBlock(b), onclick: (e) => { e.stopPropagation(); generate('ticked', [b.stem], { single: true }); } }, icon('regen')),
         h('button.act-btn', { title: 'Open the editor (or double-click the row)', onclick: (e) => { e.stopPropagation(); openEditor(b.stem); } }, icon('edit')),
@@ -510,7 +510,7 @@ export async function bookProjectView(id) {
     const vtSel = h('select', { title: 'The NPC voice type that reads this book', style: { maxWidth: '220px' } }, h('option', { value: '' }, '— voice type —'));
     rpc('books.voiceTypes', { id }).then((list) => {
       const pref = [...new Set([b.vt, ...(b.cands || [])].filter(Boolean))];
-      vtSel.append(...pref.map((v) => h('option', { value: v, selected: v === b.vt }, v + (b.cands.includes(v) && v !== b.vt ? ' (candidate)' : ''))),
+      vtSel.append(...pref.map((v) => h('option', { value: v, selected: b.reader === 'npc' && v === b.vt }, v + (b.reader !== 'npc' && v === b.vt ? ' (the author\'s voice type)' : b.cands.includes(v) && v !== b.vt ? ' (candidate)' : ''))),
         h('option', { disabled: true }, '──────'), ...list.filter((v) => !pref.includes(v)).map((v) => h('option', { value: v }, v)));
     }).catch(() => {});
     vtSel.addEventListener('change', () => { if (vtSel.value) bookAct(b, 'reader', 'npc', { voiceType: vtSel.value }); });

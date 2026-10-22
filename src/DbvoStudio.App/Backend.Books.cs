@@ -82,7 +82,8 @@ public sealed partial class Backend
                         proj.IniName = "!VanillaBooks";
                         proj.ArchivePrefix = "VBOS";
                     }
-                    proj.Narrators.Add(new BookNarrator { Name = S(p, "narrator", "Narrator").Trim() is { Length: > 0 } n ? n : "Narrator" });
+                    var nname = S(p, "narrator", "Narrator").Trim() is { Length: > 0 } n ? n : "Narrator";
+                    proj.Narrators.Add(new BookNarrator { Name = nname, Female = nname.Contains("female", StringComparison.OrdinalIgnoreCase) });
                     BkService().ApplyBaseGame(proj);
                     BooksService.RebuildLines(proj);
                     _lib.Save(proj);
@@ -195,7 +196,7 @@ public sealed partial class Backend
         var voiceStats = BkVoiceStats(proj);
         return new
         {
-            proj.Id, proj.Name, proj.Source, proj.SetVersion, setVersion = set?.Version, setName = set?.Name, setCredit = set?.Credit,
+            proj.Id, proj.Name, proj.Source, proj.SetVersion, latestSetVersion = set?.Version, setName = set?.Name, setCredit = set?.Credit,
             proj.ModName, proj.ArchivePrefix, proj.IniName, iniFile = BooksExporter.IniFileName(proj), proj.OutputFolder, proj.Packaging, proj.NpcVoices, proj.WriteIni,
             proj.PartTarget, proj.PartMin, proj.PartMax, proj.SendContext, proj.AutoSpokenRules, proj.UseBaseGame, proj.Language, audio = proj.Audio, voice = proj.Voice,
             ceiling = BooksService.Ceiling(proj),

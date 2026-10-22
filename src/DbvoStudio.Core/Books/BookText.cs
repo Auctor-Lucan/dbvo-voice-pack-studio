@@ -96,6 +96,7 @@ public static partial class BookText
     /// </summary>
     public static (string? Author, string Remainder) SplitByLine(string text, string title)
     {
+        text = DropRepeatedTitle(text, title);
         var paras = text.Split('\n');
         for (int i = 0; i < Math.Min(paras.Length, 6); i++)
         {
@@ -113,6 +114,23 @@ public static partial class BookText
             if (WordCount(p) > 8) break;
         }
         return (null, text);
+    }
+
+    /// <summary>Remove the title when the page repeats it at the top, also when it is spread over several lines ("Roads of the North" / "Vol. II").</summary>
+    public static string DropRepeatedTitle(string body, string title)
+    {
+        var t = Norm(title).ToLowerInvariant();
+        if (t.Length == 0) return body;
+        var lines = body.Split('\n');
+        var acc = "";
+        for (int i = 0; i < Math.Min(lines.Length, 6); i++)
+        {
+            if (lines[i].Trim().Length == 0) continue;
+            acc = (acc + " " + Norm(lines[i]).ToLowerInvariant()).Trim();
+            if (acc == t) return string.Join('\n', lines.Skip(i + 1)).TrimStart();
+            if (!t.StartsWith(acc + " ", StringComparison.Ordinal)) break;
+        }
+        return body;
     }
 
     private static bool Same(string a, string b) => string.Equals(Norm(a), Norm(b), StringComparison.OrdinalIgnoreCase);
@@ -155,9 +173,7 @@ public static partial class BookText
         author = a;
         var (s, body) = SplitSignature(rest);
         sender = s;
-        // Drop the title when the page repeats it as its first line.
-        var firstLine = body.Split('\n').FirstOrDefault()?.Trim() ?? "";
-        if (title.Length > 0 && Same(firstLine, title)) body = string.Join('\n', body.Split('\n').Skip(1)).TrimStart();
+        body = DropRepeatedTitle(body, title);
         var sb = new StringBuilder();
         if (title.Trim().Length > 0) sb.Append(title.Trim());
         if (author != null) sb.Append(AuthorSep).Append("By ").Append(author);
@@ -327,8 +343,12 @@ public static partial class BookText
         if (spans.Count == 0) return text;
         var sb = new StringBuilder();
         int at = 0;
-        foreach (var (start, end, spoken) in spans.OrderBy(s => s.Start))
+        foreach (var (start0, end, spoken0) in spans.OrderBy(s => s.Start))
         {
+            // "On the 17th of Last Seed": the separator goes before "the", which belongs to the date.
+            int start = start0; var spoken = spoken0;
+            if (start >= 4 && text.AsSpan(start - 4, 4).Equals("the ", StringComparison.OrdinalIgnoreCase) && (start == 4 || !char.IsLetter(text[start - 5])))
+            { spoken = text.Substring(start - 4, 3) + " " + spoken; start -= 4; }
             sb.Append(text, at, start - at);
             bool sepBefore = Regex.IsMatch(sb.ToString(), @"-{5}\s*$");
             bool sepAfter = Regex.IsMatch(text.AsSpan(end).ToString(), @"^\s*[.,;:]?\s*-{5}");

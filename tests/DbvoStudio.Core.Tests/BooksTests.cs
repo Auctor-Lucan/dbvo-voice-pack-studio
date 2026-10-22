@@ -372,3 +372,13 @@ public class BookTemplatesTests
         Assert.Empty(t.For("NoSuchTemplate"));
     }
 }
+
+public class BookDateTests
+{
+    [Fact]
+    public void The_article_moves_inside_the_date_separators()
+    {
+        var s = BookText.Dates("On the 17th of Last Seed, 4E 188, I walked.");
+        Assert.Equal("On ----- the Seventeenth of Last Seed, Fourth Era, Year One-hundred-Eighty-Eight, ----- I walked.", s);
+    }
+}
