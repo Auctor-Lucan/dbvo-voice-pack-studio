@@ -72,7 +72,7 @@ export function h(tag, attrs, ...children) {
     if (v == null || v === false) continue;
     if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'class') el.className += ' ' + v;
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'style' && typeof v === 'object') { for (const [sk, sv] of Object.entries(v)) { if (sk.startsWith('--')) el.style.setProperty(sk, sv); else el.style[sk] = sv; } }
     else if (k === 'value') el.value = v;
     else if (k === 'checked') el.checked = !!v;
     else if (k === 'html') el.innerHTML = v;
@@ -110,7 +110,13 @@ export function fail(e) {
 }
 
 /** Show a modal. content: Node[]; buttons: [{label, primary, value}]. Resolves to the clicked value (null on Esc). */
-export function modal(title, content, buttons = [{ label: 'OK', primary: true, value: true }], { wide = false } = {}) {
+/** A small ? that opens the user guide at a section (help.js listens), e.g. helpButton('the-toolbar'). */
+export function helpButton(anchor, { label = '' } = {}) {
+  return h('button.help-btn', { type: 'button', title: 'Help: open the guide for this' + (label ? ` (${label})` : ''), 'data-help': anchor,
+    onclick: (e) => { e.preventDefault(); e.stopPropagation(); document.dispatchEvent(new CustomEvent('open-help', { detail: { anchor } })); } }, icon('help', { size: 15 }));
+}
+
+export function modal(title, content, buttons = [{ label: 'OK', primary: true, value: true }], { wide = false, help = null } = {}) {
   const m = document.getElementById('modal');
   const card = clear(m.querySelector('.modal-card'));
   card.classList.toggle('wide', wide);
@@ -123,7 +129,7 @@ export function modal(title, content, buttons = [{ label: 'OK', primary: true, v
     const key = (e) => { if (e.key === 'Escape') close(null); };
     document.addEventListener('keydown', key);
     card.append(
-      h('h2', title),
+      help ? h('div.modal-head', h('h2', title), helpButton(help)) : h('h2', title),
       ...[content].flat(),
       h('div.row', h('div.spacer'), ...buttons.map((b) =>
         h('button.btn' + (b.primary ? '.primary' : '') + (b.danger ? '.danger' : ''), { onclick: () => close(typeof b.value === 'function' ? b.value() : b.value) }, b.label))),
@@ -538,6 +544,17 @@ const ICON_PATHS = {
   ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
   undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>',
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  wave: '<path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/>',
+  box: '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7M12 11v10"/>',
+  lips: '<path d="M2 12c3-4 6-5 10-2 4-3 7-2 10 2-3 4-6 6-10 6s-7-2-10-6z"/><path d="M2 12h20"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/>',
+  check: '<path d="M5 12l5 5L20 7"/>',
+  help: '<circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
   coins: '<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>',
 };
 

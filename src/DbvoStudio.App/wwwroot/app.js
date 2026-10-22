@@ -6,10 +6,12 @@ import { fomodsView, fomodView } from './phase3.js';
 import { wavLipView } from './tools.js';
 import { revoiceListView, revoiceView } from './revoice.js';
 import { settingsView } from './settings.js';
+import { homeView, noteRecent } from './home.js';
+import { helpView, PAGE_HELP } from './help.js';
 
 export const app = {
   state: null,
-  route: store.get('route', { view: 'mods' }),
+  route: store.get('route', { view: 'home' }),
   job: null,
 };
 
@@ -23,17 +25,21 @@ export async function refreshState() {
   return app.state;
 }
 
+let navigated = false; // set once the user moves, so the start-up below never overrides a click made while it loads
 export function go(view, params = {}) {
+  navigated = true;
   app.route = { view, ...params };
   store.set('route', app.route);
+  noteRecent(app.route);
   render();
 }
 
-const SECTION = { mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches', fomods: 'fomods', fomod: 'fomods', settings: 'settings', voices: 'settings', wavlip: 'tools', vc: 'patches', revoices: 'tools', revoice: 'tools' };
+const SECTION = { home: 'home', help: 'help', mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches', fomods: 'fomods', fomod: 'fomods', settings: 'settings', voices: 'settings', wavlip: 'tools', vc: 'patches', revoices: 'tools', revoice: 'tools' };
 
 export async function render() {
   const section = SECTION[app.route.view] || 'mods';
   document.querySelectorAll('[data-section]').forEach((b) => b.classList.toggle('active', b.dataset.section === section));
+  document.getElementById('brand').classList.toggle('active', section === 'home');
   // An Other Tools page shows its name in the top bar, after the three phases.
   const tool = { wavlip: ['WAV to LIP Tool', 'wavlip'], revoices: ['NPC Revoice Tool', 'revoices'], revoice: ['NPC Revoice Tool', 'revoices'] }[app.route.view];
   const tc = document.getElementById('tool-crumb');
@@ -45,6 +51,8 @@ export async function render() {
     if (!app.state) await refreshState();
     let view;
     switch (app.route.view) {
+      case 'home': view = await homeView(); break;
+      case 'help': view = await helpView(app.route.anchor); break;
       case 'mod': view = await modView(app.route.id); break;
       case 'patches': view = await patchesView('tts'); break;
       case 'vc': view = await patchesView(); break; // the Voice Changer is now a toggle inside each patch
@@ -62,13 +70,18 @@ export async function render() {
   } catch (e) {
     console.error(e);
     clear(main).append(h('div.empty', h('h2', 'Something went wrong'), h('div', e.message || String(e)),
-      h('div', { style: { marginTop: '12px' } }, h('button.btn', { onclick: () => go('mods') }, 'Back to Mods'))));
-    if (app.route.view !== 'mods') store.set('route', { view: 'mods' });
+      h('div', { style: { marginTop: '12px' } }, h('button.btn', { onclick: () => go('home') }, 'Back to the landing page'))));
+    if (app.route.view !== 'home') store.set('route', { view: 'home' });
   }
 }
 
 document.querySelectorAll('.crumb[data-section]').forEach((b) => b.addEventListener('click', () => go(b.dataset.section)));
 document.querySelector('[data-section="settings"]').addEventListener('click', () => go('settings'));
+document.querySelector('[data-section="help"]').addEventListener('click', () => go('help', { anchor: PAGE_HELP[app.route.view] }));
+document.getElementById('brand').addEventListener('click', () => go('home'));
+document.getElementById('brand').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go('home'); } });
+// F1: the guide, at the part about the page you are on.
+window.addEventListener('keydown', (e) => { if (e.key === 'F1') { e.preventDefault(); if (app.route.view !== 'help') go('help', { anchor: PAGE_HELP[app.route.view] }); } });
 const toolsBtn = document.getElementById('tools-btn');
 toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [
   { label: 'WAV to LIP Tool', sub: 'Whisper listens to WAV files and makes matching .lip files', onclick: () => go('wavlip') },
@@ -120,6 +133,14 @@ document.getElementById('job-cancel').addEventListener('click', () => rpc('job.c
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());
 
-render();
+// Start on the landing page, or where you left off (Global Settings → General & tools → Start page).
+(async () => {
+  clear(main).append(h('div.empty', 'Loading…'));
+  let home = true;
+  try { await refreshState(); home = ((app.state.settings.ui || {}).startPage || 'home') !== 'last'; } catch { /* render shows the error */ }
+  if (navigated) return;
+  if (home) app.route = { view: 'home' };
+  render();
+})();
 
 export { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce };

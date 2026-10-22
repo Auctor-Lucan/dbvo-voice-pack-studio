@@ -1,5 +1,5 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo } from './lib.js';
+import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret } from './tagtools.js';
 
@@ -90,6 +90,7 @@ export async function patchesView(kind = 'tts') {
   const view = h('div.view');
   view.append(h('div.view-head',
     h('h1', vcPage ? 'Voice Changer' : 'DBVO Patches'),
+    helpButton(vcPage ? 'voice-changer' : 'the-patch-list'),
     h('span.sub', vcPage
       ? 'Other Tools · revoice WAV or .fuz files another voice pack already has (ElevenLabs speech-to-speech). Works like Phase 2, without DBVO Fix plugins or topic files.'
       : 'One voice pack × one or more mods. Drag a patch onto another header to change its category. Two lists side by side, so you can compare voice packs.'),
@@ -373,7 +374,7 @@ export async function patchView(id) {
       h('div.row', h('button.btn.sm', { title: 'Delete every take of this line except the one in use and kept ones', onclick: async () => {
         try { const r = await rpc('patch.purgeTakes', { id, lineIds: [l.lineId] }); patch = r.patch; reindex(); grid.setRows(visible()); render(); toast(`${r.removed} take(s) deleted.`); } catch (e) { fail(e); }
       } }, 'Keep only the used take'),
-      h('button.btn.sm', { title: 'Make another take of this line', onclick: () => { document.getElementById('modal').classList.add('hidden'); generate('selected', [l.lineId], { autoplay: true }); } }, vc ? 'Convert again' : 'New take'))]);
+      h('button.btn.sm', { title: 'Make another take of this line', onclick: () => { document.getElementById('modal').classList.add('hidden'); generate('selected', [l.lineId], { autoplay: true }); } }, vc ? 'Convert again' : 'New take'))], undefined, { help: 'takes' });
   }
 
   async function purge(ids) {
@@ -518,6 +519,7 @@ export async function patchView(id) {
         numIn(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit; the app slows down automatically on "too many requests".' }));
     }
     if (locked) tb.append(h('span.badge.b-toolong', { title: 'Unlock in Global Settings → Voice packs' }, '🔒 locked'));
+    tb.append(helpButton('the-toolbar'));
     if (eng === 'elevenlabs' || eng === 'sts') tb.append(h('div.spacer'), creditsEl || (creditsEl = creditsButton(() => patch.lines.filter(pendingLine).reduce((a, l) => a + l.spoken.length, 0))));
   }
 
@@ -602,7 +604,7 @@ export async function patchView(id) {
       custom.value = '';
     });
     tagbar.append(
-      h('span.lbl', 'Tags'),
+      h('span.lbl', 'Tags'), helpButton('spoken-text-and-tags'),
       voice.tags.map(chip),
       custom,
       h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
@@ -754,6 +756,7 @@ export async function patchView(id) {
       { label: 'Keep only the used take · all lines', sub: 'Deletes every take that is not in use or kept ★', onclick: () => purge(null) },
     ]));
     clear(actions).append(
+      helpButton('generating'),
       h('span.stat', h('b', c.generated), ` / ${c.active} ${vc ? 'converted' : 'generated'}`, c.omitted ? ` · ${c.omitted} omitted` : '', c.excluded ? ` · ${c.excluded} excluded` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} changed since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
       h('div.spacer'),
       sel.length ? h('button.btn.sm.ghost', { title: 'Untick all rows', onclick: () => grid.selectAll(false) }, 'Clear ticks') : null,
@@ -838,7 +841,7 @@ export async function patchView(id) {
         h('div.kv', rows.flatMap(([k, v]) => [h('div', k), h('div', String(v))])),
         mode === 'all' ? h('div.banner.warn', { style: { margin: 0 } }, 'Every line gets a new take, which becomes the one used. Earlier takes stay in the take list.') : null,
         missingVoice ? h('div.banner.bad', { style: { margin: 0 } }, 'Pick a voice in the toolbar first.') : null,
-      ], [{ label: 'Cancel', value: false }, { label: `${vc ? 'Convert' : 'Generate'} ${est.count} line(s)`, primary: true, value: !missingVoice }]);
+      ], [{ label: 'Cancel', value: false }, { label: `${vc ? 'Convert' : 'Generate'} ${est.count} line(s)`, primary: true, value: !missingVoice }], { help: 'generating' });
       if (!ok) return;
       await rpc('patch.generate', { id, mode, lineIds });
       renderActions();
@@ -861,7 +864,7 @@ export async function patchView(id) {
     const v = await modal('Files from earlier exports', [
       h('div', `${stale.length} file(s) this patch exported earlier belong to lines that are no longer exported: excluded, omitted, removed or changed in Phase 1. Left in place they still play in game and go into the FOMOD.`),
       h('div.box.mono', { style: { whiteSpace: 'pre', maxHeight: '220px', overflow: 'auto', fontSize: '12px' } }, stale.slice(0, 200).join('\n') + (stale.length > 200 ? `\n… +${stale.length - 200} more` : '')),
-    ], [{ label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' }, { label: 'Delete them', primary: true, value: 'delete' }], { wide: true });
+    ], [{ label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' }, { label: 'Delete them', primary: true, value: 'delete' }], { wide: true, help: 'exporting' });
     return v == null ? null : { removeStale: v === 'delete' };
   }
 
@@ -933,6 +936,7 @@ export async function patchView(id) {
     clear(head).append(
       h('button.btn.ghost.sm', { onclick: () => go('patches') }, '← DBVO Patches'),
       h('h1', patch.name),
+      helpButton('the-patch-page'),
       voiceChip(voice.name, voice.color),
       h('span.badge.b-skip', patch.category),
       switchEl(vc, (on) => toggleVc(on), 'Voice Changer', { title: 'Convert another voice pack\'s WAV / .fuz files of this mod into this voice (ElevenLabs speech-to-speech) instead of text-to-speech. Only useful when the mod is already DBVO-patched with another voice.' }),
@@ -979,7 +983,7 @@ export async function patchView(id) {
           h('p', 'Billed by audio length instead of characters. Existing takes stay; the DBVO Fix plugin and topic file are written as usual.')),
         h('div.col', h('div.field-label', 'Source folders: the other voice pack\'s WAV or .fuz files for this mod'), srcList,
           h('button.btn.sm', { style: { alignSelf: 'flex-start' }, title: 'Searched with sub-folders; files are matched by Legacy and DBVO 2.0 names', onclick: async () => { const f = await rpc('pick.folder', { title: 'Folder with the other voice pack\'s WAV or .fuz files' }); if (f) { sources.push(f); renderSrc(); } } }, '+ Add folder')),
-      ], [{ label: 'Cancel', value: false }, { label: 'Turn on', primary: true, value: true }]);
+      ], [{ label: 'Cancel', value: false }, { label: 'Turn on', primary: true, value: true }], { help: 'voice-changer' });
       if (!ok) { renderHead(); return; }
       if (!sources.length) { toast('Add at least one source folder.', true); renderHead(); return; }
       await rpc('patch.saveMeta', { id, kind: 'vc', sourceFolders: sources });
@@ -1055,7 +1059,7 @@ export async function patchView(id) {
         row('Omit lines users have', 'Only packs every user installs',
           s.references.length ? h('div.col', { style: { gap: '4px' } }, s.references.map((r) => switchEl(refOn.has(r.id), (v) => { if (v) refOn.add(r.id); else refOn.delete(r.id); }, `${r.name}  ·  ${r.lineCount} lines`)))
             : h('div.faint', 'None yet: Global Settings → Omit references.'))),
-    ], [{ label: 'Cancel', value: false }, { label: 'Save', primary: true, value: true }], { wide: true });
+    ], [{ label: 'Cancel', value: false }, { label: 'Save', primary: true, value: true }], { wide: true, help: 'folders-options' });
     if (!ok) return;
     const modIds = patch.modIds;
     try {

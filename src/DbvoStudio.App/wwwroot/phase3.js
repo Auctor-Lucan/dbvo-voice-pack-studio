@@ -1,5 +1,5 @@
 // Phase 3: FOMOD Creation — import any ModuleConfig.xml, options from DBVO Patches, the DBVO JSON, validate, simulate, build.
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, switchEl, segmented, popupMenu } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, switchEl, segmented, popupMenu, helpButton } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip } from './phase2.js';
 
@@ -26,6 +26,7 @@ export async function fomodsView() {
   const view = h('div.view');
   view.append(h('div.view-head',
     h('h1', 'FOMOD Creation'),
+    helpButton('1-start-a-project'),
     h('span.sub', 'Build the installer: pages of options that install each mod\'s .fuz files and DBVO Fix plugins, plus the DBVO voice pack JSON.'),
     h('div.spacer'),
     h('button.btn', { title: 'Read an existing FOMOD folder or archive into an editable project', onclick: () => importFomod() }, 'Import FOMOD…'),
@@ -64,7 +65,7 @@ async function newFomod() {
     h('div.col', h('div.field-label', 'Name'), name),
     h('div.col', h('div.field-label', 'FOMOD root folder'), h('div.path-input', root, h('button.btn.sm', { onclick: async () => { const f = await rpc('pick.folder', { title: 'FOMOD root folder' }); if (f) root.value = f; } }, 'Browse')),
       h('div.faint', 'The folder that holds your patch folders, images and so on. File sources in the installer are relative to it.')),
-  ], [{ label: 'Cancel', value: false }, { label: 'Create', primary: true, value: true }]);
+  ], [{ label: 'Cancel', value: false }, { label: 'Create', primary: true, value: true }], { help: '1-start-a-project' });
   if (!ok) return;
   try {
     const r = await rpc('fomod.create', { voicePackId: voice.value, name: name.value, rootFolder: root.value.trim() });
@@ -141,6 +142,7 @@ export async function fomodView(id) {
     clear(head).append(
       h('button.btn.ghost.sm', { onclick: () => go('fomods') }, '← FOMODs'),
       h('h1', proj.name || proj.info.name || 'FOMOD'),
+      helpButton('3-edit-pages-groups-and-options'),
       voiceChip(dto.voiceName || '—', voice && voice.color),
       savedEl,
       h('div.spacer'),
@@ -304,7 +306,7 @@ export async function fomodView(id) {
       preview.textContent = JSON.stringify(o, null, 2);
     };
     upd();
-    return h('div', sec('DBVO voice pack JSON', switchEl(j.enabled, (x) => { j.enabled = x; changed(true); renderEditor(); }, 'Add to the installer'),
+    return h('div', sec('DBVO voice pack JSON', h('div.row', helpButton('4-the-dbvo-json'), switchEl(j.enabled, (x) => { j.enabled = x; changed(true); renderEditor(); }, 'Add to the installer')),
       h('div.help', { style: { margin: '10px 0' } }, 'This small file makes the voice selectable in DBVO\'s MCM. It is written when you build and installed by the option marked "Carries the DBVO JSON" (normally a Required core option).',
         h('p', 'Location in the game\'s Data folder: ', h('span.mono', dto.jsonPath), ' (', dto.naming === 'Legacy' ? 'Legacy / DBVO 1' : 'DBVO 2.0', ', from the voice pack\'s naming).')),
       srow('voice_pack_name', 'Shown in DBVO\'s menu.', txt(j, 'voicePackName', { after: upd })),
@@ -406,7 +408,7 @@ export async function fomodView(id) {
           for (const s2 of proj.steps) for (const g2 of s2.groups) for (const o2 of g2.options) if (x) o2.carriesJson = false;
           o.carriesJson = x; changed(true); renderEditor();
         }))),
-      sec('Offered as', null,
+      sec('Offered as', helpButton('3-edit-pages-groups-and-options'),
         srow('Type', null, h('div.col', modeSel, modeHelp)),
         o.mode === 'Detect' ? srow('Detect these plugins', 'Plugin file names as in the load order.', h('div.col', pluginsBox,
           h('div.row', segmented([['any', 'Any of them'], ['all', 'All of them']], o.requireAll ? 'all' : 'any', (x) => { o.requireAll = x === 'all'; changed(); renderEditor(); }),
@@ -429,7 +431,7 @@ export async function fomodView(id) {
       h('div', 'Each mod becomes an option on the page of its category (made if missing), detecting the mod\'s plugins and installing its Sound folder and DBVO Fix plugins from the patch\'s final folder. Patches already in this FOMOD only get their files updated.'),
       h('div.box', { style: { maxHeight: '320px', overflow: 'auto' } }, boxes.map(({ p, box }) => h('label.row', box, h('span.grow', p.name), h('span.faint', p.category), linked.has(p.id) ? h('span.badge.b-skip', 'already in') : null))),
       switchEl(sort, (x) => { sort = x; }, 'Sort each group A–Z afterwards'),
-    ], [{ label: 'Cancel', value: false }, { label: 'Add', primary: true, value: true }]);
+    ], [{ label: 'Cancel', value: false }, { label: 'Add', primary: true, value: true }], { help: '2-add-your-patches' });
     if (!ok) return;
     try {
       const r = await rpc('fomod.addPatches', { project: proj, patchIds: boxes.filter((x) => x.box.checked).map((x) => x.p.id), sort: sort ? 'az' : '' });
@@ -455,7 +457,7 @@ export async function fomodView(id) {
         issues.length ? h('div.box', { style: { maxHeight: '60vh', overflow: 'auto', padding: 0 } }, issues.map((i) => h('div.issue', { onclick: () => { if (i.optionId) { document.getElementById('modal').classList.add('hidden'); select(i.optionId); } } },
           h('span.badge.' + (i.level === 'error' ? 'b-broken' : 'b-toolong'), i.level), h('span.faint', i.where), h('span', i.message))))
           : h('div', 'The XML passes the ModConfig 5.0 schema, every file is in place and the DBVO JSON is carried by an option.'),
-      ], undefined, { wide: true });
+      ], undefined, { wide: true, help: '5-check-it' });
     } catch (e) { fail(e); }
   }
 
@@ -496,7 +498,7 @@ export async function fomodView(id) {
             try { plugins.value = (await rpc('fomod.loadOrder', { path: f })).join('\n'); run(); } catch (e) { fail(e); }
           } }, 'Load plugins.txt…'), h('button.btn.sm.primary', { title: 'Simulate the install with these plugins active', onclick: run }, 'Run'))),
         h('div.grow', out)),
-    ], undefined, { wide: true });
+    ], undefined, { wide: true, help: '5-check-it' });
   }
 
   async function previewXml() {

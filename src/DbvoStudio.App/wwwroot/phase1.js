@@ -1,5 +1,5 @@
 // Phase 1: Mods list and the per-plugin workspace.
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const KIND_LABEL = {
@@ -41,6 +41,7 @@ export async function modsView() {
   const view = h('div.view');
   view.append(h('div.view-head',
     h('h1', 'Mods'),
+    helpButton('add-mods'),
     h('span.sub', 'Read plugins or topic files and make their lines DBVO-ready. Shared by every voice pack.'),
     h('div.spacer'),
     h('button.btn', { title: 'Add many plugins at once: give each its mod name and category, and every mod becomes its own card', onclick: () => batchAdd([]) }, '+ Add many mods…'),
@@ -253,7 +254,7 @@ async function batchAdd(initial) {
       h('div.faint', { style: { margin: '6px 0' } }, 'One line per plugin: ', h('span.mono', 'Plugin.esp | Mod Name | Category'), '. Order doesn\'t matter; the plugin file name finds the row. A new category is created.'),
       paste, h('div.row', { style: { marginTop: '6px' } }, h('button.btn.sm', { onclick: applyPaste }, 'Apply list'), pasteMsg)),
     h('div.row', status, h('div.spacer'), createBtn),
-  ], [{ label: 'Cancel', value: false }], { wide: true });
+  ], [{ label: 'Cancel', value: false }], { wide: true, help: 'add-mods' });
 }
 
 async function newMod() {
@@ -424,6 +425,7 @@ export async function modView(id) {
     clear(head).append(
       h('button.btn.ghost.sm', { onclick: () => go('mods') }, '← Mods'),
       h('h1', mod.name),
+      helpButton('add-or-update-files-in-a-mod'),
       mod.version ? h('span.sub', 'v' + mod.version) : null,
       h('button.icon-btn', { title: 'Rename / version', onclick: editMeta }, '✎'),
       h('span.faint', 'Mod Category'),
@@ -524,7 +526,7 @@ export async function modView(id) {
           h('span.legend-item', h('span.appr.on.demo.fix', 'Fix'), '= Edit made in DBVO Fix plugin'),
           h('span.legend-item', h('span.appr.on.demo', h('span.note', '♪')), '= To be voiced in Phase 2'),
           h('span.legend-item', h('span.demo-ex', icon('ban', { size: 14 })), '= Excluded from voicing in Phase 2')),
-        h('div.spacer'), q, columnsMenu(grid),
+        h('div.spacer'), helpButton('review-the-lines'), q, columnsMenu(grid),
         h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp1', showInsp); split.classList.toggle('no-insp', !showInsp); renderFilters(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel')));
   }
 
@@ -539,6 +541,7 @@ export async function modView(id) {
           : plugin.needsFix ? h('span', { style: { color: 'var(--link)' } }, `${plugin.fixFileName} (${c.fixes} lines)`)
             : h('span', { style: { color: 'var(--ok)' } }, 'no DBVO Fix plugin needed'),
         c.unreviewed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.unreviewed} flagged not reviewed`) : null),
+      helpButton('fix-voice-and-exclude'),
       h('div.spacer'),
       sel.length ? h('span.dim', `${sel.length} selected`) : null,
       sel.length ? h('button.btn.sm', { title: 'Use the script\'s suggestion for the ticked lines', onclick: () => bulk('accept') }, 'Use suggestions') : null,
@@ -798,7 +801,7 @@ export async function modView(id) {
       const choice = await modal('Flagged lines not reviewed', [
         h('div', `${unreviewed.length} BROKEN LINE / TOO LONG WILL CTD row(s) were never opened. Unresolved rows get no override: the game keeps its original text and the line is not voiced.`),
         h('div.box', { style: { maxHeight: '200px', overflow: 'auto' } }, unreviewed.slice(0, 40).map(({ p, l }) => h('div.row', { style: { flexWrap: 'nowrap' } }, kindBadge(l), h('span.mono.faint', { style: { whiteSpace: 'nowrap', flexShrink: 0 } }, p.fileName), h('span.ellipsis', { style: { minWidth: 0 } }, l.original)))),
-      ], [{ label: 'Continue anyway', value: 'go' }, { label: 'Show them', primary: true, value: 'show' }]);
+      ], [{ label: 'Continue anyway', value: 'go' }, { label: 'Show them', primary: true, value: 'show' }], { help: 'continue-to-phase-2' });
       if (!choice) return;
       if (choice === 'show') {
         plugin = unreviewed[0].p;

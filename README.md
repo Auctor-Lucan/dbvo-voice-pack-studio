@@ -30,6 +30,9 @@ dotnet test tests/DbvoStudio.Core.Tests
 
 ## Credits
 
+Phase 1 is built on **[Idrinth](https://www.nexusmods.com/profile/Idrinth?gameId=1704)**'s DBVO text export script
+([Nexus Mods](https://www.nexusmods.com/skyrimspecialedition/mods/182009)). Heartfelt thanks.
+
 NPC voice types, quoted dialogue and book authors in `src/DbvoStudio.Core/Reference/uesp-skyrim.json.gz` come from
 **[UESP — The Unofficial Elder Scrolls Pages](https://en.uesp.net/)**, collected by Auctor Lucan from 17,519 UESP Skyrim
 pages. All credit for this information goes to the UESP editors and community. UESP text is licensed under

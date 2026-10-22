@@ -1,6 +1,6 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto } from './lib.js';
+import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret } from './tagtools.js';
@@ -15,6 +15,7 @@ export async function revoiceListView() {
   const view = h('div.view');
   view.append(h('div.view-head',
     h('h1', 'NPC Revoice Tool'),
+    helpButton('npc-revoice-tool'),
     h('span.sub', 'Other Tools · replace NPC voice files in any mod or the base game, line by line, with voices from your ElevenLabs account or local servers. No plugin needed unless you give an NPC a new voice type.'),
     h('div.spacer'),
     h('button.btn.primary', { title: 'Start a revoice project: drop a mod\'s plugin and its voice archive or folder', onclick: create }, '+ New revoice')));
@@ -80,6 +81,7 @@ export async function revoiceView(id) {
       h('button.btn.ghost.sm', { title: 'Back to the project list', onclick: () => go('revoices') }, '← NPC Revoice'),
       h('h1', proj.name),
       tabs,
+      helpButton({ setup: 'setup', speakers: 'speakers', lines: 'lines', voicetypes: 'new-voice-types-optional' }[tab] || 'npc-revoice-tool'),
       h('div.spacer'),
       switchEl(proj.voiceChanger, toggleVc, 'Voice Changer', { title: 'Convert the game\'s current recordings instead of text-to-speech. Not for uploading: see the warning.' }),
       h('button.btn', { title: 'Read the plugins and voice sources again and rebuild the line list (keeps your takes and edits)', disabled: !!app.job, onclick: scan }, proj.lastScan ? '⟳ Rescan' : 'Scan'),
@@ -97,7 +99,7 @@ export async function revoiceView(id) {
           h('p', 'Even for private use in your own modlist, check ElevenLabs\' terms and your local law; that responsibility is yours.'),
           h('p', 'To publish, generate from text with a voice you have the rights to (turn the Voice Changer off).')),
         h('label.row', tick, 'I have read this'),
-      ], [{ label: 'Cancel', value: false }, { label: 'Turn on', primary: true, value: () => tick.checked }]);
+      ], [{ label: 'Cancel', value: false }, { label: 'Turn on', primary: true, value: () => tick.checked }], { help: 'voice-changer-and-export' });
       if (!ok) { toast(ok === false ? 'Voice Changer stays off.' : 'Tick "I have read this" to continue.', ok !== false); renderHead(); return; }
       await save({ voiceChangerWarningAccepted: true });
     }
@@ -248,7 +250,7 @@ export async function revoiceView(id) {
       h('div.row', h('button.btn.sm', { title: 'Transcribe the files that have no match yet and match them by text', disabled: !!app.job, onclick: async () => { try { await rpc('revoice.orphansWhisper', { id }); document.getElementById('modal').classList.add('hidden'); toast('Transcribing… the list opens again when it is done.'); } catch (e) { fail(e); } } }, '🎙 Match the rest with Whisper'),
         h('span.faint', `${data.proposals.filter((m) => m.lineId).length} matched`)),
       h('div.box', { style: { maxHeight: '420px', overflow: 'auto' } }, h('table.tbl', h('tbody', rows))),
-    ], [{ label: 'Cancel', value: false }, { label: 'Link the matched files', primary: true, value: true }], { wide: true });
+    ], [{ label: 'Cancel', value: false }, { label: 'Link the matched files', primary: true, value: true }], { wide: true, help: 'setup' });
     if (!ok) return;
     const approved = data.proposals.filter((m) => choice.get(keyOf(m))).map((m) => ({ sourceId: m.sourceId, inner: m.inner, lineId: choice.get(keyOf(m)), method: m.lineId === choice.get(keyOf(m)) ? m.method : 'by hand' }));
     try { const r = await rpc('revoice.orphansApply', { id, approved }); proj = r.project; reindex(); renderAll(); toast(`${r.linked} file(s) linked.`); } catch (e) { fail(e); }
@@ -852,7 +854,7 @@ export async function revoiceView(id) {
         h('div', `The NPC can say ${cov.canSay.toLocaleString()} response(s) now; ${cov.covered.toLocaleString()} still work with the new voice type. The rest go silent in game:`),
         cov.gaps.length ? h('div.box', { style: { maxHeight: '180px', overflow: 'auto' } }, h('table.tbl', h('tbody', cov.gaps.map((g) => h('tr', h('td.mono', g.plugin), h('td', g.reason), h('td', String(g.lines)), h('td.faint.ellipsis', { title: g.examples.join('\n'), style: { maxWidth: '260px' } }, g.examples[0] || '')))))) : h('div.faint', 'Nothing goes silent.'),
         h('div.faint', 'Save, then open this again to see the coverage for changed lists. Lines that check the voice type directly need a patch for that mod, or stay silent.')),
-    ], [{ label: 'Close', value: false }, { label: 'Save', primary: true, value: true }], { wide: true });
+    ], [{ label: 'Close', value: false }, { label: 'Save', primary: true, value: true }], { wide: true, help: 'new-voice-types-optional' });
     if (!ok) return;
     try {
       proj = await rpc('revoice.planSave', { id, planId, editorId: ed.value.trim(), npcs: [...npcOn], lists: [...listOn], lineSet, extraNpcs: extraBox ? extraBox.value.split('\n').map((x) => x.trim()).filter(Boolean) : [] });
