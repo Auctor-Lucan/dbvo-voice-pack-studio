@@ -247,3 +247,48 @@ internal sealed class DirectProgress<T>(Action<T> report) : IProgress<T>
     private readonly object _lock = new();
     public void Report(T value) { lock (_lock) report(value); }
 }
+
+public sealed partial class Backend
+{
+    /// <summary>Every setting a batch will use, as label/value rows for the "Check before spending credits" dialog.</summary>
+    internal static List<string[]> SettingsRows(VoicePack v, bool speechToSpeech)
+    {
+        static string F(double x) => x.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+        static string Seed(long? s) => s?.ToString() ?? "random";
+        var rows = new List<string[]>();
+        void R(string k, string val) => rows.Add(new[] { k, val });
+        if (speechToSpeech)
+        {
+            var st = v.Sts;
+            R("Voice", st.VoiceName ?? st.VoiceId ?? "— none —"); R("Model", st.ModelId);
+            R("Stability", F(st.Stability)); R("Similarity", F(st.Similarity)); R("Style", F(st.Style));
+            R("Speaker boost", st.SpeakerBoost ? "on" : "off"); R("Remove background noise", st.RemoveBackgroundNoise ? "on" : "off");
+            R("Format", st.OutputFormat); R("Seed", Seed(st.Seed)); R("Concurrent", st.Concurrency.ToString());
+        }
+        else if (v.Engine == "voxcpm")
+        {
+            var o = v.VoxCpm;
+            R("Reference voice", o.Voice ?? "— none —"); R("CFG", F(o.CfgValue)); R("Timesteps", o.InferenceTimesteps.ToString());
+            R("Normalize", o.Normalize ? "on" : "off"); R("Retry bad cases", o.RetryBadcase ? "on" : "off"); R("Concurrent", o.Concurrency.ToString());
+        }
+        else if (v.Engine == "omnivoice")
+        {
+            var o = v.OmniVoice;
+            R("Reference voice", o.Voice ?? "— none —"); R("Steps", o.NumStep.ToString()); R("Speed", F(o.Speed)); R("Guidance", F(o.GuidanceScale)); R("Concurrent", o.Concurrency.ToString());
+        }
+        else
+        {
+            var e = v.Eleven;
+            var vs = DbvoStudio.Core.ElevenLabs.ModelCapabilities.Build(e.ModelId, e.Stability, e.Similarity, e.Style, e.SpeakerBoost, e.Speed);
+            R("Voice", e.VoiceName ?? e.VoiceId ?? "— none —"); R("Model", e.ModelId);
+            R("Stability", F(vs.Stability ?? e.Stability)); R("Similarity", F(vs.SimilarityBoost ?? e.Similarity));
+            if (vs.Style is { } sty) R("Style", F(sty));
+            if (vs.UseSpeakerBoost is { } sb) R("Speaker boost", sb ? "on" : "off");
+            R("Speed", F(vs.Speed ?? 1)); R("Language", string.IsNullOrEmpty(e.LanguageCode) ? "auto" : e.LanguageCode);
+            R("Read numbers", e.TextNormalization ?? "auto"); R("Format", e.OutputFormat); R("Seed", Seed(e.Seed)); R("Concurrent", e.Concurrency.ToString());
+        }
+        R("Loudness", v.Loudnorm ? "normalized" : "as generated"); if (Math.Abs(v.GainDb) > 0.001) R("Gain", F(v.GainDb) + " dB");
+        R("Tail trim / fade", $"{v.TrimTailMs} ms / {v.FadeOutMs} ms");
+        return rows;
+    }
+}

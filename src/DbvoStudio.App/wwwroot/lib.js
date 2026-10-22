@@ -726,3 +726,11 @@ export const TOOL_TIPS = {
   'Reference mode': 'Use the reference audio as a voice prompt (closer timbre)',
   'Control CFG': 'How strongly the reference prompt is followed',
 };
+
+/** A short glow on a row whose new take just arrived (red when it failed). */
+export function flashRow(grid, key, bad = false) {
+  const el = grid.rowEl(key);
+  if (!el) return;
+  el.classList.add(bad ? 'flash-bad' : 'flash-done');
+  setTimeout(() => el.classList.remove('flash-done', 'flash-bad'), 1600);
+}

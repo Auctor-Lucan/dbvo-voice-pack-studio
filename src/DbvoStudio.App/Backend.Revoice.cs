@@ -561,7 +561,10 @@ public sealed partial class Backend
     {
         var mode = S(p, "mode", "missing");
         var ids = Strings(p, "lineIds").ToHashSet();
-        bool Usable(RevoiceLine l) => !l.Excluded && !l.Gone && !(proj.Speakers.TryGetValue(l.SpeakerKey, out var a) && a.Skip) && (!proj.VoiceChanger || l.Original != null);
+        // The page's speaker filter: "Generate missing (30)" for one speaker must not generate every other speaker's lines too.
+        var speaker = S(p, "speaker");
+        bool Usable(RevoiceLine l) => !l.Excluded && !l.Gone && (speaker.Length == 0 || mode == "selected" || l.SpeakerKey == speaker)
+            && !(proj.Speakers.TryGetValue(l.SpeakerKey, out var a) && a.Skip) && (!proj.VoiceChanger || l.Original != null);
         return mode switch
         {
             "selected" => proj.Lines.Where(l => ids.Contains(l.LineId) && Usable(l)).ToList(),
@@ -579,9 +582,12 @@ public sealed partial class Backend
         var resolved = lines.Select(l => (Line: l, Voice: RvVoiceFor(proj, l, voices))).ToList();
         var unassigned = resolved.Where(x => x.Voice == null).Select(x => x.Line.SpeakerName).Distinct().ToList();
         var groups = resolved.Where(x => x.Voice != null).GroupBy(x => x.Voice!.Id)
-            .Select(g => { var v = g.First().Voice!; return new { voicePack = v.Name, color = v.Color, engine = proj.VoiceChanger ? "elevenlabs speech-to-speech" : v.Engine, lines = g.Count(), characters = g.Sum(x => x.Line.Spoken.Length) }; })
+            .Select(g => { var v = g.First().Voice!; return new { voicePack = v.Name, color = v.Color, engine = proj.VoiceChanger ? "elevenlabs speech-to-speech" : v.Engine, lines = g.Count(), characters = g.Sum(x => x.Line.Spoken.Length),
+                speakers = g.Select(x => x.Line.SpeakerName).Distinct().OrderBy(n => n).ToList(), settings = SettingsRows(v, proj.VoiceChanger) }; })
             .ToList();
-        return new { count = groups.Sum(g => g.lines), characters = groups.Sum(g => g.characters), groups, unassigned, voiceChanger = proj.VoiceChanger };
+        var speaker = S(p, "speaker");
+        var speakerName = speaker.Length > 0 ? proj.Lines.FirstOrDefault(l => l.SpeakerKey == speaker)?.SpeakerName : null;
+        return new { count = groups.Sum(g => g.lines), characters = groups.Sum(g => g.characters), groups, unassigned, voiceChanger = proj.VoiceChanger, speakerName };
     }
 
     private object StartRvScan(string id)
@@ -733,9 +739,11 @@ public sealed partial class Backend
             var temp = new List<string>();
             try
             {
-                _lib.Backup("before-revoice-" + proj.Name, _settings.BackupsToKeep, routine: true);
                 var svc = new Phase2Service(_lib, Runtime());
                 int total = groups.Sum(g => g.Count()), offset = 0;
+                // A few new takes overwrite nothing, so they start at once; a backup (zip of the library) only before batches.
+                Emit("progress", new { kind = "generate", done = 0, total, failed = 0, current = (string?)null, message = (string?)null });
+                if (total > 5) _lib.Backup("before-revoice-" + proj.Name, _settings.BackupsToKeep, routine: true);
                 var session = proj.VoiceChanger ? RvSession(proj) : null;
                 foreach (var g in groups)
                 {
@@ -757,7 +765,7 @@ public sealed partial class Backend
                     }
                     var shim = new DbvoPatch { Id = proj.Id, Name = proj.Name, VoicePackId = voice.Id, Kind = proj.VoiceChanger ? "vc" : "tts" };
                     int baseDone = offset;
-                    var progress = new Progress<Core.Projects.GenerationProgress>(x => Emit("progress", new { kind = "generate", done = baseDone + x.Done, total, x.Failed, x.Current, message = (string?)null }));
+                    var progress = new DirectProgress<Core.Projects.GenerationProgress>(x => Emit("progress", new { kind = "generate", done = baseDone + x.Done, total, x.Failed, x.Current, message = (string?)null }));
                     await svc.GenerateAsync(shim, voice, lines, Tools(), progress,
                         l => { Emit("revoiceLine", new { projectId = proj.Id, line = RvLineDto((RevoiceLine)l) }); return Task.CompletedTask; },
                         ct, _gate, proj.VoiceChanger ? "sts" : null, _lib.RevoiceFolder(proj.Id), () => _lib.Save(proj));
@@ -795,7 +803,7 @@ public sealed partial class Backend
             try
             {
                 var session = proj.NewVoiceTypes.Count > 0 ? RvSession(proj) : null;
-                var progress = new Progress<Core.Projects.GenerationProgress>(x => Emit("progress", new { kind = "fuz", x.Done, x.Total, x.Failed, x.Current, message = "Writing .fuz files" }));
+                var progress = new DirectProgress<Core.Projects.GenerationProgress>(x => Emit("progress", new { kind = "fuz", x.Done, x.Total, x.Failed, x.Current, message = "Writing .fuz files" }));
                 var rep = await RvService().ExportAsync(proj, Tools(), overwrite, progress, ct, session, removeStale);
                 await _gate.WaitAsync();
                 try { _lib.Save(proj); } finally { _gate.Release(); }

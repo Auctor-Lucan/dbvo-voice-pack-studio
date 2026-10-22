@@ -1031,8 +1031,10 @@ public sealed partial class Backend
             {
                 var patch = LoadPatch(id);
                 var voice = LoadVoice(patch.VoicePackId);
-                _lib.Backup("before-generate-" + patch.Name, _settings.BackupsToKeep, routine: true);
                 var lines = SelectLines(patch, p);
+                // A few new takes overwrite nothing, so they start at once; a backup (zip of the library) only before batches.
+                Emit("progress", new { kind = "generate", done = 0, total = lines.Count, failed = 0, current = (string?)null, message = (string?)null });
+                if (lines.Count > 5) _lib.Backup("before-generate-" + patch.Name, _settings.BackupsToKeep, routine: true);
                 var svc = new Phase2Service(_lib, Runtime());
                 var progress = new DirectProgress<GenerationProgress>(g => Emit("progress", new { kind = "generate", g.Done, g.Total, g.Failed, g.Current, g.Message }));
                 Emit("progress", new { kind = "generate", done = 0, total = lines.Count, failed = 0, current = (string?)null, message = (string?)null });

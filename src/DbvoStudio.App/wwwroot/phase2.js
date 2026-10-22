@@ -1,5 +1,5 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret } from './tagtools.js';
 import { recordTake } from './recorder.js';
@@ -247,6 +247,7 @@ export async function patchView(id) {
   let focusedId = null;
   let voices = [], models = [], localVoices = [];
   let creditsEl = null; // one credits button per page, updated in place
+  const inFlight = new Set(); // lines a take is being made for: their ↻ spins until the take arrives
   const creditsSlot = h('span.credits-slot');
   { const c = engineCache.get(vc ? 'sts' : voice.engine || 'elevenlabs'); if (c) ({ voices, models, localVoices } = c); }
   let showInsp = store.get('insp2', true);
@@ -329,7 +330,7 @@ export async function patchView(id) {
       ? (sel.kept ? 'Kept - click to un-keep. Legacy naming exports one take per line (the one in use).' : 'Keep this take. Legacy naming exports one take per line, so variants need DBVO 2.0 naming.')
       : (sel.kept ? `Kept (${kept} kept) - click to un-keep. Kept takes are exported as DBVO 2.0 variants (2+ → name\\0, 1, …).` : `Keep this take as a variant (${kept} kept). DBVO 2.0 exports every kept take; with none kept, the take in use.`);
     return h('span.row.icon-bar', { style: { gap: '2px' } },
-      h('button.act-btn', { title: regenTitle, disabled: l.excluded || l.omitted || !!app.job || !canGen(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.lineId], { autoplay: true }); } }, icon('regen')),
+      h('button.act-btn' + (inFlight.has(l.lineId) ? '.spinning' : ''), { title: inFlight.has(l.lineId) ? 'Making a new take…' : regenTitle, disabled: l.excluded || l.omitted || !!app.job || !canGen(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.lineId], { autoplay: true }); } }, icon('regen')),
       h('button.act-btn' + (sel && sel.kept ? '.on' : ''), { title: keepTitle, disabled: !sel, onclick: (e) => { e.stopPropagation(); keep(l, sel); } }, icon('star', { filled: !!(sel && sel.kept) })),
       h('button.act-btn', { title: sel ? 'Open this line\'s takes folder' : 'No takes yet', disabled: !l.takes.length, onclick: (e) => { e.stopPropagation(); rpc('patch.openTakeFolder', { id, lineId: l.lineId }).catch(fail); } }, icon('folder')),
       h('button.act-btn.flag-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit (stays until you clear it; "Flagged lines" generates them)', onclick: (e) => { e.stopPropagation(); upd(l, 'mark', !l.marked); } }, icon('flag')),
@@ -416,6 +417,7 @@ export async function patchView(id) {
   }
 
   function replaceLine(nl) {
+    const wasInFlight = inFlight.delete(nl.lineId);
     const i = patch.lines.findIndex((x) => x.lineId === nl.lineId);
     if (i >= 0) patch.lines[i] = nl;
     index.set(nl.lineId, nl);
@@ -423,6 +425,7 @@ export async function patchView(id) {
     if (ri >= 0) grid.rows[ri] = nl;
     if (lastEdit && lastEdit.line.lineId === nl.lineId) lastEdit.line = nl;
     grid.refreshRow(nl.lineId);
+    if (wasInFlight) flashRow(grid, nl.lineId, nl.status === 'Failed');
     if (focusedId === nl.lineId && !insp.contains(document.activeElement)) renderInspector();
     renderCounts();
     renderActions();
@@ -822,7 +825,9 @@ export async function patchView(id) {
       h('button.btn', { disabled: busy || !c.active, title: 'A new take for every line that is not omitted or excluded (the new take becomes the one used)', onclick: () => generate('all') }, `All lines (${c.active})`),
       h('button.btn', { disabled: busy || !sel.length, title: 'A new take for each ticked line', onclick: () => generate('selected', sel) }, `Ticked lines (${sel.length})`),
       h('button.btn', { disabled: busy || !c.marked, title: 'A new take for each flagged line', onclick: () => generate('marked') }, `Flagged lines (${c.marked})`),
-      h('button.btn.primary', { disabled: busy || !c.pending, title: 'Lines without a take yet, failed ones, and lines whose spoken text changed since their take', onclick: () => generate('missing') }, `${verb} missing (${c.pending})`));
+      app.job && app.job.kind === 'generate'
+        ? h('button.btn.primary.stop-btn', { title: 'Stop now: lines already made keep their takes; nothing more is sent to the engine', onclick: (e) => { e.currentTarget.disabled = true; e.currentTarget.textContent = 'Stopping…'; rpc('job.cancel').catch(fail); } }, `■ Stop ${vc ? 'converting' : 'generating'}`)
+        : h('button.btn.primary', { disabled: busy || !c.pending, title: 'Lines without a take yet, failed ones, and lines whose spoken text changed since their take', onclick: () => generate('missing') }, `${verb} missing (${c.pending})`));
   }
 
   // One menu for what to do with the ticked rows (and flags), so the status bar stays on one line.
@@ -836,6 +841,14 @@ export async function patchView(id) {
       c.marked ? { label: `Clear all flags (${c.marked})`, sub: 'Unflag every flagged line', onclick: () => bulkMark(patch.lines.filter((l) => l.marked).map((l) => l.lineId), false) } : null,
     ].filter(Boolean));
     return btn;
+  }
+
+  // Spinning ↻ on the lines being made, cleared as each take arrives (or all at once when the job ends).
+  function markInFlight(ids) {
+    const before = [...inFlight];
+    inFlight.clear();
+    for (const x of ids || []) inFlight.add(x);
+    for (const x of new Set([...before, ...inFlight])) grid.refreshRow(x);
   }
 
   // ---- 7.0: record, review, check takes, earlier packs, merge, spreadsheet, cache
@@ -1007,14 +1020,16 @@ export async function patchView(id) {
   async function generate(mode, lineIds, { autoplay = false } = {}) {
     autoPlay = null;
     try {
+      if (lineIds && lineIds.length === 1) markInFlight(lineIds); // spin at once, before the server answers
       const est = await rpc('patch.estimate', { id, mode, lineIds });
-      if (!est.count) { toast(vc ? 'Nothing to convert.' : 'Nothing to generate.'); return; }
+      if (!est.count) { markInFlight(null); toast(vc ? 'Nothing to convert.' : 'Nothing to generate.'); return; }
       // One line never asks; batches ask unless that is turned off in Global Settings.
       const confirmBatch = (app.state.settings.ui || {}).confirmBatch !== 'false';
       if (est.count === 1 || !confirmBatch) {
-        if (!est.voiceId) { toast('Pick a voice in the toolbar first.', true); return; }
+        if (!est.voiceId) { markInFlight(null); toast('Pick a voice in the toolbar first.', true); return; }
         if (autoplay && lineIds && lineIds.length === 1) { const l0 = index.get(lineIds[0]); autoPlay = { lineId: lineIds[0], takes: l0 ? l0.takes.length : 0 }; }
-        await rpc('patch.generate', { id, mode, lineIds });
+        markInFlight(lineIds);
+        await rpc('patch.generate', { id, mode, lineIds }).catch((e) => { markInFlight(null); throw e; });
         renderActions();
         return;
       }
@@ -1053,10 +1068,11 @@ export async function patchView(id) {
         mode === 'all' ? h('div.banner.warn', { style: { margin: 0 } }, 'Every line gets a new take, which becomes the one used. Earlier takes stay in the take list.') : null,
         missingVoice ? h('div.banner.bad', { style: { margin: 0 } }, 'Pick a voice in the toolbar first.') : null,
       ], [{ label: 'Cancel', value: false }, { label: `${vc ? 'Convert' : 'Generate'} ${est.count} line(s)`, primary: true, value: !missingVoice }], { help: 'generating' });
-      if (!ok) return;
-      await rpc('patch.generate', { id, mode, lineIds });
+      if (!ok) { markInFlight(null); return; }
+      markInFlight(mode === 'selected' ? lineIds : patch.lines.filter(mode === 'marked' ? (l) => l.marked && canGen(l) : mode === 'all' ? (l) => !l.omitted && !l.excluded && canGen(l) : pendingLine).map((l) => l.lineId));
+      await rpc('patch.generate', { id, mode, lineIds }).catch((e) => { markInFlight(null); throw e; });
       renderActions();
-    } catch (e) { fail(e); }
+    } catch (e) { markInFlight(null); fail(e); }
   }
 
   const filesModal = (title, summary, files) => modal(title, [summary, files && files.length ? h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), h('div.box.mono', { style: { whiteSpace: 'pre-wrap', maxHeight: '180px', overflow: 'auto' } }, files.join('\n'))) : null]);
@@ -1328,6 +1344,7 @@ export async function patchView(id) {
   document.addEventListener('job-done', async (e) => {
     jobSeen = false;
     if (!document.body.contains(view)) return;
+    if (inFlight.size) markInFlight(null);
     if (e.detail && (e.detail.kind === 'import' || e.detail.kind === 'qa') && e.detail.patchId === id) {
       patch = await rpc('patch.get', { id });
       reindex();

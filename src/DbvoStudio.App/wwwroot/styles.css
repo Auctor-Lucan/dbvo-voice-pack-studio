@@ -602,3 +602,17 @@ html.has-bg .subnav { background: color-mix(in srgb, var(--panel) 86%, transpare
   .toolbar select { max-width: 150px; }
 }
 @media (max-width: 1400px) { .crumb-more { display: none; } }
+/* A take being made: the row's ↻ spins; when it arrives the row glows once. */
+@keyframes spin { to { transform: rotate(360deg); } }
+.act-btn.spinning svg { animation: spin 0.9s linear infinite; }
+.act-btn.spinning { color: var(--accent); opacity: 1 !important; }
+.act-btn.spinning:disabled { opacity: 1; }
+@keyframes glow-ok { 0% { background: color-mix(in srgb, var(--ok) 32%, transparent); } 100% { background: transparent; } }
+@keyframes glow-bad { 0% { background: color-mix(in srgb, var(--bad) 32%, transparent); } 100% { background: transparent; } }
+.vrow.flash-done { animation: glow-ok 1.5s ease-out; }
+.vrow.flash-bad { animation: glow-bad 1.5s ease-out; }
+.btn.stop-btn { background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn.stop-btn:hover { filter: brightness(1.1); }
+.est-group { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.kv4 { display: grid; grid-template-columns: max-content 1fr max-content 1fr max-content 1fr; gap: 4px 14px; font-size: 13px; }
+.kv4 > div:nth-child(odd) { color: var(--dim); }

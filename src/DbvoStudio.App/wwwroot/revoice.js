@@ -1,6 +1,6 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
-import { TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret } from './tagtools.js';
@@ -407,7 +407,7 @@ export async function revoiceView(id) {
       { id: 'take', title: 'Take', width: 64, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s). Click to play, switch or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } }, l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—')) },
       { id: 'act', title: '', width: 146, resizable: false, render: (l) => h('span.row.icon-bar', { style: { gap: '2px' } },
-        h('button.act-btn', { title: genBlock(l) || 'Regenerate (a new take; older takes stay)', disabled: !!genBlock(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.id], { autoplay: true }); } }, icon('regen')),
+        h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: inFlight.has(l.id) ? 'Making a new take…' : genBlock(l) || 'Regenerate (a new take; older takes stay)', disabled: !!genBlock(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.id], { autoplay: true }); } }, icon('regen')),
         h('button.act-btn', { title: l.takes.length ? 'Open this line\'s takes folder' : 'No takes yet', disabled: !l.takes.length, onclick: (e) => { e.stopPropagation(); rpc('revoice.openTakeFolder', { id, lineId: l.id }).catch(fail); } }, icon('folder')),
         h('button.act-btn.flag-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit', onclick: (e) => { e.stopPropagation(); upd(l, 'mark'); } }, icon('flag')),
         h('button.act-btn', { title: l.sel ? 'Play the new take (or double-click the row)' : 'No take yet: generate the line first', disabled: !l.sel, onclick: (e) => { e.stopPropagation(); play(l); } }, icon('play'))) },
@@ -537,7 +537,9 @@ export async function revoiceView(id) {
       bulkBtn,
       h('button.btn', { disabled: !!app.job || !sel.length, title: 'Generate the ticked rows', onclick: () => generate('selected', sel) }, `Generate ticked (${sel.length})`),
       h('button.btn', { disabled: !!app.job || !c.marked, title: 'Generate the flagged lines', onclick: () => generate('marked') }, `Flagged (${c.marked})`),
-      h('button.btn.primary', { disabled: !!app.job || !c.todo, title: 'Generate every line without a take (for speakers with a voice)', onclick: () => generate('missing') }, `Generate missing (${c.todo})`));
+      app.job && app.job.kind === 'generate'
+        ? h('button.btn.primary.stop-btn', { title: 'Stop now: lines already made keep their takes; nothing more is sent to the engine', onclick: (e) => { e.currentTarget.disabled = true; e.currentTarget.textContent = 'Stopping…'; rpc('job.cancel').catch(fail); } }, '■ Stop generating')
+        : h('button.btn.primary', { disabled: !!app.job || !c.todo, title: speakerFilter ? 'Generate this speaker\'s lines without a take' : 'Generate every line without a take (for speakers with a voice)', onclick: () => generate('missing') }, `Generate missing (${c.todo})`));
   }
 
   // ---------------------------------------------------------------- toolbar above the lines (laid out like Phase 2's)
@@ -711,6 +713,7 @@ export async function revoiceView(id) {
     } catch (e) { fail(e); }
   }
   function replaceLine(nl, refresh = true) {
+    const wasInFlight = inFlight.delete(nl.id);
     const i = proj.lines.findIndex((x) => x.id === nl.id);
     if (i >= 0) proj.lines[i] = nl;
     index.set(nl.id, nl);
@@ -719,6 +722,7 @@ export async function revoiceView(id) {
     if (lastEdit && lastEdit.line.id === nl.id) lastEdit.line = nl;
     if (!refresh) return;
     grid.refreshRow(nl.id);
+    if (wasInFlight) flashRow(grid, nl.id, nl.status === 'Failed');
     if (focusedId === nl.id && !insp.contains(document.activeElement)) renderInspector();
     renderActions();
   }
@@ -755,26 +759,48 @@ export async function revoiceView(id) {
   }
 
   let autoPlay = null; // single-line generation plays the new take; batches never do
+  const inFlight = new Set(); // lines a take is being made for: their ↻ spins until the take arrives
+  function markInFlight(ids) {
+    const before = [...inFlight];
+    inFlight.clear();
+    for (const x of ids || []) inFlight.add(x);
+    if (grid) for (const x of new Set([...before, ...inFlight])) grid.refreshRow(x);
+  }
+
   async function generate(mode, lineIds, { autoplay = false } = {}) {
     autoPlay = null;
     if (autoplay && lineIds && lineIds.length === 1) { const l0 = index.get(lineIds[0]); autoPlay = { lineId: lineIds[0], takes: l0 ? l0.takes.length : 0 }; }
+    // Batches follow the speaker picked in the toolbar, exactly as the counts on the buttons do.
+    const speaker = mode === 'selected' ? '' : speakerFilter;
     try {
-      const est = await rpc('revoice.estimate', { id, mode, lineIds });
-      if (est.unassigned.length && !est.count) { toast('Pick a voice for: ' + est.unassigned.slice(0, 4).join(', ') + (est.unassigned.length > 4 ? '…' : '') + ' (Speakers tab).', true); return; }
-      if (!est.count) { toast('Nothing to generate.'); return; }
+      if (lineIds && lineIds.length === 1) markInFlight(lineIds); // spin at once, before the server answers
+      const est = await rpc('revoice.estimate', { id, mode, lineIds, speaker });
+      if (est.unassigned.length && !est.count) { markInFlight(null); toast('Pick a voice for: ' + est.unassigned.slice(0, 4).join(', ') + (est.unassigned.length > 4 ? '…' : '') + ' (Speakers tab).', true); return; }
+      if (!est.count) { markInFlight(null); toast('Nothing to generate.'); return; }
       const confirmBatch = (app.state.settings.ui || {}).confirmBatch !== 'false';
       if (est.count > 1 && confirmBatch) {
-        const ok = await modal('Check before spending credits', [
-          h('div.kv', h('div', 'Lines'), h('div', String(est.count)), h('div', est.voiceChanger ? 'Text (for the .lip)' : 'Characters (≈ credits)'), h('div', est.characters.toLocaleString())),
-          h('table.tbl', h('thead', h('tr', h('th', 'Voice pack'), h('th', 'Engine'), h('th', 'Lines'), h('th', 'Characters'))),
-            h('tbody', est.groups.map((g) => h('tr', h('td', voiceChip(g.voicePack, g.color)), h('td', g.engine), h('td', String(g.lines)), h('td', g.characters.toLocaleString()))))),
-          est.unassigned.length ? h('div.banner.warn', { style: { margin: 0 } }, 'Skipped (no voice yet): ' + est.unassigned.join(', ')) : null,
-        ], [{ label: 'Cancel', value: false }, { label: `Generate ${est.count} line(s)`, primary: true, value: true }]);
-        if (!ok) return;
+        const ok = await modal('Check before spending credits', estimateBody(est), [{ label: 'Cancel', value: false }, { label: `Generate ${est.count} line(s)`, primary: true, value: true }], { wide: true, help: 'lines' });
+        if (!ok) { markInFlight(null); return; }
       }
-      await rpc('revoice.generate', { id, mode, lineIds });
+      if (est.count > 1) markInFlight(mode === 'selected' ? lineIds : proj.lines.filter((l) => (!speaker || l.speaker === speaker) && !l.excl && !l.gone && (mode === 'marked' ? l.marked : mode === 'all' ? true : ['Pending', 'Failed', 'Stale'].includes(l.status))).map((l) => l.id));
+      await rpc('revoice.generate', { id, mode, lineIds, speaker });
       renderActions();
-    } catch (e) { fail(e); }
+    } catch (e) { markInFlight(null); fail(e); }
+  }
+
+  // What a batch will do, with every setting each voice uses, before any credits are spent.
+  function estimateBody(est) {
+    const who = est.speakerName ? `Only ${est.speakerName}'s lines are generated: ` : '';
+    const what = `${est.count} line(s), ${est.characters.toLocaleString()} characters${est.voiceChanger ? ' of text (for the .lip; speech-to-speech is billed by audio length)' : ' ≈ credits'}.`;
+    const groups = est.groups.map((g) => h('div.est-group',
+      h('div.row', voiceChip(g.voicePack, g.color), h('span.faint', g.engine), h('div.spacer'), h('b', `${g.lines} line(s)`), h('span.faint', `${g.characters.toLocaleString()} characters`)),
+      !est.speakerName && g.speakers.length ? h('div.faint', { style: { fontSize: '12px' } }, 'Speakers: ' + g.speakers.slice(0, 8).join(', ') + (g.speakers.length > 8 ? ` and ${g.speakers.length - 8} more` : '')) : null,
+      h('div.kv4', g.settings.flatMap(([k, v]) => [h('div', k), h('div', v)]))));
+    const skipped = est.unassigned.length
+      ? h('div.faint', `${est.unassigned.length} other speaker(s) have no voice yet, so their lines are not generated. To voice them, pick their voices in the Speakers tab.`,
+        h('details', h('summary', 'Show their names'), h('div', { style: { fontSize: '12px', marginTop: '4px' } }, est.unassigned.join(', '))))
+      : null;
+    return [h('div', { style: { fontSize: '15px' } }, who, h('b', what)), ...groups, skipped];
   }
 
   // ---------------------------------------------------------------- new voice types
@@ -893,6 +919,7 @@ export async function revoiceView(id) {
   document.addEventListener('job-done', async (e) => {
     jobSeen = false;
     if (!document.body.contains(view)) return;
+    if (inFlight.size) markInFlight(null);
     const d = e.detail || {};
     if (d.kind === 'revoice-orphans' && d.id === id) { if (d.message) toast(d.message, !d.ok); if (d.ok) orphansModal(); }
     if ((d.kind === 'revoice-scan' && d.id === id) || (d.kind === 'generate' && d.revoiceId === id) || (d.kind === 'revoice-export' && d.id === id)) {
