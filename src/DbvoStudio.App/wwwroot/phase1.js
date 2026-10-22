@@ -538,9 +538,9 @@ export async function modView(id) {
       h('div.filter-tools',
         h('div.legend',
           h('span.legend-note', 'Review ', h('b', 'BROKEN'), ' and ', h('b', 'TOO LONG WILL CTD'), ' lines before Phase 2.'),
-          h('span.legend-item', h('span.appr.on.demo.fix', 'Fix'), '= Edit made in DBVO Fix plugin'),
-          h('span.legend-item', h('span.appr.on.demo', h('span.note', '♪')), '= To be voiced in Phase 2'),
-          h('span.legend-item', h('span.demo-ex', icon('ban', { size: 14 })), '= Excluded from voicing in Phase 2')),
+          h('span.legend-item', h('span.appr.on.demo.fix', 'Fix'), '= Edit in the DBVO Fix plugin'),
+          h('span.legend-item', h('span.appr.on.demo', h('span.note', '♪')), '= Voiced in Phase 2'),
+          h('span.legend-item', h('span.demo-ex', icon('ban', { size: 14 })), '= Not voiced (excluded)')),
         h('div.spacer'), helpButton('review-the-lines'), q, columnsMenu(grid),
         h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp1', showInsp); split.classList.toggle('no-insp', !showInsp); renderFilters(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel')));
   }

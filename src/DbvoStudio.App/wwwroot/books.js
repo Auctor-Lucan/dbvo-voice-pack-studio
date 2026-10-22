@@ -145,7 +145,7 @@ export async function bookProjectView(id) {
     if (missing.length) toast(`${missing.map((x) => x.name).join(', ')} has no voice yet: books without takes are listed in the report.`, true);
   }
   async function openInFomod() {
-    try { const r = await rpc('fomod.import', { path: proj.outputFolder, books: true }); go('fomod', { id: r.project.id }); } catch (e) { fail(e); }
+    try { const r = await rpc('fomod.import', { path: proj.outputFolder, books: true }); go('fomod', { id: r.project.project.id }); } catch (e) { fail(e); }
   }
 
   // ---------------------------------------------------------------- setup
@@ -356,18 +356,18 @@ export async function bookProjectView(id) {
         h('summary', { title: 'Engine settings shared by every voice' }, h('b', 'Voice settings'), h('span.faint', `  ${proj.voice.eleven.modelId} · stability ${Number(proj.voice.eleven.stability).toFixed(2)} · speed ${Number(proj.voice.eleven.speed).toFixed(2)} · shared by every voice`), h('span.spacer'),
           h('button.btn.sm.ghost', { title: 'Reload voices from your accounts and local servers', onclick: (e) => { e.preventDefault(); loadVoices(true); } }, '⟳ Reload voices')),
         settingsRow()),
-      h('div.section-head', { style: { marginTop: '10px' } }, h('h2', 'Narrators'), helpButton('narrators-and-authors'), h('span.faint', `${proj.narrators.length} · ${nt.books.toLocaleString()} books · ${nt.left.toLocaleString()} characters left`), h('div.spacer'),
+      h('div.section-head', { style: { marginTop: '10px', maxWidth: '1200px' } }, h('h2', 'Narrators'), helpButton('narrators-and-authors'), h('span.faint', `${proj.narrators.length} · ${nt.books.toLocaleString()} books · ${nt.left.toLocaleString()} characters left`), h('div.spacer'),
         h('button.btn.sm', { title: 'Add another narrator: each gets its own archive and installer option', onclick: async () => { const r = await prompt('Add a narrator', [{ name: 'n', label: 'Name (in the archive name)', value: `Narrator ${proj.narrators.length + 1}`, placeholder: 'e.g. Male Narrator - Vampire' }]); if (r && r.n.trim()) { try { proj = await rpc('books.voice', { id, kind: 'narrator', add: true, name: r.n.trim() }); reindex(); renderAll(); } catch (e) { fail(e); } } } }, '+ Add narrator')),
       h('table.tbl.voices-tbl', h('thead', h('tr', h('th', 'Narrator'), h('th', 'Engine · voice'), h('th', { title: 'Loud: the IVBOS release chain. Normal: limiter only.' }, 'Level'), h('th', { title: 'Female Normal voices get +1.8 dB, as in the IVBOS macros' }, 'Voice'), h('th', 'Progress'), h('th', ''))),
-        h('tbody', narr.map((n) => h('tr',
+        h('tbody', narr.map((n) => h('tr' + (n.voiceId ? '' : '.needs-voice'),
           h('td', (() => { const i = h('input', { type: 'text', value: n.name, title: 'Shown in the archive name and the installer', style: { width: '200px' } }); i.addEventListener('change', () => setVoice(n, 'narrator', { name: i.value.trim() || n.name })); return i; })()),
           h('td', voicePick(n, 'narrator')), h('td', level(n, 'narrator')), h('td', gender(n, 'narrator')), h('td', progressCell(n.stats)),
           h('td', proj.narrators.length > 1 ? h('button.icon-btn', { title: 'Remove this narrator', onclick: async () => { if (await confirmBox('Remove narrator?', `${n.name}'s takes stay on disk but leave the project.`, 'Remove', true)) { try { proj = await rpc('books.voice', { id, kind: 'narrator', narratorId: n.id, remove: true, force: true }); reindex(); renderAll(); } catch (e) { fail(e); } } } }, '×') : null))))),
-      h('div.section-head', { style: { marginTop: '16px' } }, h('h2', 'NPC voice types'), h('span.faint', proj.npcVoices ? `${proj.voiceTypes.length} · ${vtt.books.toLocaleString()} books · ${vtt.left.toLocaleString()} characters left` : 'off: narrated books only (Setup)')),
+      h('div.section-head', { style: { marginTop: '16px', maxWidth: '1200px' } }, h('h2', 'NPC voice types'), h('span.faint', proj.npcVoices ? `${proj.voiceTypes.length} · ${vtt.books.toLocaleString()} books · ${vtt.left.toLocaleString()} characters left` : 'off: narrated books only (Setup)')),
       !proj.npcVoices ? h('div.faint', { style: { padding: '8px 0' } }, 'NPC voices are off, so books written by NPCs are left out. Turn them on in Setup → Names and output.')
         : !proj.voiceTypes.length ? h('div.faint', { style: { padding: '8px 0' } }, 'No book is read by an NPC voice. In the Books tab, set a book\'s reader to an NPC voice type to add one here.')
           : h('table.tbl.voices-tbl', h('thead', h('tr', h('th', 'Voice type'), h('th', { title: 'Books this voice type reads' }, 'Books'), h('th', 'Engine · voice'), h('th', 'Level'), h('th', { title: 'Let the narrator(s) read these books instead' }, 'Narrator instead'), h('th', 'Progress'))),
-            h('tbody', proj.voiceTypes.slice().sort((a, b) => (a.useNarrator - b.useNarrator) || (state(a.stats, a.voiceId) - state(b.stats, b.voiceId)) || a.voiceType.localeCompare(b.voiceType)).map((v) => h('tr' + (v.useNarrator ? '.muted' : ''),
+            h('tbody', proj.voiceTypes.slice().sort((a, b) => (a.useNarrator - b.useNarrator) || (state(a.stats, a.voiceId) - state(b.stats, b.voiceId)) || a.voiceType.localeCompare(b.voiceType)).map((v) => h('tr' + (v.useNarrator ? '.muted' : v.voiceId ? '' : '.needs-voice'),
               h('td', h('b.mono', v.voiceType), h('div.faint.ellipsis', { title: v.titles.join('\n'), style: { maxWidth: '240px', fontSize: '12px' } }, v.titles.slice(0, 3).join(' · '))),
               h('td', h('button.btn.sm.ghost', { title: 'Show these books', onclick: () => { voiceFilter = v.key; tab = 'books'; store.set('bk-tab:' + id, tab); renderAll(); } }, String(v.books))),
               h('td', v.useNarrator ? h('span.faint', 'read by the narrator(s)') : voicePick(v, 'vt')),
@@ -521,7 +521,7 @@ export async function bookProjectView(id) {
         h('div', 'File'), h('div.row', h('span.mono.ellipsis', { title: `sound\\fx\\voicedbooksofskyrim\\${b.stem}.xwm` }, b.stem + '.xwm'), h('button.icon-btn', { title: 'Copy the file name', onclick: () => navigator.clipboard.writeText(b.stem + '.xwm').then(() => toast('Copied.')) }, '⧉')),
         h('div', 'Record'), h('div.mono.ellipsis', { title: `${b.plugin} · ${b.edid}${b.records > 1 ? ` · +${b.records - 1} more records with this text` : ''}` }, `${b.edid}${b.records > 1 ? ` +${b.records - 1}` : ''}`),
         h('div', 'Kind'), h('div', b.kind + (b.excl ? ` · left out (${b.exReason || 'by you'})` : '') + (b.suggest ? ' · has real text' : '')),
-        b.author ? h('div', 'Author') : null, b.author ? h('div', { title: CERT_TIP[b.authorCert] || '' }, b.author, h('span.faint', ` · ${SRC[b.authorSrc] || b.authorSrc}${b.npcName ? ' · NPC ' + b.npcName : ''}`)) : null,
+        b.author ? h('div', 'Author') : null, b.author ? h('div', { title: CERT_TIP[b.authorCert] || '' }, b.author, h('span.faint', ` · ${SRC[b.authorSrc] || b.authorSrc}${b.npcName && b.npcName !== b.author ? ' · NPC ' + b.npcName : b.npcName ? ' · has an NPC record' : ''}`)) : null,
         h('div', 'Characters'), h('div', `${b.chars.toLocaleString()} · ${b.parts || 0} part(s)`)),
       h('div', h('div.field-label', 'Read by'),
         segmented([['narrator', 'Narrator', 'The narrator(s) read it'], ['npc', 'NPC voice', 'Read in the voice type of the NPC who wrote it']], b.reader, (v) => { if (v === 'narrator') bookAct(b, 'reader', 'narrator'); else if (b.vt) bookAct(b, 'reader', 'npc'); else toast('Pick the voice type below.', true); }),
