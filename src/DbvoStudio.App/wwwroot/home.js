@@ -11,6 +11,24 @@ const CHOICES = [
   { icon: 'book', color: '#e3b341', title: 'I want to read the guide.', sub: 'Every screen and button, explained.', go: () => go('help') },
 ];
 
+// The welcome: the first one on the very first launch, then the next one each time DBVO Studio opens, looping.
+const GREETINGS = [
+  ['Hello voice artist!', 'Let’s give the Dragonborn a voice.'],
+  ['Hello voice artist!', 'Welcome back to the studio.'],
+  ['Welcome, voice artist!', 'Let’s give Skyrim something new to say.'],
+  ['Good to see you, voice artist!', 'The studio is all yours.'],
+  ['Welcome back to the studio!', 'Your audience in Skyrim is waiting.'],
+  ['Hello voice artist!', 'Let’s make some noise in Nirn.'],
+];
+let greeting = null; // picked once per launch
+function pickGreeting() {
+  if (greeting) return greeting;
+  const last = Number(store.get('greeting', -1));
+  const i = Number.isInteger(last) && last >= 0 ? (last + 1) % GREETINGS.length : 0;
+  store.set('greeting', i);
+  return (greeting = GREETINGS[i]);
+}
+
 const WAVE = [18, 30, 52, 40, 70, 88, 60, 94, 72, 46, 80, 100, 64, 38, 58, 84, 50, 28, 44, 22, 36, 16];
 const RECENT_KEY = 'recent';
 const RECENT_VIEWS = ['mod', 'patch', 'fomod', 'revoice'];
@@ -62,7 +80,7 @@ export async function homeView() {
 
   const left = h('section.home-hero',
     h('div.home-wave', WAVE.map((x) => h('i', { style: { height: x + '%' } }))),
-    h('h1', 'Hello voice artist,', h('br'), 'welcome to the studio.'),
+    h('h1', pickGreeting()[0], h('br'), pickGreeting()[1]),
     h('p.home-ask', 'What do you want to do today?'),
     stats, checks);
 

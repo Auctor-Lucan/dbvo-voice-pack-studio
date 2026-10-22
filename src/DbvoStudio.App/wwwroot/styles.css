@@ -456,7 +456,8 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
   background: radial-gradient(120% 90% at 0% 100%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 60%), var(--deep); }
 .home-wave { display: flex; gap: 5px; align-items: center; height: 70px; margin-bottom: 22px; }
 .home-wave i { flex: 0 0 8px; border-radius: 5px; background: linear-gradient(color-mix(in srgb, var(--accent) 55%, #fff), var(--accent-strong)); }
-.home-hero h1 { font-size: 29px; line-height: 1.2; margin: 0 0 8px; font-weight: 600; letter-spacing: -.2px; }
+.home-hero { container-type: inline-size; }
+.home-hero h1 { font-size: clamp(20px, 5.1cqi, 29px); line-height: 1.2; margin: 0 0 8px; font-weight: 600; letter-spacing: -.2px; text-wrap: balance; }
 .home-ask { color: var(--dim); font-size: 16.5px; margin: 0 0 22px; }
 .home-stats { display: flex; gap: 30px; }
 .home-stats b { display: block; font-size: 24px; font-weight: 650; }
