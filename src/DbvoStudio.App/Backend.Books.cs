@@ -224,8 +224,8 @@ public sealed partial class Backend
             var books = lines.GroupBy(l => l.Stem + "|" + l.Variant).ToList();
             res[g.Key] = new VoiceStat(books.Count, books.Count(b => b.All(l => l.SelectedTake != null && l.Status == Phase2Status.Generated)), lines.Count,
                 lines.Count(l => l.SelectedTake != null), lines.Sum(l => l.Spoken.Length),
-                lines.Where(l => l.SelectedTake == null || l.Status is Phase2Status.Stale or Phase2Status.Failed or Phase2Status.Pending).Sum(l => l.Spoken.Length),
-                lines.Count(l => l.Status == Phase2Status.Stale));
+                lines.Where(l => l.IsMissing).Sum(l => l.Spoken.Length),
+                lines.Count(l => l.IsEdited));
         }
         return res;
     }
@@ -262,7 +262,7 @@ public sealed partial class Backend
             excl = b.Excluded, exReason = b.ExcludeReason, suggest = b.SuggestInclude, gone = b.Gone, marked = b.Marked, updated = b.UpdatedText != null,
             chars = b.Spoken.Length, edited = b.SpokenEdited, records = b.Records.Count, edid = b.First?.EditorId ?? "", plugin = b.First?.Plugin ?? "",
             variants = b.Variants.Count, parts = lines.Count(l => l.Voice == voices.FirstOrDefault() && l.Variant.Length == 0),
-            voices = voices.Select(v => new { v, status = BooksService.StatusOf(BooksService.LinesOf(proj, v, b.Stem)) }).ToList(),
+            voices = voices.Select(v => { var ls = BooksService.LinesOf(proj, v, b.Stem); return new { v, status = BooksService.StatusOf(ls), miss = ls.Any(l => l.IsMissing), edited = ls.Any(l => l.IsEdited) }; }).ToList(),
             serious = issues.Count(i => i.Serious), notes = issues.Count(i => !i.Serious),
             hasText = b.InGame.Length > 0,
         };
@@ -516,7 +516,8 @@ public sealed partial class Backend
         var marked = proj.Books.Where(b => b.Marked).Select(b => b.Stem).ToHashSet();
         var problems = proj.Books.Where(b => !b.Excluded && BkIssues(b).Any(i => i.Serious)).Select(b => b.Stem).ToHashSet();
         bool Usable(BookLine l) => !l.Excluded && (voice.Length == 0 || l.Voice == voice);
-        bool Missing(BookLine l) => l.SelectedTake == null || l.Status is Phase2Status.Pending or Phase2Status.Failed or Phase2Status.Stale;
+        // Ticked, flagged and problem books make every part that needs work; "missing" only parts with no take, "edited" parts whose text changed.
+        bool Missing(BookLine l) => l.IsMissing || l.IsEdited;
         return mode switch
         {
             "lines" => proj.Lines.Where(l => ids.Contains(l.LineId) && !l.Excluded).ToList(),
@@ -524,7 +525,8 @@ public sealed partial class Backend
             "flagged" => proj.Lines.Where(l => marked.Contains(l.Stem) && Usable(l) && (B(p, "regenerate") || Missing(l))).ToList(),
             "problems" => proj.Lines.Where(l => problems.Contains(l.Stem) && Usable(l) && Missing(l)).ToList(),
             "all" => proj.Lines.Where(Usable).ToList(),
-            _ => proj.Lines.Where(l => Usable(l) && Missing(l)).ToList(),
+            "edited" => proj.Lines.Where(l => Usable(l) && l.IsEdited).ToList(),
+            _ => proj.Lines.Where(l => Usable(l) && l.IsMissing).ToList(),
         };
     }
 

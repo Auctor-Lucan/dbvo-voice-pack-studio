@@ -14,6 +14,9 @@ namespace DbvoStudio.App;
 /// <summary>Bridge methods for pronunciation files, local engines, the Voice Changer, Other Tools and Phase 3 (FOMOD).</summary>
 public sealed partial class Backend
 {
+    /// <summary>The page drew its first screen (the window closes the splash).</summary>
+    public static event Action? PageReady;
+
     private static readonly object NotHandled = new();
 
     private async Task<object?> DispatchExtra(string m, JsonElement p)
@@ -39,6 +42,9 @@ public sealed partial class Backend
                 else OpenPath(Path.GetDirectoryName(wav) is { } d && Directory.Exists(d) ? d : Path.Combine(_lib.PatchFolder(patch.Id), "takes"));
                 return true;
             }
+            case "window.ready":
+                PageReady?.Invoke();
+                return true;
             case "window.theme":
                 _owner.Dispatcher.Invoke(() => WindowChrome.Apply(_owner, S(p, "caption"), S(p, "text"), B(p, "dark")));
                 return true;
@@ -414,7 +420,7 @@ public sealed partial class Backend
             var pw = PathChecks.Check(x.Lines.Where(l => !l.IsOmitted).Select(l => l.FinalLine), voice.Naming, x.WavLipFolder, fuz, Path.Combine(_lib.PatchFolder(x.Id), "takes"));
             if (pw.Count > 0) warnings.Add("Path too long: " + string.Join(", ", pw.Select(w => w.Where).Distinct()));
         }
-        // What "Generate missing" would make: no take yet, failed, or text changed since the take.
+        // What "Missing" would make: lines with no take at all (edited lines have their own choice).
         var pending = Phase2Service.Eligible(x, false);
         return new
         {

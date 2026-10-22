@@ -1,10 +1,10 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats, withBusy } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret } from './tagtools.js';
 import { recordTake } from './recorder.js';
 
-const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Text changed since take' };
+const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Edited since take' };
 
 export const LANGS = [['', 'Auto'], ['en', 'en · English'], ['de', 'de · German'], ['fr', 'fr · French'], ['es', 'es · Spanish'], ['it', 'it · Italian'],
   ['pt', 'pt · Portuguese'], ['pl', 'pl · Polish'], ['ru', 'ru · Russian'], ['ja', 'ja · Japanese'], ['zh', 'zh · Chinese'], ['ko', 'ko · Korean'],
@@ -232,7 +232,7 @@ export async function patchView(id) {
   await refreshState();
   let patch;
   try {
-    const r = await rpc('patch.sync', { id }); // pull in Phase 1 edits automatically
+    const r = await withBusy(rpc('patch.sync', { id }), 'Loading voice lines', 'Reading the lines, takes and WAV + LIP files…'); // pull in Phase 1 edits automatically
     patch = r.patch;
     if (r.report.adopted) setTimeout(() => toast(`${r.report.adopted} line(s) already had WAV + LIP files in the WAV + LIP folder: added as take #1.`), 300);
   } catch {
@@ -242,7 +242,7 @@ export async function patchView(id) {
   let voice = app.state.voicePacks.find((v) => v.id === patch.voicePackId);
   if (!voice) throw new Error('This patch\'s voice pack was deleted.');
   const ui = store.get('patch:' + id, { filter: 'all' });
-  let filter = ['stale', 'differs'].includes(ui.filter) ? 'all' : (ui.filter || 'all');
+  let filter = ['differs', 'generated'].includes(ui.filter) ? 'all' : (ui.filter || 'all');
   let search = '';
   let focusedId = null;
   let voices = [], models = [], localVoices = [];
@@ -663,16 +663,20 @@ export async function patchView(id) {
   }
 
   // ---- filters
-  // Like the backend's "missing": no take yet, failed, or the spoken text changed since the take.
-  const pendingLine = (l) => !l.omitted && !l.excluded && (l.status === 'Pending' || l.status === 'Failed' || l.status === 'Stale') && canGen(l);
+  // Like the backend: "missing" = no take at all (a line with one or more takes is never missing);
+  // "edited" = has takes, but the spoken text changed since the take in use (or the last attempt failed).
+  const pendingLine = (l) => !l.omitted && !l.excluded && !l.takes.length && canGen(l);
+  const isEdited = (l) => l.takes.length > 0 && (l.stale || l.status === 'Stale' || l.status === 'Failed');
+  const editedLine = (l) => !l.omitted && !l.excluded && isEdited(l) && canGen(l);
   function counts() {
     const L = patch.lines;
     return {
       all: L.length,
       pending: L.filter(pendingLine).length,
-      generated: L.filter((l) => l.status === 'Generated' && !l.stale && !l.omitted && !l.excluded).length,
+      generated: L.filter((l) => l.takes.length && !l.omitted && !l.excluded).length,
+      current: L.filter((l) => l.takes.length && !isEdited(l) && !l.omitted && !l.excluded).length,
       failed: L.filter((l) => l.status === 'Failed' && !l.omitted && !l.excluded).length,
-      stale: L.filter((l) => (l.stale || l.status === 'Stale') && l.takes.length).length,
+      stale: L.filter((l) => isEdited(l) && !l.omitted && !l.excluded).length,
       omitted: L.filter((l) => l.omitted).length,
       marked: L.filter((l) => l.marked).length,
       excluded: L.filter((l) => l.excluded).length,
@@ -692,7 +696,8 @@ export async function patchView(id) {
     return patch.lines.filter((l) => {
       switch (filter) {
         case 'pending': if (!pendingLine(l)) return false; break;
-        case 'generated': if (!(l.status === 'Generated' && !l.stale)) return false; break;
+        case 'current': if (!(l.takes.length && !isEdited(l))) return false; break;
+        case 'stale': if (!(isEdited(l) && !l.omitted && !l.excluded)) return false; break;
         case 'failed': if (l.status !== 'Failed') return false; break;
         case 'omitted': if (!l.omitted) return false; break;
         case 'marked': if (!l.marked) return false; break;
@@ -716,8 +721,9 @@ export async function patchView(id) {
     if (!had) q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 150));
     // Only filters that match at least one line (the open one always stays).
     const opt = (key, label, title) => (key === 'all' || filter === key || c[key] ? chip(key, label, title) : null);
-    clear(filters).append(opt('all', 'All', 'Every line of this patch'), opt('pending', vc ? 'To convert' : 'To generate', 'Lines without a take yet, failed ones, and lines whose spoken text changed since their take'), opt('generated', vc ? 'Converted' : 'Generated', 'Lines with a take that matches their spoken text'),
-      opt('failed', 'Failed', 'The last attempt made no usable take (engine error, credits, offline local engine, LIP or WAV step). The error is shown at the top of the line\'s panel; Generate options ▾ → Missing retries these.'),
+    clear(filters).append(opt('all', 'All', 'Every line of this patch'), opt('pending', 'Missing', 'Lines without any take yet'), opt('current', vc ? 'Converted' : 'Generated', 'Lines with a take that matches their spoken text'),
+      opt('stale', 'Edited since take', 'Lines with a take whose spoken text changed since (tags added, words edited), or whose last attempt failed'),
+      opt('failed', 'Failed', 'The last attempt made no usable take (engine error, credits, offline local engine, LIP or WAV step). The error is shown at the top of the line\'s panel; Generate options ▾ → Missing (no take yet) or Edited (has a take) retries these.'),
       opt('marked', 'Flagged', 'Flagged to revisit'), opt('excluded', 'Excluded', 'Won\'t generate or export'),
       opt('omitted', 'Omitted', 'Left out because a ticked reference topic file (e.g. the base game pack) already has the line'),
       vc ? opt('nosource', 'No source file', 'No file of the other voice pack was found for these lines') : null, opt('p1', 'Edited in Phase 1', 'The in-game line was edited in Phase 1'),
@@ -816,6 +822,7 @@ export async function patchView(id) {
     const reviewBtn = h('button.btn' + (review ? '.review-on' : ''), { title: review ? 'End Review (Esc)' : 'Listen through the lines with the keyboard: Space plays, A approves and moves on, R makes a new take, F flags', onclick: () => setReview(!review) }, review ? '■ End review' : '▶ Review');
     const chars = (ls) => ls.reduce((a, l) => a + (l.spoken || '').length, 0);
     const pend = patch.lines.filter(pendingLine);
+    const edited = patch.lines.filter(editedLine);
     const tickedL = sel.map((x) => index.get(x)).filter((l) => l && !l.omitted && canGen(l));
     const flagged = patch.lines.filter((l) => l.marked && !l.omitted && !l.excluded && canGen(l));
     const qaL = patch.lines.filter((l) => qaFlagged(l) && !l.omitted && !l.excluded && canGen(l));
@@ -824,19 +831,20 @@ export async function patchView(id) {
     const genBtn = generateButton({
       running: app.job && app.job.kind === 'generate', label: vc ? 'Convert options' : 'Generate options',
       items: () => [
-        { key: 'missing', label: 'Missing', count: pend.length, chars: chars(pend), desc: `Lines without a take yet, failed ones, and lines whose spoken text changed since their take.` },
+        { key: 'missing', label: 'Missing', count: pend.length, chars: chars(pend), desc: 'Lines without any take yet. A line with a take is never missing.' },
+        { key: 'edited', label: 'Edited', count: edited.length, chars: chars(edited), desc: 'A new take for each line whose spoken text changed since its take (tags added, words edited), or whose last attempt failed.' },
         { key: 'ticked', label: 'Ticked', count: tickedL.length, chars: chars(tickedL), desc: 'A new take for each ticked line.' },
         { key: 'flagged', label: 'Flagged', count: flagged.length, chars: chars(flagged), desc: 'A new take for each line you flagged to revisit.' },
         { key: 'qa', label: 'Check found problems', count: qaL.length, chars: chars(qaL), desc: 'A new take for each line Check takes flagged (the words differ, too quiet, or clipping).' },
         { key: 'unapproved', label: 'Not approved yet', count: unapp.length, chars: chars(unapp), desc: 'A new take for each line that has a take you haven\'t approved in Review.' },
         { key: 'all', label: 'All lines', count: all.length, chars: chars(all), warn: true, desc: 'A new take for every line that is not omitted or excluded. Uses the most credits; earlier takes stay.' },
       ],
-      onPick: (k) => k === 'missing' ? generate('missing') : k === 'all' ? generate('all') : k === 'flagged' ? generate('marked')
+      onPick: (k) => k === 'missing' ? generate('missing') : k === 'edited' ? generate('edited') : k === 'all' ? generate('all') : k === 'flagged' ? generate('marked')
         : generate('selected', (k === 'ticked' ? tickedL : k === 'qa' ? qaL : unapp).map((l) => l.lineId)),
     });
     clear(actions).append(
       helpButton('generating'),
-      h('span.stat', h('b', c.generated), ` / ${c.active} ${vc ? 'converted' : 'generated'}`, c.approved ? ` · ${c.approved} approved` : '', patch.exportApprovedOnly ? h('span', { title: 'Folders & options → Export: only approved lines are exported' }, ' · exporting approved only') : '', c.omitted ? ` · ${c.omitted} omitted` : '', c.excluded ? ` · ${c.excluded} excluded` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} changed since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
+      h('span.stat', h('b', c.generated), ` / ${c.active} ${vc ? 'converted' : 'generated'}`, c.approved ? ` · ${c.approved} approved` : '', patch.exportApprovedOnly ? h('span', { title: 'Folders & options → Export: only approved lines are exported' }, ' · exporting approved only') : '', c.omitted ? ` · ${c.omitted} omitted` : '', c.excluded ? ` · ${c.excluded} excluded` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} edited since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
       h('div.spacer'),
       sel.length || c.marked ? tickedMenu(sel, c) : null,
       reviewBtn,
@@ -892,7 +900,7 @@ export async function patchView(id) {
     clear(reviewBar).append(h('b', 'Review'),
       h('span', k('Space'), ' play / stop'), h('span', k('↑'), k('↓'), ' move'), h('span', k('A'), ' approve + next'), h('span', k('R'), ' new take'), h('span', k('F'), ' flag'), h('span', k('Esc'), ' end'),
       h('div.spacer'),
-      h('span.faint', `${c.approved} of ${c.generated + (c.stale || 0)} approved`),
+      h('span.faint', `${c.approved} of ${c.generated} approved`),
       switchEl(reviewAutoplay, (v) => { reviewAutoplay = v; store.set('reviewAutoplay', v); }, 'Autoplay', { title: 'Play each line as you land on it' }),
       helpButton('review'));
   }
@@ -1009,7 +1017,7 @@ export async function patchView(id) {
       const changes = r.changes.filter((_, i) => ticks[i]).map((c) => ({ lineId: c.lineId, spoken: c.incoming }));
       const res = await rpc('patch.applyCsv', { id, changes });
       patch = res.patch; reindex(); renderAll();
-      toast(`${res.applied} line(s) changed. They show as changed since their take: Generate options ▾ → Missing makes new takes.`);
+      toast(`${res.applied} line(s) changed. They show as edited since their take: Generate options ▾ → Edited makes new takes.`);
     } catch (e) { fail(e); }
   }
 
@@ -1086,7 +1094,7 @@ export async function patchView(id) {
         missingVoice ? h('div.banner.bad', { style: { margin: 0 } }, 'Pick a voice in the toolbar first.') : null,
       ], [{ label: 'Cancel', value: false }, { label: `${vc ? 'Convert' : 'Generate'} ${est.count} line(s)`, primary: true, value: !missingVoice }], { help: 'generating' });
       if (!ok) { markInFlight(null); return; }
-      markInFlight(mode === 'selected' ? lineIds : patch.lines.filter(mode === 'marked' ? (l) => l.marked && canGen(l) : mode === 'all' ? (l) => !l.omitted && !l.excluded && canGen(l) : pendingLine).map((l) => l.lineId));
+      markInFlight(mode === 'selected' ? lineIds : patch.lines.filter(mode === 'marked' ? (l) => l.marked && canGen(l) : mode === 'all' ? (l) => !l.omitted && !l.excluded && canGen(l) : mode === 'edited' ? editedLine : pendingLine).map((l) => l.lineId));
       await rpc('patch.generate', { id, mode, lineIds }).catch((e) => { markInFlight(null); throw e; });
       renderActions();
     } catch (e) { markInFlight(null); fail(e); }
@@ -1209,7 +1217,7 @@ export async function patchView(id) {
       renderCounts();
       renderActions();
       const rep = r.report;
-      toast(`${rep.total} lines · ${rep.added} new · ${rep.removed} removed${rep.parked ? ` (takes of ${rep.parked} kept in case they come back)` : ''} · ${rep.omitted} omitted${rep.stale ? ` · ${rep.stale} changed since take` : ''}`);
+      toast(`${rep.total} lines · ${rep.added} new · ${rep.removed} removed${rep.parked ? ` (takes of ${rep.parked} kept in case they come back)` : ''} · ${rep.omitted} omitted${rep.stale ? ` · ${rep.stale} edited since take` : ''}`);
     } catch (e) { fail(e); }
   }
 
@@ -1316,13 +1324,13 @@ export async function patchView(id) {
     if (!ok) return;
     const modIds = patch.modIds;
     try {
-      patch = await rpc('patch.saveMeta', {
+      patch = await withBusy(rpc('patch.saveMeta', {
         id, name: name.value, modIds, referenceIds: [...refOn],
         wavLipFolder: wl.i.value.trim(), finalRoot: fr.i.value.trim(), fuzTemplate: normTpl(tpl.value), fixFolder: fx.i.value.trim(),
         overwriteWavLip: owWav, overwriteFuz: owFuz, overwriteFix: owFix, sourceFolders: sources, exportApprovedOnly: apprOnly,
-      });
+      }), 'Loading voice lines', 'Looking for WAV + LIP files in the folders and matching them to the lines…');
       if (vc) {
-        const r = await rpc('patch.matchSources', { id });
+        const r = await withBusy(rpc('patch.matchSources', { id }), 'Matching source files', 'Looking for the other voice pack\'s file for every line…');
         patch = r.patch;
         toast(`${r.found} of ${r.total} lines have a source WAV.`);
       }

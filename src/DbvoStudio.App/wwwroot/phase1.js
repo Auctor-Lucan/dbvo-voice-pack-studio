@@ -497,7 +497,7 @@ export async function modView(id) {
       unrev && mod.plugins.length > 1 ? h('span.badge.b-broken', { title: 'Plugins with flagged lines not reviewed yet' }, `${unrev} with lines to review`) : null,
       drop, h('div.spacer'));
     if (plugin && !plugin.isTopicFile) {
-      if (plugin.importedFixPlugin) tabs.append(h('span.appr.on.demo.fix', { title: 'A DBVO Fix plugin is loaded for this plugin: ' + plugin.importedFixPlugin }, 'Fix'));
+      if (plugin.importedFixPlugin) tabs.append(h('button.appr.on.demo.fix.fix-remove', { title: `DBVO Fix plugin imported: ${plugin.importedFixPlugin}\nClick to remove it: the lines it changed get their earlier text back`, onclick: removeFix }, 'Fix'));
       tabs.append(h('button.btn.sm', { onclick: importFix, title: 'Take the texts of a DBVO Fix plugin you made earlier (for example with xEdit) into this plugin\'s lines' },
         plugin.importedFixPlugin ? `Imported: ${plugin.importedFixPlugin} · import again…` : 'Import existing DBVO Fix plugin…'));
     }
@@ -767,6 +767,20 @@ export async function modView(id) {
         h('div', 'Old markers ignored'), h('div', `${r.markers} (BROKEN LINE / TOO LONG WILL CTD texts stay flagged for you to fix)`),
         h('div', 'Records not found in the plugin'), h('div', r.unmatched)),
         h('div.faint', 'From now on this app writes the DBVO Fix plugin, rebuilt from the plugin with your texts.')]);
+    } catch (e) { fail(e); }
+  }
+
+  async function removeFix() {
+    const name = plugin.importedFixPlugin;
+    if (!await confirmBox('Remove the imported DBVO Fix plugin?', `The lines ${name} changed get their earlier text back. Lines you edited by hand after importing keep your edit. The file itself is not touched.`, 'Remove', true)) return;
+    try {
+      const r = await rpc('mod.removeFix', { id, plugin: plugin.fileName });
+      mod = r.mod;
+      plugin = mod.plugins.find((p) => p.fileName === plugin.fileName);
+      renderAll();
+      toast(r.restored || r.kept
+        ? `${name} removed: ${r.restored} line(s) back to their earlier text${r.kept ? `, ${r.kept} kept your later edit` : ''}.`
+        : `${name} removed. Its lines were imported by an older version, so their texts stay: use ↶ on a row to go back to the original.`);
     } catch (e) { fail(e); }
   }
 

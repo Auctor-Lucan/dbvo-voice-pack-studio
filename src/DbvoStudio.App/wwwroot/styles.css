@@ -725,3 +725,21 @@ select.bad-sel { border-color: var(--bad); color: var(--bad); }
 .pop-panel:has(> .gen-pop) { max-width: 480px; padding: 8px; }
 .gen-pop .gen-item { width: 100%; }
 .check-item.click { cursor: pointer; } .check-item.click:hover { color: var(--text); text-decoration: underline dotted; }
+
+/* Phase 1: the imported DBVO Fix chip shows a cross on hover; clicking removes the import */
+.fix-remove { position: relative; cursor: pointer; font: inherit; }
+.fix-remove:hover { color: transparent !important; border-color: var(--bad) !important; background: color-mix(in srgb, var(--bad) 18%, transparent) !important; }
+.fix-remove:hover::after { content: '✕'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--bad); font-weight: 700; }
+
+/* The busy screen (Loading voice lines) */
+.busy-overlay { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--deep, #010409) 78%, transparent); backdrop-filter: blur(3px); animation: busy-in .2s ease-out; }
+.busy-overlay.out { opacity: 0; transition: opacity .2s; }
+.busy-card { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 26px 34px 30px; }
+.busy-art { width: 380px; max-width: 70vw; height: auto; animation: busy-breathe 2.2s ease-in-out infinite; }
+.busy-title { font-size: 22px; font-weight: 650; color: var(--text); letter-spacing: .2px; margin-top: -26px; }
+.busy-sub { color: var(--dim); font-size: 13px; }
+.busy-bar { width: 260px; height: 4px; border-radius: 3px; background: color-mix(in srgb, var(--line) 80%, transparent); overflow: hidden; margin-top: 10px; }
+.busy-bar > i { display: block; width: 35%; height: 100%; border-radius: 3px; background: var(--accent); animation: busy-slide 1.2s ease-in-out infinite; }
+@keyframes busy-slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(300%); } }
+@keyframes busy-breathe { 0%, 100% { filter: brightness(.85); } 50% { filter: brightness(1.15); } }
+@keyframes busy-in { from { opacity: 0; } to { opacity: 1; } }

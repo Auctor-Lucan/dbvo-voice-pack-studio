@@ -285,12 +285,34 @@ public sealed class Phase1Service
                 continue;
             }
             if (line.Final == text && line.Reviewed) continue;
+            // Remember the line as it was before the first import, so the import can be removed again.
+            line.FixImport ??= new FixImportUndo { Final = line.Final, UserEdited = line.UserEdited, Reviewed = line.Reviewed };
             SetFinal(line, text);
+            line.FixImport.Imported = line.Final;
             applied++;
         }
         target.ImportedFixPlugin = Path.GetFileName(fixPath);
         _lib.Save(mod);
         return (applied, markers, unmatched);
+    }
+
+    /// <summary>
+    /// Remove an imported DBVO Fix plugin: lines it changed get their earlier text back. Lines edited by hand after the
+    /// import keep the hand edit. Returns (restored, keptEdits).
+    /// </summary>
+    public (int Restored, int Kept) RemoveFixPlugin(Mod mod, ModPlugin target)
+    {
+        int restored = 0, kept = 0;
+        foreach (var line in target.Lines.Where(l => l.FixImport != null))
+        {
+            var u = line.FixImport!;
+            if (line.Final == u.Imported) { line.Final = u.Final; line.UserEdited = u.UserEdited; line.Reviewed = u.Reviewed; restored++; }
+            else kept++;
+            line.FixImport = null;
+        }
+        target.ImportedFixPlugin = null;
+        _lib.Save(mod);
+        return (restored, kept);
     }
 
     /// <summary>Translate a FormID from one plugin's master list to another's (by owning file name).</summary>

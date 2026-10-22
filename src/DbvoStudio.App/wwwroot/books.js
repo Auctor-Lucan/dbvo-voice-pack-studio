@@ -1,8 +1,9 @@
 // Other Tools → Voiced Books Tool: narrate Skyrim's books, letters and journals (or a mod's) for Voiced Books of Skyrim.
 // Books are split into parts the engine can read, each part gets takes, and export joins them, adds the IVBOS
 // reverb and loudness chain, encodes xWMA and packs archives, the VBoS .ini and a FOMOD.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy } from './lib.js';
 import { app, go, refreshState } from './app.js';
+import { insertTagAtCaret } from './tagtools.js';
 import { creditsButton, LANGS } from './phase2.js';
 
 const CERT = { Confirmed: 'CONFIRMED', Unverified: 'UNVERIFIED', Inferred: 'INFERRED', None: '' };
@@ -13,7 +14,7 @@ const CERT_TIP = {
 };
 const SRC = { 'by-line': 'a "By …" line', signature: 'the signature', uesp: 'UESP\'s book page', title: 'the title', set: 'the built-in set', user: 'you' };
 const DOT = { ready: 'Generated', stale: 'Stale', partial: 'Partial', missing: 'Pending', none: 'Omitted' };
-const DOT_TIP = { ready: 'Ready: every part has a current take', stale: 'Changed since take: a part\'s text changed after its take', partial: 'Some parts have takes', missing: 'No takes yet', none: 'Not read by this voice' };
+const DOT_TIP = { ready: 'Ready: every part has a current take', stale: 'Edited since take: a part\'s text changed after its take', partial: 'Some parts have takes', missing: 'No takes yet', none: 'Not read by this voice' };
 const ENGINE_NAMES = { elevenlabs: 'ElevenLabs', voxcpm: 'VoxCPM (local)', omnivoice: 'OmniVoice (local)' };
 
 // ------------------------------------------------------------------ list
@@ -81,7 +82,7 @@ async function create(sets) {
 
 export async function bookProjectView(id) {
   await refreshState();
-  let proj = await rpc('books.get', { id });
+  let proj = await withBusy(rpc('books.get', { id }), 'Loading books', 'Reading the books, parts and takes…');
   let tab = store.get('bk-tab:' + id, 'books');
   let showInsp = store.get('bk-insp', true);
   let filter = store.get('bk-filter:' + id, 'all'), search = '', voiceFilter = '';
@@ -336,7 +337,7 @@ export async function bookProjectView(id) {
     const pct = st.lines ? Math.round((100 * st.generated) / st.lines) : 0;
     return h('div.col', { style: { gap: '3px', minWidth: '150px' } },
       h('div.bar' + (st.lines && st.generated >= st.lines && !st.stale ? '.ok' : ''), h('div.bar-fill', { style: { width: pct + '%' } })),
-      h('span.faint', { style: { fontSize: '12px' } }, `${st.done}/${st.books} books · ${st.charactersLeft.toLocaleString()} chars left${st.stale ? ` · ${st.stale} changed` : ''}`));
+      h('span.faint', { style: { fontSize: '12px' } }, `${st.done}/${st.books} books · ${st.charactersLeft.toLocaleString()} chars left${st.stale ? ` · ${st.stale} edited` : ''}`));
   }
 
   function renderVoices() {
@@ -401,11 +402,12 @@ export async function bookProjectView(id) {
       { id: 'parts', title: 'Parts', width: 46, render: (b) => h('span.mono.faint', String(b.parts || '—')) },
       { id: 'checks', title: 'Checks', width: 58, render: (b) => b.serious ? h('span.badge.b-broken', { title: `${b.serious} serious problem(s): open the editor to see them` }, `⚠ ${b.serious}`) : b.notes ? h('span.faint', { title: `${b.notes} note(s): open the editor to see them` }, `· ${b.notes}`) : h('span.faint', '✓') },
       { id: 'status', title: 'Audio', width: 62, render: (b) => h('span.row', { style: { gap: '4px' } }, b.voices.length ? b.voices.map((v) => h('span.dot.' + DOT[v.status], { title: `${voiceName(v.v)}: ${DOT_TIP[v.status]}` })) : h('span.faint', '—')) },
-      { id: 'act', title: '', width: 118, resizable: false, render: (b) => h('span.row.icon-bar', { style: { gap: '2px' } },
-        h('button.act-btn' + (inFlight.has(b.stem) ? '.spinning' : ''), { title: genBlock(b) || 'Generate this book\'s missing parts (every voice that reads it)', disabled: !!genBlock(b), onclick: (e) => { e.stopPropagation(); generate('ticked', [b.stem], { single: true }); } }, icon('regen')),
+      { id: 'act', title: '', width: 146, resizable: false, render: (b) => h('span.row.icon-bar', { style: { gap: '2px' } },
+        h('button.act-btn' + (inFlight.has(b.stem) ? '.spinning' : ''), { title: genBlock(b) || (b.voices.some((v) => v.miss || v.edited) ? 'Generate this book\'s missing and edited parts (every voice that reads it)' : 'A new take of every part (every voice that reads it)'), disabled: !!genBlock(b), onclick: (e) => { e.stopPropagation(); generate('ticked', [b.stem], { single: true }); } }, icon('regen')),
         h('button.act-btn', { title: 'Open the editor (or double-click the row)', onclick: (e) => { e.stopPropagation(); openEditor(b.stem); } }, icon('edit')),
         h('button.act-btn.flag-btn' + (b.marked ? '.on.warn' : ''), { title: b.marked ? 'Flagged - click to clear' : 'Flag to revisit', onclick: (e) => { e.stopPropagation(); bookAct(b, 'mark'); } }, icon('flag')),
-        h('button.act-btn', { title: b.voices.some((v) => v.status === 'ready') ? 'Play the whole book (joined, with reverb and loudness)' : 'No complete take yet', disabled: !b.voices.some((v) => v.status === 'ready'), onclick: (e) => { e.stopPropagation(); playBook(b); } }, icon('play'))) },
+        h('button.act-btn', { title: b.voices.some((v) => v.status === 'ready') ? 'Play the whole book (joined, with reverb and loudness)' : 'No complete take yet', disabled: !b.voices.some((v) => v.status === 'ready'), onclick: (e) => { e.stopPropagation(); playBook(b); } }, icon('play')),
+        h('button.act-btn', { title: 'Stop playback', onclick: (e) => { e.stopPropagation(); audio.pause(); } }, h('span', { style: { fontSize: '11px' } }, '■'))) },
     ],
   });
   grid.el.addEventListener('selection', () => renderActions());
@@ -434,9 +436,9 @@ export async function bookProjectView(id) {
     const live = B.filter((b) => !b.excl && !b.gone);
     return {
       all: B.length,
-      todo: live.filter((b) => b.voices.some((v) => v.status !== 'ready')).length,
+      todo: live.filter((b) => b.voices.some((v) => v.miss)).length,
       done: live.filter((b) => b.voices.length && b.voices.every((v) => v.status === 'ready')).length,
-      stale: live.filter((b) => b.voices.some((v) => v.status === 'stale')).length,
+      stale: live.filter((b) => b.voices.some((v) => v.edited)).length,
       npc: live.filter((b) => b.reader === 'npc').length,
       pickvt: live.filter((b) => b.reader === 'npc' && !b.vt).length,
       unconfirmed: live.filter((b) => b.reader === 'npc' && !b.confirmed).length,
@@ -449,9 +451,9 @@ export async function bookProjectView(id) {
   }
   function matches(b, f) {
     switch (f) {
-      case 'todo': return !b.excl && !b.gone && b.voices.some((v) => v.status !== 'ready');
+      case 'todo': return !b.excl && !b.gone && b.voices.some((v) => v.miss);
       case 'done': return !b.excl && b.voices.length && b.voices.every((v) => v.status === 'ready');
-      case 'stale': return !b.excl && b.voices.some((v) => v.status === 'stale');
+      case 'stale': return !b.excl && b.voices.some((v) => v.edited);
       case 'npc': return !b.excl && b.reader === 'npc';
       case 'pickvt': return !b.excl && b.reader === 'npc' && !b.vt;
       case 'unconfirmed': return !b.excl && b.reader === 'npc' && !b.confirmed;
@@ -474,8 +476,8 @@ export async function bookProjectView(id) {
     const q = h('input', { type: 'text', placeholder: 'Search title, file, author, voice type…', value: search, title: 'Filter the list' });
     q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 200));
     clear(filters).append(
-      chip('all', 'All', 'Every book'), chip('todo', 'To generate', 'A voice that reads it has missing or changed parts'), chip('done', 'Ready', 'Every voice has every part'),
-      chip('stale', 'Changed since take', 'A part\'s text changed after its take'), chip('npc', 'NPC voices', 'Read in an NPC\'s voice type'),
+      chip('all', 'All', 'Every book'), chip('todo', 'Missing', 'A voice that reads it has parts with no take yet'), chip('done', 'Ready', 'Every voice has every part'),
+      chip('stale', 'Edited since take', 'A part has a take, but its text changed after it (or its last attempt failed)'), chip('npc', 'NPC voices', 'Read in an NPC\'s voice type'),
       chip('pickvt', 'Pick a voice type', 'Written by an NPC whose voice type isn\'t known yet: the narrator reads them until you pick one'),
       chip('unconfirmed', 'Author unconfirmed', 'NPC voice from an automatic match: check, then Confirm'), chip('problems', 'Check found problems', 'Alias markup, leftover markup or short ALL-CAPS words'),
       chip('updated', 'Updated text', 'The built-in set has a newer text for a book you edited'), chip('suggest', 'Suggested', 'Spell tomes or recipes with real text: left out, but worth voicing'),
@@ -555,25 +557,30 @@ export async function bookProjectView(id) {
       ]);
     });
     const live = proj.books.filter((b) => !b.excl && !b.gone && (!voiceFilter || b.voices.some((v) => v.v === voiceFilter)));
-    const missingParts = (b) => b.voices.filter((v) => (!voiceFilter || v.v === voiceFilter) && v.status !== 'ready');
-    const est = (books) => books.reduce((a, b) => a + b.chars * Math.max(1, missingParts(b).length), 0);
+    // Missing: parts with no take at all. Edited: parts with a take whose text changed since. Ticked and Flagged make new takes.
+    const vs = (b) => b.voices.filter((v) => !voiceFilter || v.v === voiceFilter);
+    const missingParts = (b) => vs(b).filter((v) => v.miss);
+    const editedParts = (b) => vs(b).filter((v) => v.edited);
+    const est = (books, f = missingParts) => books.reduce((a, b) => a + b.chars * Math.max(1, f(b).length), 0);
     const todo = live.filter((b) => missingParts(b).length);
+    const edited = live.filter((b) => editedParts(b).length);
     const ticked = live.filter((b) => sel.includes(b.stem));
     const flagged = live.filter((b) => b.marked);
-    const problems = live.filter((b) => b.serious && missingParts(b).length);
+    const problems = live.filter((b) => b.serious && (missingParts(b).length || editedParts(b).length));
     const forVoice = voiceFilter ? ` for ${voiceName(voiceFilter)}` : '';
     clear(actions).append(
       helpButton('generating-books'),
-      h('span.stat', h('b', String(c.done)), ` / ${live.length} books ready${forVoice}`, c.stale ? h('span', { style: { color: 'var(--warn)' } }, ` · ${c.stale} changed since take`) : '', c.pickvt ? h('span', { style: { color: 'var(--warn)' } }, ` · ${c.pickvt} need a voice type`) : ''),
+      h('span.stat', h('b', String(c.done)), ` / ${live.length} books ready${forVoice}`, c.stale ? h('span', { style: { color: 'var(--warn)' } }, ` · ${c.stale} edited since take`) : '', c.pickvt ? h('span', { style: { color: 'var(--warn)' } }, ` · ${c.pickvt} need a voice type`) : ''),
       h('div.spacer'),
       h('button.btn', { title: 'Open the takes or joined-audio folder', onclick: (e) => popupMenu(e.currentTarget, [{ label: 'Takes folder', sub: 'Every part\'s takes', onclick: () => rpc('books.openFolder', { id, which: 'takes' }).catch(fail) }, { label: 'Joined audio', sub: 'Whole books, built for listening and export', onclick: () => rpc('books.openFolder', { id, which: 'joined' }).catch(fail) }, proj.outputFolder ? { label: 'Output folder', sub: proj.outputFolder, onclick: () => rpc('open.path', { path: proj.outputFolder }).catch(fail) } : null].filter(Boolean)) }, icon('folder', { size: 14 }), ' Folders ▾'),
       bulkBtn,
       generateButton({
         running: app.job && app.job.kind === 'generate', unit: 'book',
         items: () => [
-          { key: 'missing', label: 'Missing', count: todo.length, chars: est(todo), desc: `Books with parts that have no take, failed, or changed since their take${forVoice}. Parts that are fine are left alone.` },
-          { key: 'ticked', label: 'Ticked', count: ticked.length, chars: est(ticked), desc: 'The ticked books\' missing parts.' },
-          { key: 'flagged', label: 'Flagged', count: flagged.filter((b) => missingParts(b).length).length, chars: est(flagged), desc: 'Flagged books\' missing parts.' },
+          { key: 'missing', label: 'Missing', count: todo.length, chars: est(todo), desc: `Books with parts that have no take yet${forVoice}. A part with a take is never missing.` },
+          { key: 'edited', label: 'Edited', count: edited.length, chars: est(edited, editedParts), desc: `A new take for each part whose text changed since its take, or whose last attempt failed${forVoice}.` },
+          { key: 'ticked', label: 'Ticked', count: ticked.length, chars: est(ticked, vs), desc: 'A new take for every part of each ticked book.' },
+          { key: 'flagged', label: 'Flagged', count: flagged.length, chars: est(flagged, vs), desc: 'A new take for every part of each flagged book.' },
           { key: 'problems', label: 'Check found problems', count: problems.length, chars: est(problems), warn: true, desc: 'Books whose text check found a problem (alias markup, leftover markup, short ALL-CAPS). Usually fix the text first.' },
           { key: 'all', label: 'All parts again', count: live.length, chars: live.reduce((a, b) => a + b.chars * Math.max(1, b.voices.filter((v) => !voiceFilter || v.v === voiceFilter).length), 0), warn: true, desc: `A new take for every part of every book${forVoice}, even ready ones. Older takes stay. Uses the most credits.` },
         ],
@@ -619,7 +626,11 @@ export async function bookProjectView(id) {
   async function generate(mode, stems, { single = false, lineIds = null } = {}) {
     try {
       if (single && stems) markInFlight(stems);
-      const params = { id, mode: lineIds ? 'lines' : mode, stems: stems || [], lineIds: lineIds || [], voice: single || lineIds ? '' : voiceFilter, regenerate: mode === 'all' };
+      // One book (the row's ↻): its parts that need work, or a new take of every part when none do. Ticked and Flagged always make new takes.
+      const book = single && stems && stems.length === 1 ? index.get(stems[0]) : null;
+      const needsWork = book && book.voices.some((v) => v.miss || v.edited);
+      const regenerate = mode === 'all' || mode === 'flagged' || (mode === 'ticked' && (!single || !needsWork));
+      const params = { id, mode: lineIds ? 'lines' : mode, stems: stems || [], lineIds: lineIds || [], voice: single || lineIds ? '' : voiceFilter, regenerate };
       const est = await rpc('books.estimate', params);
       if (!est.count) { markInFlight(null); toast(est.unassigned.length ? `Pick a voice for ${est.unassigned.join(', ')} first (Narrators & authors).` : 'Nothing to generate.', !!est.unassigned.length); return; }
       const confirmBatch = (app.state.settings.ui || {}).confirmBatch !== 'false';
@@ -627,7 +638,7 @@ export async function bookProjectView(id) {
         const ok = await modal('Check before spending credits', estimateBody(est), [{ label: 'Cancel', value: false }, { label: `Generate ${est.count} part(s)`, primary: true, value: true }], { wide: true, help: 'generating-books' });
         if (!ok) { markInFlight(null); return; }
       }
-      if (!single) markInFlight(stems || proj.books.filter((b) => mode === 'flagged' ? b.marked : mode === 'all' || b.voices.some((v) => v.status !== 'ready')).map((b) => b.stem));
+      if (!single) markInFlight(stems || proj.books.filter((b) => mode === 'flagged' ? b.marked : mode === 'all' || b.voices.some((v) => (mode === 'edited' ? v.edited : mode === 'problems' ? v.miss || v.edited : v.miss))).map((b) => b.stem));
       await rpc('books.generate', params);
       renderActions();
     } catch (e) { markInFlight(null); fail(e); }
@@ -663,7 +674,8 @@ export async function bookProjectView(id) {
       try { proj = await rpc('books.get', { id }); reindex(); renderAll(); } catch { /* keep */ }
     };
     const onKey = (e) => {
-      if (e.key === 'Escape' && !document.querySelector('#modal:not(.hidden)')) { e.preventDefault(); close(); }
+      // Ask about unsaved text after this key press is done, so the same Esc doesn't also dismiss the question.
+      if (e.key === 'Escape' && !document.querySelector('#modal:not(.hidden)')) { e.preventDefault(); e.stopPropagation(); setTimeout(close, 0); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveText(); }
     };
     document.addEventListener('keydown', onKey, true);
@@ -721,6 +733,21 @@ export async function bookProjectView(id) {
       act('breaks', [...breaks, near].sort((a, b) => a - b));
     }
 
+    // [custom tag] + Enter puts the tag at the cursor in the spoken text (v3/v4 models read tags; others ignore them).
+    function customTag() {
+      const inp = h('input', { type: 'text', placeholder: '[custom tag]', title: 'Type a tag and press Enter: it goes in at the cursor of the spoken text', style: { width: '130px' } });
+      inp.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key !== 'Enter' || !inp.value.trim()) return;
+        let t = inp.value.trim();
+        if (!t.startsWith('[')) t = `[${t.replace(/[\[\]]/g, '')}]`;
+        insertTagAtCaret(ta, t);
+        dirty = true; renderCount();
+        inp.value = '';
+      });
+      return inp;
+    }
+
     function renderEd(textToo) {
       const b = d.book;
       const v = vdata();
@@ -738,7 +765,8 @@ export async function bookProjectView(id) {
       clear(toolsBox).append(
         b.variants ? segmented([['', 'Main text', 'The text everyone gets'], ...d.variantsList.map((x) => [x.id, `${x.label || x.plugin} ${x.whenInstalled ? 'installed' : 'not installed'}`, `Used when ${x.plugin} is ${x.whenInstalled ? '' : 'not '}installed`])], variant, async (k) => { if (dirty) await saveText(); variant = k; renderEd(true); }) : null,
         h('button.btn.sm', { title: 'Apply the IVBOS spoken-text rules to this text: asides to dashes, "Vol. II" → "Volume Two", regnal numbers, dates in words', onclick: () => act('applyRules') }, 'Spoken rules'),
-        h('button.btn.sm', { title: 'Let your AI provider add pacing (…) and ALL-CAPS emphasis by the IVBOS rules. You review the result before it is used.', onclick: aiFormat }, '✨ AI spoken format…'),
+        customTag(),
+        h('button.btn.sm', { title: 'Let your AI provider add pacing (…) and ALL-CAPS emphasis by the IVBOS rules. You review the result before it is used.', onclick: aiFormat }, 'AI Auto Format'),
         h('button.btn.sm.ghost', { title: 'Back to the game\'s text with the spoken rules (your edits go)', disabled: !d.inGame, onclick: async () => { if (await confirmBox('Restore the game text?', 'Your edits to this book are replaced.', 'Restore', true)) act('restore'); } }, '↺ Game text'),
         d.updatedText ? h('button.btn.sm.accent', { title: 'The built-in set has a newer text for this book', onclick: compareUpdated }, '★ Updated text…') : null,
         h('div.spacer'), countEl);
@@ -757,10 +785,10 @@ export async function bookProjectView(id) {
             h('div.row', h('span.dot.' + (l ? l.status : 'Pending'), { title: l ? (l.status + (l.err ? ': ' + l.err : '')) : 'Not generated' }),
               h('b', { style: { cursor: 'pointer' }, title: 'Select this part in the spoken text', onclick: () => selectRange(r.start, r.end) }, `Part ${i + 1}`),
               h('span.faint', `${(r.end - r.start).toLocaleString()} chars${r.para ? ' · ¶' : ''}`), h('div.spacer'),
-              t ? h('button.icon-btn', { title: 'Play this part\'s take', onclick: () => playTake(t) }, '▶') : null,
+              l ? h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: v && v.hasVoice ? (l.takes.length ? 'A new take of this part' : 'Generate this part') : 'Pick a voice first', disabled: !v || !v.hasVoice || !!app.job, onclick: () => { inFlight.add(l.id); edAutoPlay.add(l.id); renderEd(false); generate('lines', null, { lineIds: [l.id], single: true }); } }, icon('regen')) : null,
               takeSel,
               l && l.takes.length ? h('button.icon-btn', { title: 'Delete the take in use', onclick: async () => { if (await confirmBox('Delete take?', 'Deletes this part\'s take in use and its file.', 'Delete', true)) lineAct(l.id, 'deleteTake', l.sel); } }, '🗑') : null,
-              l ? h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: v && v.hasVoice ? (l.takes.length ? 'A new take of this part' : 'Generate this part') : 'Pick a voice first', disabled: !v || !v.hasVoice || !!app.job, onclick: () => { inFlight.add(l.id); edAutoPlay.add(l.id); renderEd(false); generate('lines', null, { lineIds: [l.id], single: true }); } }, icon('regen')) : null),
+              t ? h('button.icon-btn', { title: 'Play this part\'s take', onclick: () => playTake(t) }, '▶') : null),
             h('div.part-excerpt', { title: 'Click to select this part in the spoken text', onclick: () => selectRange(r.start, r.end) }, excerpt(ta.value, r.start, r.end)));
           const brk = i < breaks.length ? h('div.break-row', h('span.faint', '— break —'),
             h('button.icon-btn', { title: 'Move this break one sentence earlier', onclick: () => moveBreak(i, -1) }, '◀'),
@@ -769,7 +797,14 @@ export async function bookProjectView(id) {
           return [card2, brk];
         }).flat(),
         h('div.row', { style: { marginTop: '6px' } },
-          h('button.btn.sm.primary', { title: 'Generate the parts of this book that have no current take, in this voice', disabled: !v || !v.hasVoice || !!app.job || !lines.some((l) => !l.sel || l.status !== 'Generated'), onclick: () => { const ids = lines.filter((l) => !l.sel || l.status !== 'Generated').map((l) => l.id); ids.forEach((x) => inFlight.add(x)); renderEd(false); generate('lines', null, { lineIds: ids, single: ids.length === 1 }); } }, 'Generate missing parts'),
+          (() => {
+            // Parts that need work (no take, or the text changed since): those. Otherwise a new take of every part.
+            const need = lines.filter((l) => !l.takes.length || l.status !== 'Generated');
+            const ids = (need.length ? need : lines).map((l) => l.id);
+            const label = need.length ? (need.length === lines.length ? (lines.length === 1 ? 'Generate' : 'Generate all parts') : `Generate ${need.length} missing part${need.length === 1 ? '' : 's'}`) : (lines.length === 1 ? 'New take' : 'New take of every part');
+            return h('button.btn.sm.primary', { title: need.length ? 'Generate the parts that have no take yet or whose text changed since their take, in this voice' : 'Every part has a current take: make a new take of each, in this voice (earlier takes stay)', disabled: !v || !v.hasVoice || !!app.job || !lines.length,
+              onclick: () => { ids.forEach((x) => inFlight.add(x)); if (ids.length === 1) edAutoPlay.add(ids[0]); renderEd(false); generate('lines', null, { lineIds: ids, single: ids.length === 1 }); } }, label);
+          })(),
           h('div.spacer'),
           h('button.btn.sm', { title: 'Join the parts (with reverb, pauses and loudness) and play the whole book', disabled: !lines.length || lines.some((l) => !l.sel), onclick: async () => { try { const r = await rpc('books.join', { id, stem, voice, variant }); edAudio.src = r.url; edAudio.play().catch(fail); toast(`${fmtTime(r.seconds)} · ${r.lufs.toFixed(1)} LUFS · peak ${r.peakDb.toFixed(1)} dB`); } catch (e) { fail(e); } } }, '▶ Whole book'),
           h('button.btn.sm.ghost', { title: 'Stop playback', onclick: () => edAudio.pause() }, '■')));
@@ -825,7 +860,12 @@ export async function bookProjectView(id) {
   }
 
   // ---------------------------------------------------------------- layout
+  let shownTab = null;
   function renderAll() {
+    const same = shownTab === tab; shownTab = tab;
+    keepScroll(body, () => renderAllNow(), same);
+  }
+  function renderAllNow() {
     const scroll = grid.el.isConnected ? grid.el.scrollTop : null;
     renderHead();
     clear(body);

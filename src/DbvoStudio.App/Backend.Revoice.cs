@@ -571,7 +571,8 @@ public sealed partial class Backend
             "selected" => proj.Lines.Where(l => ids.Contains(l.LineId) && Usable(l)).ToList(),
             "marked" => proj.Lines.Where(l => l.Marked && Usable(l)).ToList(),
             "all" => proj.Lines.Where(Usable).ToList(),
-            _ => proj.Lines.Where(l => Usable(l) && l.Status is Phase2Status.Pending or Phase2Status.Failed or Phase2Status.Stale).ToList(),
+            "edited" => proj.Lines.Where(l => Usable(l) && l.IsEdited).ToList(),
+            _ => proj.Lines.Where(l => Usable(l) && l.IsMissing).ToList(),
         };
     }
 

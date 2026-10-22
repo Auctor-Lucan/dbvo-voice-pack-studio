@@ -1,5 +1,5 @@
 // Phase 3: FOMOD Creation — import any ModuleConfig.xml, options from DBVO Patches, the DBVO JSON, validate, simulate, build.
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, switchEl, segmented, popupMenu, helpButton } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, switchEl, segmented, popupMenu, helpButton, keepScroll } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip } from './phase2.js';
 
@@ -262,7 +262,12 @@ export async function fomodView(id) {
     } }, 'Browse'), obj[key] ? h('button.btn.sm.ghost', { title: 'Remove this image from the installer (the file itself stays)', onclick: () => { i.value = ''; obj[key] = ''; changed(); load(); } }, 'Remove') : null), prev);
   };
 
+  let shownKey = null;
   function renderEditor() {
+    const same = shownKey === selKey; shownKey = selKey;
+    keepScroll(edit, () => renderEditorNow(), same);
+  }
+  function renderEditorNow() {
     clear(edit);
     const f = find(selKey);
     if (f.kind === 'project') edit.append(projectPanel());

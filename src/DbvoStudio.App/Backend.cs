@@ -229,6 +229,14 @@ public sealed partial class Backend
                     var (applied, markers, unmatched) = new Phase1Service(_lib, Runtime()).ImportFixPlugin(mod, pl, S(p, "path"));
                     return new { mod = ModDto(LoadMod(mod.Id)), applied, markers, unmatched };
                 });
+            case "mod.removeFix":
+                return await Locked(() =>
+                {
+                    var mod = LoadMod(S(p, "id"));
+                    var pl = mod.Plugins.First(x => x.FileName == S(p, "plugin"));
+                    var (restored, kept) = new Phase1Service(_lib, Runtime()).RemoveFixPlugin(mod, pl);
+                    return new { mod = ModDto(LoadMod(mod.Id)), restored, kept };
+                });
             case "mod.exportPlayerNames":
                 return await Locked(() =>
                 {
@@ -1015,6 +1023,7 @@ public sealed partial class Backend
             "selected" => Phase2Service.Eligible(patch, true, ids ?? new List<string>()),
             "marked" => Phase2Service.Eligible(patch, true, patch.Lines.Where(l => l.Marked).Select(l => l.LineId)),
             "all" => Phase2Service.Eligible(patch, true),
+            "edited" => Phase2Service.Eligible(patch, false, null, edited: true),
             _ => Phase2Service.Eligible(patch, false),
         };
     }

@@ -773,3 +773,41 @@ export function outputFormats(current) {
   if (current && !list.some(([k]) => k === current)) list.push([current, current.replace(/^pcm_(\d+)$/, (m, hz) => `PCM ${Number(hz) / 1000}k`).replace(/^mp3_(\d+)_(\d+)$/, (m, hz, kb) => `MP3 ${Number(hz) / 1000}k ${kb}`) + ' (earlier setting)']);
   return list;
 }
+
+/**
+ * Rebuild a page part without jumping to the top: the scroll positions of its scrolling panels (.view-body, .fedit)
+ * are put back after rebuild(). Pass keep = false when the user switched to another tab (that one starts at the top).
+ */
+export function keepScroll(root, rebuild, keep = true) {
+  const sel = '.view-body, .fedit';
+  const before = keep ? [...root.querySelectorAll(sel)].map((el) => el.scrollTop) : [];
+  const rootTop = keep && root.matches && root.matches(sel) ? root.scrollTop : null;
+  rebuild();
+  if (!keep) return;
+  const restore = () => {
+    [...root.querySelectorAll(sel)].forEach((el, i) => { if (before[i] && el.scrollTop !== before[i]) el.scrollTop = before[i]; });
+    if (rootTop) root.scrollTop = rootTop;
+  };
+  restore();
+  requestAnimationFrame(restore);
+}
+
+/**
+ * A full-window "please wait" screen with the warrior art, for slow steps (reading thousands of voice lines).
+ * It only appears when the step takes longer than delayMs, so quick steps don't flash. Returns close().
+ */
+export function busyOverlay(title = 'Loading voice lines', sub = 'Reading the takes and files from disk…', delayMs = 350) {
+  let el = null;
+  const timer = setTimeout(() => {
+    el = h('div.busy-overlay', { role: 'status', 'aria-live': 'polite' },
+      h('div.busy-card', h('img.busy-art', { src: 'warrior.png', alt: '' }), h('div.busy-title', title), h('div.busy-sub', sub), h('div.busy-bar', h('i'))));
+    document.body.append(el);
+  }, delayMs);
+  return () => { clearTimeout(timer); if (el) { el.classList.add('out'); const e = el; setTimeout(() => e.remove(), 220); } };
+}
+
+/** Run a slow promise behind the busy screen. */
+export async function withBusy(promise, title, sub) {
+  const close = busyOverlay(title, sub);
+  try { return await promise; } finally { close(); }
+}

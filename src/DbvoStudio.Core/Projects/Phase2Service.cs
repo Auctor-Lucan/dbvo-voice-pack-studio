@@ -311,14 +311,18 @@ public sealed partial class Phase2Service
     }
 
     /// <summary>Lines eligible for generation: not omitted, and (unless <paramref name="regenerate"/>) without a usable take.</summary>
-    public static List<Phase2Line> Eligible(DbvoPatch patch, bool regenerate, IEnumerable<string>? onlyLineIds = null)
+    /// <summary>
+    /// The lines a generation would make. regenerate: every line (or every listed one). Otherwise "missing" (no take at all)
+    /// or, with edited, the lines that have takes but whose spoken text changed since (or whose last attempt failed).
+    /// </summary>
+    public static List<Phase2Line> Eligible(DbvoPatch patch, bool regenerate, IEnumerable<string>? onlyLineIds = null, bool edited = false)
     {
         var only = onlyLineIds?.ToHashSet();
         return patch.Lines.Where(l => !l.IsOmitted)
             .Where(l => !l.Excluded)
             .Where(l => patch.Kind != "vc" || l.SourceWav != null || patch.TtsForMissing)
             .Where(l => only == null || only.Contains(l.LineId))
-            .Where(l => regenerate || only != null || l.Status is Phase2Status.Pending or Phase2Status.Failed or Phase2Status.Stale)
+            .Where(l => regenerate || only != null || (edited ? l.IsEdited : l.IsMissing))
             .ToList();
     }
 

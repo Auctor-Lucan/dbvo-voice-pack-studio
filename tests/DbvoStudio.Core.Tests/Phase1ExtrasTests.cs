@@ -115,6 +115,19 @@ public class Phase1ExtrasTests : IDisposable
         Assert.Equal("No Serana. (laughs)", p.Lines.Single(l => l.FormId == 0x02000802).Final);
         Assert.Null(p.Lines.Single(l => l.FormId == 0x02000804).Final);
         Assert.Equal("DBVO Fix - Src.esp", p.ImportedFixPlugin);
+
+        // Removing the import puts the changed lines back; a line edited by hand after the import keeps the edit.
+        var t1 = p.Lines.Single(l => l.FormId == 0x02000800);
+        var t2 = p.Lines.Single(l => l.FormId == 0x02000802);
+        var t1Before = t1.FixImport!.Final;
+        Phase1Service.SetFinal(t2, "No Serana. Ha.");
+        var (restored, kept) = svc.RemoveFixPlugin(mod, p);
+        Assert.Equal(1, restored);
+        Assert.Equal(1, kept);
+        Assert.Equal(t1Before, t1.Final);
+        Assert.Equal("No Serana. Ha.", t2.Final);
+        Assert.Null(p.ImportedFixPlugin);
+        Assert.All(p.Lines, l => Assert.Null(l.FixImport));
     }
 
     [Fact]

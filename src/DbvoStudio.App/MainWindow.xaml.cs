@@ -14,6 +14,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         SourceInitialized += (_, _) => WindowChrome.Apply(this, "#010409", "#e6edf3", true);
         Loaded += async (_, _) => await InitAsync();
+        Backend.PageReady += () => Dispatcher.BeginInvoke(App.CloseSplash);
     }
 
     private async Task InitAsync()
@@ -40,16 +41,23 @@ public partial class MainWindow : Window
                 if (e.PermissionKind == CoreWebView2PermissionKind.Microphone)
                     e.State = e.Uri.StartsWith("https://app.dbvo/", StringComparison.OrdinalIgnoreCase) ? CoreWebView2PermissionState.Allow : CoreWebView2PermissionState.Deny;
             };
-            core.NavigationCompleted += (_, _) => Loading.Visibility = Visibility.Collapsed;
+            core.NavigationCompleted += (_, _) =>
+            {
+                Loading.Visibility = Visibility.Collapsed;
+                // The page closes the splash when its first screen is drawn (window.ready); this is the safety net.
+                _ = Task.Delay(TimeSpan.FromSeconds(10)).ContinueWith(_ => Dispatcher.BeginInvoke(App.CloseSplash));
+            };
             core.Navigate("https://app.dbvo/index.html");
         }
         catch (WebView2RuntimeNotFoundException)
         {
+            App.CloseSplash();
             Loading.Text = "Microsoft Edge WebView2 Runtime is missing. Install it from https://go.microsoft.com/fwlink/p/?LinkId=2124703 and restart.";
         }
         catch (Exception ex)
         {
             App.Log("Init failed: " + ex);
+            App.CloseSplash();
             Loading.Text = "Could not start: " + ex.Message;
         }
     }

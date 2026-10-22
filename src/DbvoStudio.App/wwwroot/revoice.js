@@ -1,6 +1,6 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret } from './tagtools.js';
@@ -52,13 +52,16 @@ export async function revoiceListView() {
 
 export async function revoiceView(id) {
   await refreshState();
-  let proj = await rpc('revoice.get', { id });
+  let proj = await withBusy(rpc('revoice.get', { id }), 'Loading voice lines', 'Reading the project\'s lines and takes…');
   let showInsp = store.get('rv-insp', true);
   // Reopens where you left off: the tab, the speaker picked in the toolbar and the scroll position of the lines.
   let tab = store.get('rv-tab:' + id, proj.lines.length ? 'speakers' : 'setup');
   let filter = 'all', speakerFilter = store.get('rv-speaker:' + id, ''), search = '';
   if (speakerFilter && !proj.speakers.some((x) => x.key === speakerFilter)) speakerFilter = '';
   let pendingScroll = store.get('rv-scroll:' + id, 0);
+  // Missing: no take at all (a line with takes is never missing). Edited: has takes, but the text changed since (or the last attempt failed).
+  const isMissing = (l) => !l.takes.length;
+  const isEdited = (l) => l.takes.length > 0 && (l.status === 'Stale' || l.status === 'Failed');
   const setTab = (v) => { tab = v; store.set('rv-tab:' + id, v); renderAll(); };
   const setSpeaker = (k) => { speakerFilter = k; store.set('rv-speaker:' + id, k); };
   // Takes that are not in the output folder yet (never exported, or the line has another take since).
@@ -86,7 +89,7 @@ export async function revoiceView(id) {
   function renderHead() {
     updateExpNew();
     // Credits show on every tab, filled once (the button keeps itself up to date).
-    const needs = () => proj.lines.filter((l) => !l.excl && !l.gone && ['Pending', 'Failed', 'Stale'].includes(l.status)).reduce((a, l) => a + l.spoken.length, 0);
+    const needs = () => proj.lines.filter((l) => !l.excl && !l.gone && isMissing(l)).reduce((a, l) => a + l.spoken.length, 0);
     clear(creditsSlot).append(creditsEl || (creditsEl = creditsButton(needs, 'This project')));
     const exp = h('button.btn.accent.export-btn', { title: 'Write the chosen takes as .fuz files at the game\'s paths. "new" counts takes that are not in the output folder yet.', disabled: !!app.job }, icon('export', { size: 15 }), 'Export .fuz', expNew, ' ▾');
     exp.addEventListener('click', () => popupMenu(exp, [
@@ -168,7 +171,7 @@ export async function revoiceView(id) {
       ls.orphans ? h('div.banner.info', { style: { margin: 0 } }, h('span', h('b', `${ls.orphans} voice file(s) in the mod's sources match no line`), ' — usually a merged, compacted (ESL) or renamed plugin changed their FormIDs. Link them to their lines so they play as the current file and can feed the Voice Changer.'),
         h('div.spacer'), h('button.btn.sm', { title: 'Match orphaned files to silent lines by name, then by Whisper transcription', onclick: orphansModal }, 'Match orphaned files…')) : null,
       speakerChangesBanner(),
-      ls.textChanged ? h('div.banner.info', { style: { margin: 0 } }, h('span', h('b', `${ls.textChanged} line(s) changed in the mod since their take`), ' — they are marked "changed since take" and come up again under To do.')) : null,
+      ls.textChanged ? h('div.banner.info', { style: { margin: 0 } }, h('span', h('b', `${ls.textChanged} line(s) changed in the mod since their take`), ' — they show as Edited since take: Generate options ▾ → Edited makes new takes.')) : null,
       ls.masterCosts.length ? h('div.banner.warn', { style: { margin: 0 } }, h('div', h('b', 'Missing masters'), h('ul', ls.masterCosts.map((x) => h('li', x))), h('div.faint', 'Drop them in to fix it, or set the base game folder for vanilla masters.'))) : null,
       ls.missingStrings.length ? h('div.banner.warn', { style: { margin: 0 } }, 'No strings for localized plugin(s): ' + ls.missingStrings.join(', ') + '. Their text is empty. Add the plugin\'s Strings folder or the archive that holds its strings.') : null,
       ls.errors.length ? h('div.banner.bad', { style: { margin: 0 } }, h('ul', ls.errors.map((x) => h('li', x)))) : null)
@@ -407,7 +410,7 @@ export async function revoiceView(id) {
       if (!st) m.set(l.speaker, st = { active: 0, left: 0, chars: 0 });
       if (l.excl || l.gone) continue;
       st.active++;
-      if (['Pending', 'Failed', 'Stale'].includes(l.status)) { st.left++; st.chars += l.spoken.length; }
+      if (isMissing(l)) { st.left++; st.chars += l.spoken.length; } else if (isEdited(l)) st.edited = (st.edited || 0) + 1;
     }
     return m;
   }
@@ -437,7 +440,7 @@ export async function revoiceView(id) {
           h('td', h('div.row', { style: { gap: '6px' } }, h('b', sp.name), sp.plan ? h('span.badge.b-player', 'new voice type') : null),
             kind(sp) ? h('div.faint', { style: { fontSize: '12px' } }, kind(sp)) : null),
           h('td.mono', sp.voiceType),
-          h('td', { title: `${done} of ${st.active} line(s) have a current take${st.left ? `; ${st.left} to go` : ''}` },
+          h('td', { title: `${done} of ${st.active} line(s) have a take${st.left ? `; ${st.left} missing` : ''}${st.edited ? `; ${st.edited} edited since their take` : ''}` },
             h('div.row', { style: { gap: '8px', flexWrap: 'nowrap' } }, h('div.pbar' + (state === 2 ? '.full' : ''), h('i', { style: { width: pct + '%' } })), h('span.mono.faint', `${done}/${st.active}`))),
           h('td.mono', state === 2 ? h('span', { style: { color: 'var(--ok)' } }, '✓') : st.chars.toLocaleString()),
           h('td', voicePick(sp), state === 1 ? h('div', { style: { color: 'var(--warn)', fontSize: '12px', marginTop: '2px' } }, 'Needs a voice') : null),
@@ -529,7 +532,8 @@ export async function revoiceView(id) {
     const L = proj.lines.filter((l) => !speakerFilter || l.speaker === speakerFilter);
     return {
       all: L.length,
-      todo: L.filter((l) => !l.excl && !l.gone && ['Pending', 'Failed', 'Stale'].includes(l.status)).length,
+      todo: L.filter((l) => !l.excl && !l.gone && isMissing(l)).length,
+      edited: L.filter((l) => !l.excl && !l.gone && isEdited(l)).length,
       done: L.filter((l) => l.sel).length,
       failed: L.filter((l) => l.status === 'Failed').length,
       orig: L.filter((l) => l.original).length,
@@ -542,7 +546,7 @@ export async function revoiceView(id) {
   function visible() {
     const q = search.toLowerCase();
     return proj.lines.filter((l) => (!speakerFilter || l.speaker === speakerFilter)
-      && (filter === 'all' || (filter === 'todo' && !l.excl && !l.gone && ['Pending', 'Failed', 'Stale'].includes(l.status)) || (filter === 'done' && l.sel) || (filter === 'failed' && l.status === 'Failed')
+      && (filter === 'all' || (filter === 'todo' && !l.excl && !l.gone && isMissing(l)) || (filter === 'edited' && !l.excl && !l.gone && isEdited(l)) || (filter === 'done' && l.sel) || (filter === 'failed' && l.status === 'Failed')
         || (filter === 'orig' && l.original) || (filter === 'silent' && !l.original) || (filter === 'unsure' && l.cert !== 'Exact') || (filter === 'marked' && l.marked) || (filter === 'excl' && l.excl))
       && (!q || l.text.toLowerCase().includes(q) || l.spoken.toLowerCase().includes(q) || (l.stem || '').toLowerCase().includes(q) || l.speakerName.toLowerCase().includes(q) || (l.quest || '').toLowerCase().includes(q)));
   }
@@ -553,7 +557,7 @@ export async function revoiceView(id) {
     const q = h('input', { type: 'text', placeholder: 'Search text, file, speaker, quest…', value: search, title: 'Filter the list' });
     q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 200));
     clear(filters).append(
-      chip('all', 'All', 'Every voice file to make'), chip('todo', 'To generate', 'No take yet, failed, or text changed since the take'), chip('done', 'Generated', 'Has a take'),
+      chip('all', 'All', 'Every voice file to make'), chip('todo', 'Missing', 'No take yet'), chip('edited', 'Edited since take', 'Has a take, but the spoken text changed since (or the last attempt failed)'), chip('done', 'Generated', 'Has a take'),
       chip('failed', 'Failed', 'The last attempt failed'), chip('orig', 'Has current file', 'The game plays a file for this line now (▶ in the Now column)'),
       chip('silent', 'Silent now', 'No voice file yet: subtitles only in game'), chip('unsure', 'Speaker unsure', 'The speaker was worked out as probable or unknown — check before generating'),
       chip('marked', 'Flagged', 'Flagged to revisit'), chip('excl', 'Excluded', 'Left out of generation and export'),
@@ -602,7 +606,7 @@ export async function revoiceView(id) {
       h('div.row', { style: { gap: '8px' } },
         l.original ? h('button.btn.sm', { title: 'Play the file the game uses now: ' + l.original, onclick: () => playOriginal(l) }, '▶ Now') : h('span.faint', { title: 'No voice file for this line yet: subtitles only in game' }, 'Silent in game now'),
         h('div.spacer'),
-        h('span.row', { style: { gap: '6px' }, title: l.err || '' }, statusDot(l), h('span.faint', { style: { fontSize: '12.5px' } }, status === 'Stale' ? 'Text changed since the take' : status))),
+        h('span.row', { style: { gap: '6px' }, title: l.err || '' }, statusDot(l), h('span.faint', { style: { fontSize: '12.5px' } }, status === 'Stale' ? 'Edited since the take' : status))),
       h('div', h('div.field-label', 'Subtitle (in game)'), h('div.box.ellipsis', { title: l.text }, l.text)),
       h('div', h('div.field-label', 'Spoken text (tags allowed)'), spoken,
         h('div.row', { style: { marginTop: '6px', gap: '6px' } },
@@ -641,7 +645,8 @@ export async function revoiceView(id) {
     const L = proj.lines.filter((l) => !speakerFilter || l.speaker === speakerFilter);
     const can = (l) => { const b = genBlock(l); return !b || b.startsWith('A job'); };
     const chars = (a) => a.reduce((n, l) => n + l.spoken.length, 0);
-    const miss = L.filter((l) => can(l) && ['Pending', 'Failed', 'Stale'].includes(l.status));
+    const miss = L.filter((l) => can(l) && isMissing(l));
+    const edl = L.filter((l) => can(l) && isEdited(l));
     const tickedL = sel.map((x) => index.get(x)).filter((l) => l && can(l));
     const flagged = L.filter((l) => l.marked && can(l));
     const unsure = L.filter((l) => l.cert !== 'Exact' && can(l));
@@ -651,13 +656,14 @@ export async function revoiceView(id) {
       running: app.job && app.job.kind === 'generate', label: proj.voiceChanger ? 'Convert options' : 'Generate options',
       title: (who ? `Only ${who}'s lines (the speaker picked in the toolbar). ` : '') + 'Choose what to generate. You see the count, characters and every setting before any credits are spent.',
       items: () => [
-        { key: 'missing', label: 'Missing', count: miss.length, chars: chars(miss), desc: 'Lines without a take yet, failed ones, and lines whose spoken text changed since their take.' },
+        { key: 'missing', label: 'Missing', count: miss.length, chars: chars(miss), desc: 'Lines without any take yet. A line with a take is never missing.' },
+        { key: 'edited', label: 'Edited', count: edl.length, chars: chars(edl), desc: 'A new take for each line whose spoken text changed since its take (tags added, words edited), or whose last attempt failed.' },
         { key: 'ticked', label: 'Ticked', count: tickedL.length, chars: chars(tickedL), desc: 'A new take for each ticked line.' },
         { key: 'flagged', label: 'Flagged', count: flagged.length, chars: chars(flagged), desc: 'A new take for each line you flagged to revisit.' },
         { key: 'unsure', label: 'Speaker unsure', count: unsure.length, chars: chars(unsure), desc: 'Lines whose speaker was worked out as probable or unknown. Check the speaker first: a wrong speaker means a wrong voice.' },
         { key: 'all', label: who ? `All of ${who}'s lines` : 'All lines', count: all.length, chars: chars(all), warn: true, desc: 'A new take for every line of speakers with a voice (not excluded or skipped). Uses the most credits; earlier takes stay.' },
       ],
-      onPick: (k) => k === 'missing' ? generate('missing') : k === 'flagged' ? generate('marked') : k === 'all' ? generate('all')
+      onPick: (k) => k === 'missing' ? generate('missing') : k === 'edited' ? generate('edited') : k === 'flagged' ? generate('marked') : k === 'all' ? generate('all')
         : generate('selected', (k === 'ticked' ? tickedL : unsure).map((l) => l.id)),
     });
     clear(actions).append(
@@ -910,7 +916,7 @@ export async function revoiceView(id) {
         const ok = await modal('Check before spending credits', estimateBody(est), [{ label: 'Cancel', value: false }, { label: `Generate ${est.count} line(s)`, primary: true, value: true }], { wide: true, help: 'lines' });
         if (!ok) { markInFlight(null); return; }
       }
-      if (est.count > 1) markInFlight(mode === 'selected' ? lineIds : proj.lines.filter((l) => (!speaker || l.speaker === speaker) && !l.excl && !l.gone && (mode === 'marked' ? l.marked : mode === 'all' ? true : ['Pending', 'Failed', 'Stale'].includes(l.status))).map((l) => l.id));
+      if (est.count > 1) markInFlight(mode === 'selected' ? lineIds : proj.lines.filter((l) => (!speaker || l.speaker === speaker) && !l.excl && !l.gone && (mode === 'marked' ? l.marked : mode === 'all' ? true : mode === 'edited' ? isEdited(l) : isMissing(l))).map((l) => l.id));
       await rpc('revoice.generate', { id, mode, lineIds, speaker });
       renderActions();
     } catch (e) { markInFlight(null); fail(e); }
@@ -1015,7 +1021,12 @@ export async function revoiceView(id) {
   }
 
   // ---------------------------------------------------------------- layout
+  let shownTab = null;
   function renderAll() {
+    const same = shownTab === tab; shownTab = tab;
+    keepScroll(body, () => renderAllNow(), same);
+  }
+  function renderAllNow() {
     // Re-attaching the grid resets its scroll position: keep where the user was.
     const scroll = grid.el.isConnected ? grid.el.scrollTop : null;
     renderHead();

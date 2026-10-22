@@ -84,6 +84,8 @@ export async function settingsView(tab, selectedId) {
 
   let voiceSel = selectedId;
   const show = async (t, id) => {
+    // Re-showing the same page (after a save) keeps the scroll position; another page starts at the top.
+    const keepTop = t === tab && (id === undefined || id === voiceSel) ? body.scrollTop : 0;
     tab = t;
     if (id !== undefined) voiceSel = id;
     store.set('settingsTab', t);
@@ -91,6 +93,7 @@ export async function settingsView(tab, selectedId) {
     clear(body);
     const render = { general, voices, pronunciation, references, categories, credits }[tab];
     try { body.append(await render(voiceSel, () => show(tab), (vid) => { voiceSel = vid; renderSub(); })); } catch (e) { fail(e); }
+    if (keepTop) { body.scrollTop = keepTop; requestAnimationFrame(() => { body.scrollTop = keepTop; }); }
   };
   function renderSub() {
     clear(sub);

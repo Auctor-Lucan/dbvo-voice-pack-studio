@@ -214,6 +214,16 @@ public sealed class VoicePack
 public enum Phase1Status { Active, ChangedInMod, Removed }
 
 /// <summary>One player line in Phase 1, with the user's decision.</summary>
+/// <summary>How a line was before an imported DBVO Fix plugin changed it, so removing the import can put it back.</summary>
+public sealed class FixImportUndo
+{
+    public string? Final { get; set; }
+    public bool UserEdited { get; set; }
+    public bool Reviewed { get; set; }
+    /// <summary>The text the import wrote. A line edited by hand after the import keeps the hand edit when the import is removed.</summary>
+    public string? Imported { get; set; }
+}
+
 public sealed class Phase1Line
 {
     public uint FormId { get; set; }
@@ -239,6 +249,8 @@ public sealed class Phase1Line
     public int Order { get; set; }
     /// <summary>Exported to the player-name topic file (Downloads).</summary>
     public bool PlayerNameExported { get; set; }
+    /// <summary>Set when an imported DBVO Fix plugin changed this line: the line as it was before, and the text the import wrote.</summary>
+    public FixImportUndo? FixImport { get; set; }
 
     [JsonIgnore] public string Key => $"{FormId:X8}:{(Field == LineField.TopicText ? "FULL" : "RNAM")}";
 
@@ -455,6 +467,11 @@ public class Phase2Line
     public bool NoAdopt { get; set; }
 
     [JsonIgnore] public Take? SelectedTake => Takes.FirstOrDefault(t => t.Id == SelectedTakeId);
+
+    /// <summary>Missing: the line has no take at all. A line with one or more takes is never missing.</summary>
+    [JsonIgnore] public bool IsMissing => Takes.Count == 0;
+    /// <summary>Edited: the line has takes, but its spoken text changed since the take in use (or the last attempt failed).</summary>
+    [JsonIgnore] public bool IsEdited => Takes.Count > 0 && (Status is Phase2Status.Stale or Phase2Status.Failed || (SelectedTake is { } t && t.SpokenText != Spoken));
 
     /// <summary>After the spoken text or the selected take changed: Generated when the take says the current text, else Stale.</summary>
     public void RefreshStale()

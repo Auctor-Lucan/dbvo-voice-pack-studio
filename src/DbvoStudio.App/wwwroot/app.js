@@ -183,9 +183,11 @@ window.addEventListener('drop', (e) => e.preventDefault());
   clear(main).append(h('div.empty.view', 'Loading…'));
   let home = true;
   try { await refreshState(); home = ((app.state.settings.ui || {}).startPage || 'home') !== 'last'; } catch { /* render shows the error */ }
-  if (navigated) return;
+  if (navigated) { rpc('window.ready').catch(() => {}); return; }
   if (home) app.route = { view: 'home' };
-  render();
+  await render();
+  // The first screen is drawn: the splash can go.
+  rpc('window.ready').catch(() => { /* not in the app */ });
 })();
 
 export { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce };
