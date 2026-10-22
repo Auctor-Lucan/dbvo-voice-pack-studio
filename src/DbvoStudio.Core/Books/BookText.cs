@@ -367,7 +367,8 @@ public static partial class BookText
 
     // ------------------------------------------------------------------ checks
 
-    public sealed record Issue(string Kind, string Message, bool Serious);
+    /// <summary>A check result. Find: text in the spoken text that shows where the problem is (the editor selects it), when there is one.</summary>
+    public sealed record Issue(string Kind, string Message, bool Serious, string? Find = null);
 
     [GeneratedRegex(@"\b[\p{Lu}]{2,}(?:['’][\p{Lu}]+)?\b")]
     private static partial Regex CapsWordRx();
@@ -387,21 +388,23 @@ public static partial class BookText
         if (!srcAliases.SequenceEqual(outAliases, StringComparer.Ordinal))
             issues.Add(new("alias", srcAliases.Count == outAliases.Count
                 ? "Alias markup changed (it must stay exactly as in the game, e.g. <Alias=Player>)."
-                : $"Alias markup missing or added: the game text has {srcAliases.Count}, the spoken text {outAliases.Count}.", true));
+                : $"Alias markup missing or added: the game text has {srcAliases.Count}, the spoken text {outAliases.Count}.", true,
+                outAliases.FirstOrDefault(a => !srcAliases.Contains(a, StringComparer.Ordinal))));
         foreach (Match m in TagRx().Matches(spoken))
-            if (!IsAlias(m.Value)) { issues.Add(new("markup", $"Leftover markup {Short(m.Value)} would be read out.", true)); break; }
-        if (PageBreakRx().IsMatch(spoken)) issues.Add(new("markup", "[pagebreak] would be read out.", true));
+            if (!IsAlias(m.Value)) { issues.Add(new("markup", $"Leftover markup {Short(m.Value)} would be read out.", true, m.Value)); break; }
+        if (PageBreakRx().IsMatch(spoken)) issues.Add(new("markup", "[pagebreak] would be read out.", true, PageBreakRx().Match(spoken).Value));
         var srcCaps = new HashSet<string>(CapsWordRx().Matches(baseline + "\n" + (title ?? "")).Select(m => m.Value), StringComparer.Ordinal);
         var badCaps = CapsWordRx().Matches(spoken).Select(m => m.Value)
             .Where(w => w.Count(char.IsLetter) < 4 && !srcCaps.Contains(w) && FromRoman(w) == null).Distinct().ToList();
         if (badCaps.Count > 0)
-            issues.Add(new("caps", $"New ALL-CAPS word{(badCaps.Count > 1 ? "s" : "")} shorter than four letters: {string.Join(", ", badCaps.Take(6))}. Keep emphasis to words of four letters or more.", true));
+            issues.Add(new("caps", $"New ALL-CAPS word{(badCaps.Count > 1 ? "s" : "")} shorter than four letters: {string.Join(", ", badCaps.Take(6))}. Keep emphasis to words of four letters or more.", true, badCaps[0]));
         if (spoken.Contains('(') || spoken.Contains(')'))
-            issues.Add(new("aside", "Parentheses left in: asides read better as \"- aside -\".", false));
-        if (EraYearRx.IsMatch(spoken) || DayMonthRx.IsMatch(spoken) || MonthDayRx.IsMatch(spoken))
-            issues.Add(new("date", "A date is still in numbers (e.g. 4E 201): spoken dates read better.", false));
+            issues.Add(new("aside", "Parentheses left in: asides read better as \"- aside -\".", false, spoken.Contains('(') ? "(" : ")"));
+        var dateM = new[] { EraYearRx.Match(spoken), DayMonthRx.Match(spoken), MonthDayRx.Match(spoken) }.FirstOrDefault(m => m.Success);
+        if (dateM != null)
+            issues.Add(new("date", "A date is still in numbers (e.g. 4E 201): spoken dates read better.", false, dateM.Value));
         if (Regex.IsMatch(spoken, @"\bVol\.\s"))
-            issues.Add(new("vol", "\"Vol.\" is often misread: write \"Volume\".", false));
+            issues.Add(new("vol", "\"Vol.\" is often misread: write \"Volume\".", false, "Vol."));
         var changed = inGame.Length == 0 ? new List<string>() : WordChanges(baseline, spoken);
         if (changed.Count > 0)
             issues.Add(new("words", $"Words differ from the game text: {string.Join("; ", changed.Take(4))}{(changed.Count > 4 ? $" (+{changed.Count - 4} more)" : "")}. Fine if intended, but check nothing was \"proofread\" by accident.", false));

@@ -70,6 +70,9 @@ public class BookTextTests
         Assert.Contains(issues, i => i.Kind == "markup" && i.Serious);
         Assert.Contains(issues, i => i.Kind == "caps" && i.Message.Contains("THE"));
         Assert.Contains(issues, i => i.Kind == "words");
+        // The editor selects where a problem is.
+        Assert.Equal("<b>", issues.First(i => i.Kind == "markup").Find);
+        Assert.Equal("THE", issues.First(i => i.Kind == "caps").Find);
         // Emphasis of long words and pacing are fine.
         Assert.DoesNotContain(BookText.Check(game, "Hello <Alias=Player>... the WOLF is near."), i => i.Serious);
     }

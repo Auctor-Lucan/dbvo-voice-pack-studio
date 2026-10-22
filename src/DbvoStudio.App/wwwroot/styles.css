@@ -724,3 +724,4 @@ select.bad-sel { border-color: var(--bad); color: var(--bad); }
 .tool-row select { max-width: 180px; }
 .pop-panel:has(> .gen-pop) { max-width: 480px; padding: 8px; }
 .gen-pop .gen-item { width: 100%; }
+.check-item.click { cursor: pointer; } .check-item.click:hover { color: var(--text); text-decoration: underline dotted; }

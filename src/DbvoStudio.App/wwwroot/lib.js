@@ -766,3 +766,10 @@ export function flashRow(grid, key, bad = false) {
   el.classList.add(bad ? 'flash-bad' : 'flash-done');
   setTimeout(() => el.classList.remove('flash-done', 'flash-bad'), 2600);
 }
+
+/** ElevenLabs output formats offered in the toolbars. A format saved by an older version stays listed, so the select shows what is really used. */
+export function outputFormats(current) {
+  const list = [['mp3_44100_128', 'MP3 44.1k 128'], ['mp3_44100_192', 'MP3 44.1k 192'], ['pcm_44100', 'PCM 44.1k (lossless)']];
+  if (current && !list.some(([k]) => k === current)) list.push([current, current.replace(/^pcm_(\d+)$/, (m, hz) => `PCM ${Number(hz) / 1000}k`).replace(/^mp3_(\d+)_(\d+)$/, (m, hz, kb) => `MP3 ${Number(hz) / 1000}k ${kb}`) + ' (earlier setting)']);
+  return list;
+}

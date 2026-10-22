@@ -1,7 +1,7 @@
 // Other Tools → Voiced Books Tool: narrate Skyrim's books, letters and journals (or a mod's) for Voiced Books of Skyrim.
 // Books are split into parts the engine can read, each part gets takes, and export joins them, adds the IVBOS
 // reverb and loudness chain, encodes xWMA and packs archives, the VBoS .ini and a FOMOD.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { creditsButton, LANGS } from './phase2.js';
 
@@ -315,7 +315,7 @@ export async function bookProjectView(id) {
       const stabVal = e.stability < 0.25 ? 0 : e.stability < 0.75 ? 0.5 : 1;
       const lang = h('select', { title: 'Force the language (ISO 639-1). Auto lets the model detect it.', onchange: (ev) => set(e, 'languageCode', ev.target.value) }, LANGS.map(([k, t]) => h('option', { value: k, selected: k === (e.languageCode || '') }, t)));
       const norm = h('select', { title: 'Whether ElevenLabs writes out numbers, dates and abbreviations before speaking', onchange: (ev) => set(e, 'textNormalization', ev.target.value) }, [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']].map(([k, t]) => h('option', { value: k, selected: k === (e.textNormalization || 'auto') }, t)));
-      const fmt = h('select', { onchange: (ev) => set(e, 'outputFormat', ev.target.value) }, [['mp3_44100_128', 'MP3 44.1k 128'], ['mp3_44100_192', 'MP3 44.1k 192'], ['pcm_44100', 'PCM 44.1k (lossless)']].map(([k, t]) => h('option', { value: k, selected: k === e.outputFormat }, t)));
+      const fmt = h('select', { onchange: (ev) => set(e, 'outputFormat', ev.target.value) }, outputFormats(e.outputFormat).map(([k, t]) => h('option', { value: k, selected: k === e.outputFormat }, t)));
       const out = h('button.btn.sm', { title: 'Format, seed and how many parts are requested at once' }, `${({ mp3_44100_128: 'MP3 128', mp3_44100_192: 'MP3 192', pcm_44100: 'PCM 44.1k' })[e.outputFormat] || 'Output'} ▾`);
       out.onclick = () => popover(out, () => [grp('Format', fmt), num(e, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px' }), num(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'Match your ElevenLabs plan\'s concurrency limit' })]);
       kids.push(grp('Model', ms), tag ? grp('Stability', segmented([[0, 'Creative'], [0.5, 'Natural'], [1, 'Robust']], stabVal, (x) => set(e, 'stability', Number(x)))) : slider(e, 'stability', 0, 1, 0.01, 'Stability'),
@@ -493,6 +493,7 @@ export async function bookProjectView(id) {
     const row = cur ? (cur.kind === 'narrator' ? proj.narrators.find((n) => n.key === cur.key) : proj.voiceTypes.find((v) => v.key === cur.key)) : null;
     clear(vbar).append(grp('Voice', sel),
       row ? grp('Engine · voice', voicePick(row, cur.kind)) : grp('Voices', h('button.btn.sm.bordered', { title: 'Every narrator and NPC voice type has its own voice. Pick one on the left to set it here, or set them all in the Narrators & authors tab.', onclick: () => { tab = 'voices'; store.set('bk-tab:' + id, tab); renderAll(); glow(); } }, 'Set in Narrators & authors')),
+      helpButton('books-and-the-editor'),
       h('div.spacer'),
       h('span.faint', { title: 'The longest part this model accepts' }, `Parts ≈ ${proj.partTarget.toLocaleString()} chars (max ${Math.min(proj.partMax, proj.ceiling).toLocaleString()})`));
   }
@@ -562,6 +563,7 @@ export async function bookProjectView(id) {
     const problems = live.filter((b) => b.serious && missingParts(b).length);
     const forVoice = voiceFilter ? ` for ${voiceName(voiceFilter)}` : '';
     clear(actions).append(
+      helpButton('generating-books'),
       h('span.stat', h('b', String(c.done)), ` / ${live.length} books ready${forVoice}`, c.stale ? h('span', { style: { color: 'var(--warn)' } }, ` · ${c.stale} changed since take`) : '', c.pickvt ? h('span', { style: { color: 'var(--warn)' } }, ` · ${c.pickvt} need a voice type`) : ''),
       h('div.spacer'),
       h('button.btn', { title: 'Open the takes or joined-audio folder', onclick: (e) => popupMenu(e.currentTarget, [{ label: 'Takes folder', sub: 'Every part\'s takes', onclick: () => rpc('books.openFolder', { id, which: 'takes' }).catch(fail) }, { label: 'Joined audio', sub: 'Whole books, built for listening and export', onclick: () => rpc('books.openFolder', { id, which: 'joined' }).catch(fail) }, proj.outputFolder ? { label: 'Output folder', sub: proj.outputFolder, onclick: () => rpc('open.path', { path: proj.outputFolder }).catch(fail) } : null].filter(Boolean)) }, icon('folder', { size: 14 }), ' Folders ▾'),
@@ -622,7 +624,7 @@ export async function bookProjectView(id) {
       if (!est.count) { markInFlight(null); toast(est.unassigned.length ? `Pick a voice for ${est.unassigned.join(', ')} first (Narrators & authors).` : 'Nothing to generate.', !!est.unassigned.length); return; }
       const confirmBatch = (app.state.settings.ui || {}).confirmBatch !== 'false';
       if ((est.count > 1 || !single) && confirmBatch) {
-        const ok = await modal('Check before spending credits', estimateBody(est), [{ label: 'Cancel', value: false }, { label: `Generate ${est.count} part(s)`, primary: true, value: true }], { wide: true, help: 'generating' });
+        const ok = await modal('Check before spending credits', estimateBody(est), [{ label: 'Cancel', value: false }, { label: `Generate ${est.count} part(s)`, primary: true, value: true }], { wide: true, help: 'generating-books' });
         if (!ok) { markInFlight(null); return; }
       }
       if (!single) markInFlight(stems || proj.books.filter((b) => mode === 'flagged' ? b.marked : mode === 'all' || b.voices.some((v) => v.status !== 'ready')).map((b) => b.stem));
@@ -773,7 +775,11 @@ export async function bookProjectView(id) {
           h('button.btn.sm.ghost', { title: 'Stop playback', onclick: () => edAudio.pause() }, '■')));
       // checks
       clear(checksBox).append(h('div.ed-col-head', h('b', 'Checks'), h('span.faint', 'flags, never blocks')),
-        d.issues.length ? h('div.col', { style: { gap: '4px' } }, d.issues.map((x) => h('div.check-item' + (x.serious ? '.bad' : ''), x.serious ? '⚠ ' : '· ', x.message))) : h('div.faint', '✓ Nothing found: aliases intact, no leftover markup, no short ALL-CAPS words, no unconverted dates.'));
+        d.issues.length ? h('div.col', { style: { gap: '4px' } }, d.issues.map((x) => {
+          // Click a check to select its place in the spoken text (when the check knows it).
+          const at = x.find ? ta.value.indexOf(x.find) : -1;
+          return h('div.check-item' + (x.serious ? '.bad' : '') + (at >= 0 ? '.click' : ''), { title: at >= 0 ? 'Click to select it in the spoken text' : '', onclick: at >= 0 ? () => { const i = ta.value.indexOf(x.find); if (i >= 0) selectRange(i, i + x.find.length); } : null }, x.serious ? '⚠ ' : '· ', x.message);
+        })) : h('div.faint', '✓ Nothing found: aliases intact, no leftover markup, no short ALL-CAPS words, no unconverted dates.'));
     }
 
     async function aiFormat() {

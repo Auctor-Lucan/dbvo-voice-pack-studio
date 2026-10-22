@@ -1,6 +1,6 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret } from './tagtools.js';
@@ -349,7 +349,7 @@ export async function revoiceView(id) {
         const e = v.eleven;
         const m = (elevenModels || []).find((x) => x.modelId === e.modelId) || {};
         const ms = h('select', { onchange: (ev) => { set(e, 'modelId', ev.target.value); renderAll(); } }, (elevenModels && elevenModels.length ? elevenModels : [{ modelId: e.modelId }]).map((x) => h('option', { value: x.modelId, selected: x.modelId === e.modelId }, x.name || x.modelId)));
-        const fmt = h('select', { onchange: (ev) => set(e, 'outputFormat', ev.target.value) }, [['mp3_44100_128', 'MP3 44.1k 128'], ['mp3_44100_192', 'MP3 44.1k 192'], ['pcm_44100', 'PCM 44.1k (lossless)']].map(([k, t]) => h('option', { value: k, selected: k === e.outputFormat }, t)));
+        const fmt = h('select', { onchange: (ev) => set(e, 'outputFormat', ev.target.value) }, outputFormats(e.outputFormat).map(([k, t]) => h('option', { value: k, selected: k === e.outputFormat }, t)));
         const lang = h('input', { type: 'text', value: e.languageCode || '', placeholder: 'auto', title: 'ISO 639-1 language code, e.g. en, de. Empty = auto', style: { width: '56px' } });
         lang.addEventListener('change', () => set(e, 'languageCode', lang.value.trim()));
         rows.push(h('div.tool-row', h('b', 'ElevenLabs'), grp('Model', ms),
@@ -704,7 +704,6 @@ export async function revoiceView(id) {
       btn.onclick = () => popover(btn, fields);
       return grp('Output', btn);
     };
-    const fmts = [['mp3_44100_128', 'MP3 44.1k 128'], ['mp3_44100_192', 'MP3 44.1k 192'], ['pcm_44100', 'PCM 44.1k (lossless)']];
     if (proj.voiceChanger) {
       const st = v.sts;
       const ms = h('select', { onchange: (e) => set(st, 'modelId', e.target.value) }, (elevenModels && elevenModels.length ? elevenModels : [{ modelId: st.modelId }]).map((m) => h('option', { value: m.modelId, selected: m.modelId === st.modelId }, m.modelId)));
@@ -727,7 +726,7 @@ export async function revoiceView(id) {
           LANGS.map(([k, t]) => h('option', { value: k, selected: k === (e.languageCode || '') }, t)));
         const norm = h('select', { title: 'Text normalization: whether ElevenLabs writes out numbers, dates and abbreviations before speaking. Auto lets the model decide; On is safer for numbers; Off keeps the text exactly as written.', onchange: (ev) => set(e, 'textNormalization', ev.target.value) },
           [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']].map(([k, t]) => h('option', { value: k, selected: k === (e.textNormalization || 'auto') }, t)));
-        const fmt = h('select', { onchange: (ev) => set(e, 'outputFormat', ev.target.value) }, fmts.map(([k, t]) => h('option', { value: k, selected: k === e.outputFormat }, t)));
+        const fmt = h('select', { onchange: (ev) => set(e, 'outputFormat', ev.target.value) }, outputFormats(e.outputFormat).map(([k, t]) => h('option', { value: k, selected: k === e.outputFormat }, t)));
         kids.push(grp('Model', ms),
           tag ? grp('Stability', segmented([[0, 'Creative'], [0.5, 'Natural'], [1, 'Robust']], stabVal, (x) => set(e, 'stability', Number(x)))) : slider(e, 'stability', 0, 1, 0.01, 'Stability'),
           slider(e, 'similarity', 0, 1, 0.01, 'Similarity'),

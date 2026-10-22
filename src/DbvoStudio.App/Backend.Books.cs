@@ -279,7 +279,7 @@ public sealed partial class Backend
             records = b.Records.Select(r => new { r.Plugin, formId = r.Hex, r.EditorId }),
             breaks = parts.Skip(1).Select(x => x.Start).ToList(), manual = b.ManualBreaks,
             partRanges = parts.Select(x => new { start = x.Start, end = x.End, para = x.ParagraphEnd }).ToList(),
-            issues = BkIssues(b).Select(i => new { i.Kind, i.Message, i.Serious }),
+            issues = BkIssues(b).Select(i => new { i.Kind, i.Message, i.Serious, i.Find }),
             variantsList = b.Variants.Select(v => new { v.Id, v.Plugin, v.Label, v.WhenInstalled, v.Spoken }),
             voices = voices.Select(v => new
             {
