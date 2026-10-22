@@ -34,6 +34,8 @@ public sealed class Library
 
     public string Root { get; }
     public string SettingsPath => Path.Combine(Root, "settings.json");
+    /// <summary>Built .fuz files by content (audio + LIP + encoder), so a rebuild only encodes what changed. Not backed up.</summary>
+    public string FuzCacheFolder => Path.Combine(Root, "cache", "fuz");
     public string ModFolder(string modId) => Path.Combine(Root, "mods", modId);
     public string PatchFolder(string patchId) => Path.Combine(Root, "patches", patchId);
     public string ReferencePath(string id) => Path.Combine(Root, "references", id + ".txt");

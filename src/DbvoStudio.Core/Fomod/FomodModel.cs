@@ -119,6 +119,11 @@ public sealed class FomodProject
     public string ReleaseFolder { get; set; } = "";
     /// <summary>"zip" (built in) or "7z" (uses 7-Zip from Settings).</summary>
     public string ArchiveFormat { get; set; } = "zip";
+    /// <summary>
+    /// Pack each option's Sound folder into one BSA plus the plugin that loads it (the option's DBVO Fix plugin when it
+    /// has one, else a small empty light plugin), instead of thousands of loose files. Off: loose files, as before.
+    /// </summary>
+    public bool PackBsa { get; set; }
     /// <summary>"utf-16" (FOMOD Creation Tool style) or "utf-8".</summary>
     public string Encoding { get; set; } = "utf-16";
     public FomodInfo Info { get; set; } = new();

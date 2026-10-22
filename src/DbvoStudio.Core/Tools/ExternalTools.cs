@@ -94,6 +94,26 @@ public sealed class ExternalTools
         if (r.ExitCode != 0 || !File.Exists(xwmOut)) throw new ToolException("xWMAEncode failed: " + Tail(r.StdOut + r.StdErr));
     }
 
+    /// <summary>Integrated loudness (LUFS) and true peak (dBTP) of an audio file (ffmpeg ebur128). Null where ffmpeg gave none.</summary>
+    public async Task<(double? Lufs, double? TruePeak)> MeasureAsync(string input, CancellationToken ct = default)
+    {
+        var r = await RunAsync(FfmpegPath, new[] { "-hide_banner", "-nostats", "-i", input, "-af", "ebur128=peak=true", "-f", "null", "-" }, ct);
+        return ParseEbur128(r.StdErr);
+    }
+
+    /// <summary>The Summary block of ffmpeg's ebur128 filter: "I: -18.3 LUFS" and, under True peak, "Peak: -1.4 dBFS".</summary>
+    public static (double? Lufs, double? TruePeak) ParseEbur128(string stderr)
+    {
+        int at = stderr.LastIndexOf("Summary:", StringComparison.Ordinal);
+        var sum = at >= 0 ? stderr[at..] : stderr;
+        static double? Num(System.Text.RegularExpressions.Match m) =>
+            m.Success && double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v
+            : m.Success && m.Groups[1].Value.Contains("inf") ? double.NegativeInfinity : null;
+        var i = Num(System.Text.RegularExpressions.Regex.Match(sum, @"I:\s+(-?[\d.]+|-inf) LUFS"));
+        var tp = Num(System.Text.RegularExpressions.Regex.Match(sum, @"Peak:\s+(-?[\d.]+|-inf) dBFS"));
+        return (i, tp);
+    }
+
     private static string Tail(string s)
     {
         var lines = s.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

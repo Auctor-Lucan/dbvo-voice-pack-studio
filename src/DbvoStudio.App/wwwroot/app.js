@@ -102,11 +102,11 @@ toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [
 
 // ---- background jobs (generation, .fuz, FOMOD, WAV to LIP)
 const jobEl = document.getElementById('job');
-const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to LIP', generate: 'Generating', import: 'Importing .fuz' };
+const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to LIP', generate: 'Generating', import: 'Importing', qa: 'Checking takes' };
 on('progress', (p) => {
   app.job = p;
   jobEl.classList.remove('hidden');
-  jobEl.querySelector('.job-label').textContent = `${(p.kind === 'fomod' || p.kind === 'revoice') && p.message ? p.message : LABEL[p.kind] || 'Working'}${p.kind === 'revoice' ? '…' : ` ${p.done}/${p.total}`}${p.failed ? ` · ${p.failed} failed` : ''}`;
+  jobEl.querySelector('.job-label').textContent = `${(p.kind === 'fomod' || p.kind === 'revoice' || (p.kind === 'qa' && p.message)) && p.message ? p.message : LABEL[p.kind] || 'Working'}${p.kind === 'revoice' ? '…' : ` ${p.done}/${p.total}`}${p.failed ? ` · ${p.failed} failed` : ''}`;
   jobEl.title = p.current || '';
   jobEl.querySelector('.bar-fill').style.width = (p.total ? (100 * p.done) / p.total : 0) + '%';
   document.dispatchEvent(new CustomEvent('job-progress', { detail: p }));
@@ -117,20 +117,23 @@ on('jobDone', async (d) => {
   document.dispatchEvent(new CustomEvent('job-done', { detail: d }));
   if (d.kind === 'fuz' && d.report) {
     const r = d.report;
-    const body = [h('div.kv', h('div', 'Written'), h('div', r.written), h('div', 'Skipped (already there)'), h('div', r.skipped), h('div', 'Failed'), h('div', r.failed))];
+    const body = [h('div.kv', h('div', 'Written'), h('div', r.written),
+      r.reused ? [h('div', 'Imported .fuz kept as they were'), h('div', r.reused)] : null,
+      r.cached ? [h('div', 'From the .fuz cache (unchanged since an earlier build)'), h('div', r.cached)] : null,
+      h('div', 'Skipped (already there)'), h('div', r.skipped), h('div', 'Failed'), h('div', r.failed))];
     if (r.errors && r.errors.length) body.push(h('div.box.mono', { style: { maxHeight: '160px', overflow: 'auto' } }, r.errors.slice(0, 50).join('\n')));
     if (d.files && d.files.length) body.push(h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), h('div.box.mono', { style: { whiteSpace: 'pre-wrap', maxHeight: '140px', overflow: 'auto' } }, d.files.join('\n'))));
     if (d.reminders && d.reminders.length) body.push(h('div.banner.warn', { style: { margin: 0 } }, h('div', h('b', 'Before you release: '), h('ul', d.reminders.map((x) => h('li', x))))));
     await modal('.fuz files built', body);
-  } else if (d.kind === 'import') {
-    toast(d.message || 'Done.', !d.ok);
+  } else if (d.kind === 'import' || d.kind === 'qa') {
+    toast(d.message || 'Done.', !d.ok || (d.kind === 'qa' && d.flagged > 0));
   } else if (d.kind === 'wavlip') {
     if (d.message) toast(d.message, !d.ok);
   } else if (d.kind === 'fomod') {
     if (!d.ok) { toast(d.message || 'FOMOD build failed.', true); return; }
     const r = d.report;
     const v = await modal('FOMOD built', [
-      h('div.kv', h('div', 'Files staged'), h('div', r.files), h('div', 'Staging folder'), h('div.mono', r.staging), h('div', 'Archive'), h('div.mono', r.archive || '— (staged only)')),
+      h('div.kv', h('div', 'Files staged'), h('div', r.files), r.bsas ? [h('div', 'BSA archives packed'), h('div', r.bsas)] : null, h('div', 'Staging folder'), h('div.mono', r.staging), h('div', 'Archive'), h('div.mono', r.archive || '— (staged only)')),
       r.warnings && r.warnings.length ? h('div.banner.warn', { style: { margin: 0 } }, h('ul', r.warnings.slice(0, 20).map((x) => h('li', x)))) : null,
     ], [{ label: 'Open folder', value: 'open' }, { label: 'OK', primary: true, value: true }]);
     if (v === 'open') rpc('open.path', { path: r.archive || r.staging });

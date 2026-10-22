@@ -31,11 +31,15 @@ public sealed class ExportReport
     public int Written { get; set; }
     public int Skipped { get; set; }
     public int Failed { get; set; }
+    /// <summary>.fuz files taken unchanged from an imported pack (no second encode).</summary>
+    public int Reused { get; set; }
+    /// <summary>.fuz files taken from the encode cache (same audio and LIP as an earlier build).</summary>
+    public int Cached { get; set; }
     public List<string> Errors { get; } = new();
 }
 
 /// <summary>Phase 2: build the line list for a DBVO Patch, generate takes, and export WAV + LIP and .fuz.</summary>
-public sealed class Phase2Service
+public sealed partial class Phase2Service
 {
     private readonly Library _lib;
     private readonly AppSettings _settings;
@@ -216,7 +220,7 @@ public sealed class Phase2Service
         return n;
     }
 
-    private void AddExistingTake(DbvoPatch patch, VoicePack voice, Phase2Line line, string wav, string lip, string source)
+    private Take AddExistingTake(DbvoPatch patch, VoicePack voice, Phase2Line line, string wav, string lip, string source, string? originalFuz = null, string? label = null)
     {
         var stem = LineNaming.Stem(line.FinalLine, voice.Naming);
         var take = new Take
@@ -224,17 +228,32 @@ public sealed class Phase2Service
             Slot = line.Takes.Count == 0 ? 1 : line.Takes.Max(t => t.Slot) + 1,
             SpokenText = line.Spoken,
             DurationSeconds = WavSeconds(wav),
-            Settings = new TakeSettings { Engine = source, ModelId = source == "fuz" ? "imported from .fuz" : "imported WAV + LIP" },
+            Settings = new TakeSettings { Engine = source, ModelId = label ?? (source == "fuz" ? "imported from .fuz" : "imported WAV + LIP") },
         };
         var rel = Path.Combine("takes", line.LineId, take.Slot.ToString("00"));
         take.WavPath = Path.Combine(rel, stem + ".wav");
         take.LipPath = Path.Combine(rel, stem + ".lip");
         FileLinks.LinkOrCopy(wav, Path.Combine(_lib.PatchFolder(patch.Id), take.WavPath), true);
         FileLinks.LinkOrCopy(lip, Path.Combine(_lib.PatchFolder(patch.Id), take.LipPath), true);
+        if (originalFuz != null && File.Exists(originalFuz))
+        {
+            take.OriginalFuz = Path.Combine(rel, stem + ".fuz");
+            FileLinks.LinkOrCopy(originalFuz, Path.Combine(_lib.PatchFolder(patch.Id), take.OriginalFuz), true);
+        }
         line.Takes.Add(take);
         line.SelectedTakeId = take.Id;
         line.Status = Phase2Status.Generated;
         line.LastError = null;
+        return take;
+    }
+
+    /// <summary>A finished WAV + LIP made outside generation (a microphone recording, converted or not) becomes a new take.</summary>
+    public Take AddRecordedTake(DbvoPatch patch, VoicePack voice, Phase2Line line, string wav, string lip, bool converted)
+    {
+        var t = AddExistingTake(patch, voice, line, wav, lip, converted ? "microphone+vc" : "microphone",
+            label: converted ? "microphone, converted with the Voice Changer" : "microphone recording");
+        t.SpokenText = line.Spoken;
+        return t;
     }
 
     /// <summary>Lines without a take that have a .fuz (in either naming) in the patch's .fuz folders.</summary>
@@ -278,7 +297,7 @@ public sealed class Phase2Service
                 var lip = work.File("a.lip");
                 await File.WriteAllBytesAsync(lip, lipBytes, ct);
                 await gate.WaitAsync(ct);
-                try { if (line.Takes.Count == 0) { AddExistingTake(patch, voice, line, wav, lip, "fuz"); ok++; } }
+                try { if (line.Takes.Count == 0) { AddExistingTake(patch, voice, line, wav, lip, "fuz", fuzPath); ok++; } }
                 finally { gate.Release(); }
             }
             catch (OperationCanceledException) { throw; }
@@ -647,6 +666,10 @@ public sealed class Phase2Service
 
     private static string ExportKey(string path) => Path.GetFullPath(path);
 
+    /// <summary>Lines an export writes: not omitted or excluded, and approved when the patch exports approved lines only.</summary>
+    public static IEnumerable<Phase2Line> ExportLines(DbvoPatch patch) =>
+        patch.Lines.Where(l => !l.IsOmitted && !l.Excluded && (!patch.ExportApprovedOnly || l.Approved));
+
     /// <summary>The export map, compared without case like Windows paths (a loaded map has no comparer).</summary>
     private static void ExportMap(DbvoPatch patch)
     {
@@ -669,7 +692,7 @@ public sealed class Phase2Service
         var wl = WavLipFolder(patch, voice);
         var root = FinalRoot(patch, voice);
         var template = FuzTemplate(patch, voice);
-        foreach (var line in patch.Lines.Where(l => !l.IsOmitted && !l.Excluded))
+        foreach (var line in ExportLines(patch))
             foreach (var (_, stem) in ExportTakes(line, voice.Naming))
             {
                 if (!string.IsNullOrWhiteSpace(wl)) { set.Add(ExportKey(Path.Combine(wl, stem + ".wav"))); set.Add(ExportKey(Path.Combine(wl, stem + ".lip"))); }
@@ -715,7 +738,7 @@ public sealed class Phase2Service
         var folder = WavLipFolder(patch, voice);
         if (string.IsNullOrWhiteSpace(folder)) throw new InvalidOperationException("Set the WAV + LIP folder first.");
         ExportMap(patch);
-        foreach (var (line, t, stem) in patch.Lines.Where(l => !l.IsOmitted && !l.Excluded).SelectMany(l => ExportTakes(l, voice.Naming).Select(x => (l, x.Take, x.Stem))))
+        foreach (var (line, t, stem) in ExportLines(patch).SelectMany(l => ExportTakes(l, voice.Naming).Select(x => (l, x.Take, x.Stem))))
         {
             try
             {
@@ -754,7 +777,9 @@ public sealed class Phase2Service
         var template = FuzTemplate(patch, voice);
         if (customFolder == null && string.IsNullOrWhiteSpace(root)) throw new InvalidOperationException("Set the final folder first.");
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
-        var lines = patch.Lines.Where(l => !l.IsOmitted && !l.Excluded).SelectMany(l => ExportTakes(l, voice.Naming).Select(x => (Line: l, x.Take, x.Stem))).ToList();
+        var lines = ExportLines(patch).SelectMany(l => ExportTakes(l, voice.Naming).Select(x => (Line: l, x.Take, x.Stem))).ToList();
+        var cache = new FuzCache(_lib.FuzCacheFolder);
+        var encoder = FuzCache.EncoderId(tools.XwmaEncodePath, 48000);
         int done = 0;
         var gate = new SemaphoreSlim(Math.Max(2, Environment.ProcessorCount / 2));
         var written = new List<(string Target, string TakeId)>();
@@ -779,13 +804,36 @@ public sealed class Phase2Service
                     lock (rep) rep.Skipped++;
                     return;
                 }
-                using var work = new WorkFolder(workRoot);
                 var t = take;
-                var wav = work.File("a.wav");
-                File.Copy(Path.Combine(_lib.PatchFolder(patch.Id), t.WavPath), wav, true);
-                var xwm = work.File("a.xwm");
-                await tools.ToXwmaAsync(wav, xwm, 48000, ct);
-                var fuz = FuzFile.Build(await File.ReadAllBytesAsync(Path.Combine(_lib.PatchFolder(patch.Id), t.LipPath), ct), await File.ReadAllBytesAsync(xwm, ct));
+                var pf = _lib.PatchFolder(patch.Id);
+                byte[] fuz;
+                var original = t.OriginalFuz != null ? Path.Combine(pf, t.OriginalFuz) : null;
+                if (original != null && File.Exists(original))
+                {
+                    fuz = await File.ReadAllBytesAsync(original, ct); // imported audio: as it was, no second encode
+                    lock (rep) rep.Reused++;
+                }
+                else
+                {
+                    var wavPath = Path.Combine(pf, t.WavPath);
+                    var lipBytes = await File.ReadAllBytesAsync(Path.Combine(pf, t.LipPath), ct);
+                    var key = FuzCache.Key(await File.ReadAllBytesAsync(wavPath, ct), lipBytes, encoder);
+                    if (cache.TryGet(key) is { } hit)
+                    {
+                        fuz = hit;
+                        lock (rep) rep.Cached++;
+                    }
+                    else
+                    {
+                        using var work = new WorkFolder(workRoot);
+                        var wav = work.File("a.wav");
+                        File.Copy(wavPath, wav, true);
+                        var xwm = work.File("a.xwm");
+                        await tools.ToXwmaAsync(wav, xwm, 48000, ct);
+                        fuz = FuzFile.Build(lipBytes, await File.ReadAllBytesAsync(xwm, ct));
+                        cache.Put(key, fuz);
+                    }
+                }
                 var first = needed[0];
                 Directory.CreateDirectory(Path.GetDirectoryName(first)!);
                 await File.WriteAllBytesAsync(first, fuz, ct);

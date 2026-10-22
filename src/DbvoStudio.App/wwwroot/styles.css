@@ -557,3 +557,26 @@ html.has-bg .view.work, html.has-bg .view.help-page { background: var(--bg); }
 /* The Global Settings sidebar matches the page header above it: the same see-through shade */
 html.has-bg .subnav { background: color-mix(in srgb, var(--panel) 86%, transparent); backdrop-filter: blur(8px); }
 .tool-top .section-head, .tool-bottom .section-head { min-height: 58px; padding-top: 8px; padding-bottom: 8px; }
+
+/* 7.0: recorder, review mode, QA badges */
+.rec-line { font-size: 15px; line-height: 1.45; }
+.rec-meter { flex: 1; height: 10px; border-radius: 5px; background: var(--raised); overflow: hidden; min-width: 120px; }
+.rec-meter i { display: block; height: 100%; width: 0; background: var(--ok); transition: width 60ms linear; }
+.rec-meter i.hot { background: var(--bad); }
+.rec-clock { font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+.rec-trim { display: flex; flex-direction: column; gap: 6px; }
+.rec-trim .row > span:first-child { width: 40px; }
+.rec-trim input[type=range] { flex: 1; }
+.review-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 8px 18px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--ok) 10%, var(--bg)); }
+.review-bar kbd { font: inherit; font-size: 11.5px; padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--panel); }
+.vrow.approved { box-shadow: inset 3px 0 0 var(--ok); }
+.vrow.approved.focus { box-shadow: inset 3px 0 0 var(--ok), inset 0 0 0 1px var(--accent); }
+.qa-badge { font-size: 12px; line-height: 16px; padding: 0 2px; cursor: help; white-space: nowrap; }
+.qa-badge.bad { color: var(--warn); font-weight: 700; }
+.qa-badge.ok { color: var(--ok); }
+.take .qa { font-size: 12px; }
+.csv-list { max-height: 55vh; overflow: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.csv-row { display: flex; gap: 10px; align-items: flex-start; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.csv-row:hover { background: var(--panel); }
+.csv-row input { margin-top: 3px; }
+.btn.review-on { border-color: var(--ok); color: var(--ok); }

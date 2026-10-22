@@ -326,6 +326,7 @@ public sealed partial class Backend
                     if (p.TryGetProperty("overwriteWavLip", out var ow) && ow.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteWavLip = ow.GetBoolean();
                     if (p.TryGetProperty("overwriteFuz", out var of) && of.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteFuz = of.GetBoolean();
                     if (p.TryGetProperty("overwriteFix", out var ox) && ox.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteFix = ox.GetBoolean();
+                    if (p.TryGetProperty("exportApprovedOnly", out var ea) && ea.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.ExportApprovedOnly = ea.GetBoolean();
                     _lib.Save(patch);
                     new Phase2Service(_lib, Runtime()).Sync(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods());
                     return PatchDto(patch);
@@ -377,6 +378,8 @@ public sealed partial class Backend
             default:
                 var extra = await DispatchExtra(m, p);
                 if (extra != NotHandled) return extra;
+                var v70 = await DispatchV70(m, p);
+                if (v70 != NotHandled) return v70;
                 var rv = await DispatchRevoice(m, p, dropped);
                 if (rv != NotHandled) return rv;
                 throw new InvalidOperationException("Unknown action: " + m);
@@ -827,7 +830,7 @@ public sealed partial class Backend
         {
             patch.Id, patch.Name, patch.VoicePackId, patch.ModIds, patch.ReferenceIds, patch.WavLipFolder, patch.FinalRoot,
             fuzTemplate = voice == null ? patch.FuzTemplate : Phase2Service.ResolveFuzTemplate(patch, voice),
-            patch.OverwriteWavLip, patch.OverwriteFuz, patch.OverwriteFix, patch.FixFolder, patch.Kind, patch.SourceFolders, patch.LastFuzUtc, patch.TtsForMissing,
+            patch.OverwriteWavLip, patch.OverwriteFuz, patch.OverwriteFix, patch.FixFolder, patch.Kind, patch.SourceFolders, patch.LastFuzUtc, patch.TtsForMissing, patch.ExportApprovedOnly,
             voiceName = voice?.Name ?? "", voiceColor = voice?.Color ?? "",
             category = mods.FirstOrDefault(m => patch.ModIds.Contains(m.Id))?.Category ?? "Misc",
             mediaBase = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, _lib.PatchFolder(patch.Id)).Replace('\\', '/') + "/",
@@ -839,14 +842,14 @@ public sealed partial class Backend
     private static object Line2Dto(Phase2Line l, VoicePack? v) => new
     {
         l.LineId, l.FinalLine, l.OriginalLine, l.Spoken, l.SpokenEdited, status = l.Status.ToString(), l.OmittedBy, l.OverrideOmit,
-        omitted = l.IsOmitted, l.LastError, l.TagSuggestion, l.SelectedTakeId, l.Marked, excluded = l.Excluded, undo = l.UndoSpoken != null,
+        omitted = l.IsOmitted, l.LastError, l.TagSuggestion, l.SelectedTakeId, l.Marked, excluded = l.Excluded, undo = l.UndoSpoken != null, approved = l.Approved,
         hasSource = l.SourceWav != null, sourceWav = l.SourceWav,
         stem = v == null ? "" : LineNaming.Stem(l.FinalLine, v.Naming),
         legacyName = LineNaming.Legacy(l.FinalLine),
         differs = l.SpokenDiffersFromFinal, editedInPhase1 = l.EditedInPhase1,
         stale = l.SelectedTake != null && l.SelectedTake.SpokenText != l.Spoken,
         sources = l.Sources.Select(s => new { s.ModId, s.Plugin, formId = s.FormId.ToString("X8"), field = s.Field.ToString() }),
-        takes = l.Takes.Select(t => new { t.Id, t.Slot, t.CreatedUtc, t.SpokenText, t.Settings, wav = t.WavPath.Replace('\\', '/'), t.DurationSeconds, kept = t.Kept }),
+        takes = l.Takes.Select(t => new { t.Id, t.Slot, t.CreatedUtc, t.SpokenText, t.Settings, wav = t.WavPath.Replace('\\', '/'), t.DurationSeconds, kept = t.Kept, t.Qa, original = t.OriginalFuz != null }),
     };
 
     private object UpdatePhase2Line(JsonElement p)
@@ -917,6 +920,9 @@ public sealed partial class Backend
                 break;
             case "mark":
                 line.Marked = B(p, "value");
+                break;
+            case "approve":
+                line.Approved = B(p, "value") && line.Takes.Count > 0;
                 break;
             default: throw new InvalidOperationException("Unknown line action.");
         }

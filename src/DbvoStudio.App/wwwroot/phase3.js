@@ -278,6 +278,8 @@ export async function fomodView(id) {
         srow('FOMOD root folder', 'The folder that holds your patch folders and images. Relative file sources start here.', pathIn('rootFolder', 'FOMOD root folder')),
         srow('Release folder', 'The packed archive is written here, named from the mod name and version.', pathIn('releaseFolder', 'Release folder')),
         srow('Archive', '.zip needs nothing; .7z uses 7-Zip (Global Settings).', segmented([['zip', '.zip'], ['7z', '.7z']], proj.archiveFormat, (x) => { proj.archiveFormat = x; changed(); renderEditor(); renderHead(); })),
+        srow('Voice files', 'Loose files: thousands of .fuz files, as before. BSA: each option installs one archive plus the plugin that loads it (its DBVO Fix plugin, or a small empty light plugin), which installs faster and keeps the Data folder tidy. The option must be active in the load order for the game to read the BSA.',
+          h('div.row', segmented([['loose', 'Loose files'], ['bsa', 'Pack as BSA']], proj.packBsa ? 'bsa' : 'loose', (x) => { proj.packBsa = x === 'bsa'; changed(); renderEditor(); }), helpButton('pack-as-bsa'))),
         srow('XML encoding', 'UTF-16 is what FOMOD Creation Tool writes; both work in MO2 and Vortex.', segmented([['utf-16', 'UTF-16'], ['utf-8', 'UTF-8']], proj.encoding, (x) => { proj.encoding = x; changed(); renderEditor(); })),
         srow('Title in the installer', 'moduleName in ModuleConfig.xml.', txt(proj, 'moduleName')),
         srow('Header image', 'moduleImage: shown at the top of every page.', imagePicker(proj, 'moduleImage'))),

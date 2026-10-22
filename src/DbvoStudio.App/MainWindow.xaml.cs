@@ -34,6 +34,12 @@ public partial class MainWindow : Window
             core.Settings.IsZoomControlEnabled = true;
             core.Settings.AreDefaultContextMenusEnabled = true;
             core.WebMessageReceived += OnMessage;
+            // Recording takes: the app's own pages may use the microphone without a browser prompt; nothing else can.
+            core.PermissionRequested += (_, e) =>
+            {
+                if (e.PermissionKind == CoreWebView2PermissionKind.Microphone)
+                    e.State = e.Uri.StartsWith("https://app.dbvo/", StringComparison.OrdinalIgnoreCase) ? CoreWebView2PermissionState.Allow : CoreWebView2PermissionState.Deny;
+            };
             core.NavigationCompleted += (_, _) => Loading.Visibility = Visibility.Collapsed;
             core.Navigate("https://app.dbvo/index.html");
         }

@@ -145,6 +145,17 @@ public static class FixPluginWriter
         s.Write(contents);
     }
 
+    /// <summary>
+    /// An empty light (ESL-flagged) plugin. Skyrim loads "&lt;plugin&gt;.bsa" next to an active plugin of the same name,
+    /// so this is all a voice archive needs to be read in game.
+    /// </summary>
+    public static void WriteLoader(string path)
+    {
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
+        using var fs = File.Create(path);
+        WriteHeader(fs, new List<string>(), 0);
+    }
+
     private static void WriteHeader(Stream s, List<string> masters, int recordCount)
     {
         var subs = new List<Subrecord>();

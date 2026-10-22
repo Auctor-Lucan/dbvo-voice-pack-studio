@@ -195,6 +195,43 @@ second line</description>
     }
 
     [Fact]
+    public async Task Pack_as_bsa_puts_each_options_sound_in_a_bsa_next_to_its_plugin()
+    {
+        var root = Path.Combine(_dir, "rootbsa");
+        Directory.CreateDirectory(Path.Combine(root, "Inigo", "Sound", "DBVO", "myvoice"));
+        File.WriteAllText(Path.Combine(root, "Inigo", "Sound", "DBVO", "myvoice", "Hello.fuz"), "fuz1");
+        File.WriteAllText(Path.Combine(root, "Inigo", "DBVO Fix - Inigo.esp"), "esp");
+        Directory.CreateDirectory(Path.Combine(root, "Lucien", "Sound", "DBVO", "myvoice"));
+        File.WriteAllText(Path.Combine(root, "Lucien", "Sound", "DBVO", "myvoice", "Bye.fuz"), "fuz2");
+        var voice = new VoicePack { Name = "My Voice", PackId = "MyVoice" };
+        var p = FomodService.NewProject(voice, "My Voice");
+        p.RootFolder = root;
+        p.ReleaseFolder = Path.Combine(_dir, "releasebsa");
+        p.PackBsa = true;
+        var g = FomodService.GroupFor(p, "Followers");
+        g.Options.Add(new FomodOption { Name = "Inigo", Files = { new FomodFile { Kind = "folder", Source = @"Inigo\Sound", Destination = "Sound" },
+            new FomodFile { Kind = "file", Source = @"Inigo\DBVO Fix - Inigo.esp", Destination = "DBVO Fix - Inigo.esp" } } });
+        g.Options.Add(new FomodOption { Name = "Lucien", Files = { new FomodFile { Kind = "folder", Source = @"Lucien\Sound", Destination = "Sound" } } });
+        var svc = new FomodService(new Library(Path.Combine(_dir, "lib")), new AppSettings());
+        var res = await svc.BuildAsync(p, NamingMode.Dbvo2Hash, false);
+        Assert.Equal(2, res.Bsas);
+        // Inigo: its DBVO Fix plugin loads the BSA; Lucien: a small loader plugin
+        using (var bsa = Archives.BsaArchive.Open(Path.Combine(res.Staging, "_bsa", "DBVO Fix - Inigo.bsa")))
+            Assert.Equal("fuz1"u8.ToArray(), bsa.Read(@"sound\dbvo\myvoice\hello.fuz"));
+        Assert.False(File.Exists(Path.Combine(res.Staging, "_bsa", "DBVO Fix - Inigo.esp")));
+        Assert.True(File.Exists(Path.Combine(res.Staging, "_bsa", "DBVO - MyVoice - Lucien.esp")));
+        using (var bsa = Archives.BsaArchive.Open(Path.Combine(res.Staging, "_bsa", "DBVO - MyVoice - Lucien.bsa")))
+            Assert.Equal("fuz2"u8.ToArray(), bsa.Read(@"sound\dbvo\myvoice\bye.fuz"));
+        Assert.False(Directory.Exists(Path.Combine(res.Staging, "Inigo", "Sound"))); // no loose copies
+        var mc = FomodXml.ReadText(Path.Combine(res.Staging, "fomod", "ModuleConfig.xml"));
+        Assert.Contains(@"source=""_bsa\DBVO Fix - Inigo.bsa"" destination=""DBVO Fix - Inigo.bsa""", mc);
+        Assert.Contains(@"source=""Inigo\DBVO Fix - Inigo.esp""", mc);
+        Assert.Contains(@"source=""_bsa\DBVO - MyVoice - Lucien.esp"" destination=""DBVO - MyVoice - Lucien.esp""", mc);
+        Assert.DoesNotContain(@"destination=""Sound""", mc);
+        Assert.DoesNotContain(p.Steps.SelectMany(s => s.Groups).SelectMany(x => x.Options).SelectMany(o => o.Files), f => f.Source.StartsWith("_bsa")); // the project itself is unchanged
+    }
+
+    [Fact]
     public async Task Build_works_when_the_release_folder_is_the_fomod_root()
     {
         var root = Path.Combine(_dir, "root2");

@@ -377,6 +377,27 @@ public sealed class Take
     public double DurationSeconds { get; set; }
     /// <summary>Kept as a variant (DBVO 2.0: every kept take is exported; two or more go to &lt;name&gt;\0, 1, …).</summary>
     public bool Kept { get; set; }
+    /// <summary>
+    /// Relative to the patch folder: the .fuz this take was imported from (a legacy pack or the final folder). Building
+    /// .fuz files reuses it as it is, so imported audio is never encoded a second time.
+    /// </summary>
+    public string? OriginalFuz { get; set; }
+    /// <summary>The last quality check of this take (Check takes), or null.</summary>
+    public TakeQa? Qa { get; set; }
+}
+
+/// <summary>Quality check of one take: what Whisper heard against the line, plus loudness and peak.</summary>
+public sealed class TakeQa
+{
+    public DateTime CheckedUtc { get; set; } = DateTime.UtcNow;
+    /// <summary>0..1: how closely the transcript matches the spoken text (tags and punctuation ignored). Null: not transcribed.</summary>
+    public double? Score { get; set; }
+    public string Heard { get; set; } = "";
+    /// <summary>Integrated loudness (LUFS) and true peak (dBTP).</summary>
+    public double? Lufs { get; set; }
+    public double? TruePeak { get; set; }
+    /// <summary>Short reasons the take was flagged: "words", "quiet", "clipping". Empty: passed.</summary>
+    public List<string> Flags { get; set; } = new();
 }
 
 public sealed class LineSource
@@ -417,6 +438,8 @@ public class Phase2Line
     public string? SourceWav { get; set; }
     /// <summary>Left out of generation and export, and not counted as missing.</summary>
     public bool Excluded { get; set; }
+    /// <summary>Approved in Review: heard and accepted. Only matters with "Export approved lines only".</summary>
+    public bool Approved { get; set; }
     /// <summary>The spoken text before "restore in-game line", so the restore can be undone.</summary>
     public string? UndoSpoken { get; set; }
     /// <summary>File name (without extension) for takes when it is not derived from the line (NPC Revoice: the game's voice file name).</summary>
@@ -473,6 +496,8 @@ public sealed class DbvoPatch
     /// settings. Files of lines no longer exported (excluded, removed, renamed) can be cleaned up.
     /// </summary>
     public Dictionary<string, string> Exported { get; set; } = new();
+    /// <summary>Export (WAV + LIP and .fuz) only lines approved in Review. Off: every generated line.</summary>
+    public bool ExportApprovedOnly { get; set; }
     public List<Phase2Line> Lines { get; set; } = new();
     /// <summary>Lines no longer in Phase 1 that have takes: kept (hidden) so the takes come back if the line returns.</summary>
     public List<Phase2Line> Parked { get; set; } = new();

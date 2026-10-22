@@ -63,6 +63,8 @@ public sealed class BuildResult
     public string? Archive { get; set; }
     public int Files { get; set; }
     public int Linked { get; set; }
+    /// <summary>BSA archives packed (Pack as BSA).</summary>
+    public int Bsas { get; set; }
     public List<string> Warnings { get; set; } = new();
 }
 
@@ -538,6 +540,43 @@ public sealed class FomodService
             }
         }
 
+        // BSA: each option's Sound folder(s) become "<plugin>.bsa" next to the plugin that loads it.
+        var bsaJobs = new List<(string Base, List<string> Folders, bool MakeLoader, string Option)>();
+        if (p.PackBsa)
+        {
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var o in withJson.AllOptions())
+            {
+                var sound = o.Files.Where(f => f.Kind == "folder" && f.Destination.Trim('\\', '/').Equals("Sound", StringComparison.OrdinalIgnoreCase)).ToList();
+                if (sound.Count == 0) continue;
+                var folders = sound.Select(f => Resolve(p, f.Source)).Where(Directory.Exists).ToList();
+                if (folders.Count == 0) continue;
+                long bytes = folders.Sum(d => Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length));
+                if (bytes > Archives.BsaWriter.MaxDataBytes)
+                {
+                    res.Warnings.Add($"{o.Name}: {bytes / 1_000_000} MB of audio is too much for one BSA; installed as loose files.");
+                    continue;
+                }
+                var fix = o.Files.FirstOrDefault(f => f.Kind == "file" && f.Destination.StartsWith(FixPluginWriterPrefix, StringComparison.OrdinalIgnoreCase)
+                                                     && f.Destination.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) && !f.Destination.Contains('\\'));
+                string baseName = fix != null && usedNames.Add(Path.GetFileNameWithoutExtension(fix.Destination))
+                    ? Path.GetFileNameWithoutExtension(fix.Destination)
+                    : UniqueName(usedNames, SafeName($"DBVO - {(string.IsNullOrWhiteSpace(p.Json.VoicePackId) ? p.Name : p.Json.VoicePackId)} - {o.Name}"));
+                bool loader = fix == null || !Path.GetFileNameWithoutExtension(fix.Destination).Equals(baseName, StringComparison.OrdinalIgnoreCase);
+                foreach (var f in sound) o.Files.Remove(f);
+                var bsaRel = "_bsa\\" + baseName + ".bsa";
+                o.Files.Add(new FomodFile { Kind = "file", Source = bsaRel, Destination = baseName + ".bsa" });
+                mapped[bsaRel + "|False"] = bsaRel;
+                if (loader)
+                {
+                    var espRel = "_bsa\\" + baseName + ".esp";
+                    o.Files.Add(new FomodFile { Kind = "file", Source = espRel, Destination = baseName + ".esp" });
+                    mapped[espRel + "|False"] = espRel;
+                }
+                bsaJobs.Add((baseName, folders, loader, o.Name));
+            }
+        }
+
         var moduleConfig = FomodXml.WriteModuleConfig(withJson, s => mapped.TryGetValue(s + "|True", out var hit) ? hit : MapSource(s), MapImage);
         var info = FomodXml.WriteInfo(withJson);
         await File.WriteAllBytesAsync(Path.Combine(staging, "fomod", "ModuleConfig.xml"), FomodXml.Encode(moduleConfig, p.Encoding), ct);
@@ -581,6 +620,19 @@ public sealed class FomodService
             if (++done % 25 == 0 || done == pairs.Count)
                 progress?.Report(new GenerationProgress(done, pairs.Count, 0, Path.GetFileName(from), "Staging files"));
         }
+        for (int b = 0; b < bsaJobs.Count; b++)
+        {
+            var (baseName, folders, loader, option) = bsaJobs[b];
+            progress?.Report(new GenerationProgress(b, bsaJobs.Count, 0, baseName + ".bsa", "Packing BSA archives"));
+            var entries = folders.SelectMany(d => Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories).Where(f => !InRelease(f))
+                .Select(f => new Archives.BsaWriter.Entry("sound\\" + Path.GetRelativePath(d, f), f))).ToList();
+            var bsa = Path.Combine(staging, "_bsa", baseName + ".bsa");
+            await Task.Run(() => Archives.BsaWriter.Write(bsa, entries, ct), ct);
+            if (loader) Plugins.FixPluginWriter.WriteLoader(Path.Combine(staging, "_bsa", baseName + ".esp"));
+            res.Files += loader ? 2 : 1;
+            res.Bsas++;
+        }
+
         if (copies > 0 && res.Linked == 0 && copies > 50)
             res.Warnings.Add($"{copies} files were copied instead of hardlinked (the release folder is on another drive than the sources?). The build is correct, just slower and larger on disk.");
 
@@ -635,6 +687,13 @@ public sealed class FomodService
         }
         p.LastBuildUtc = DateTime.UtcNow;
         return res;
+    }
+
+    private static string UniqueName(HashSet<string> used, string name)
+    {
+        var n = name;
+        for (int i = 2; !used.Add(n); i++) n = $"{name} {i}";
+        return n;
     }
 
     private static FomodProject Clone(FomodProject p) =>

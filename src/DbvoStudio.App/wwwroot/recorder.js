@@ -1,0 +1,141 @@
+// Record a take with the microphone: record, listen, trim, then keep it as it is or convert it into the voice pack's
+// voice with the Voice Changer (ElevenLabs speech-to-speech), when that is set up.
+import { rpc, h, clear, toast, fail, modal } from './lib.js';
+
+const fmt = (s) => (Math.max(0, s) || 0).toFixed(2) + ' s';
+
+/** Opens the recorder for one line. Resolves to the updated line (or null when nothing was kept). */
+export async function recordTake({ patchId, line, onSaved }) {
+  const target = await rpc('patch.recordTarget', { id: patchId }).catch(() => ({ ready: false, why: '' }));
+  let stream = null, rec = null, chunks = [], blob = null, url = null, startT = 0, raf = 0, timer = 0, saved = null;
+  const audio = new Audio();
+  const meter = h('div.rec-meter', h('i'));
+  const clock = h('span.rec-clock', '0.00 s');
+  const recBtn = h('button.btn.primary.rec-btn', { title: 'Start recording (the line stays on screen to read from)' }, '● Record');
+  const status = h('div.faint', 'Press Record and read the line. Speak close to the microphone; a quiet room helps.');
+  const startIn = h('input', { type: 'range', min: 0, max: 0, step: 0.01, value: 0 });
+  const endIn = h('input', { type: 'range', min: 0, max: 0, step: 0.01, value: 0 });
+  const startLbl = h('span.mono', '0.00 s'), endLbl = h('span.mono', '0.00 s');
+  const trim = h('div.rec-trim.hidden',
+    h('div.row', h('span.faint', 'Start'), startIn, startLbl),
+    h('div.row', h('span.faint', 'End'), endIn, endLbl),
+    h('div.row', h('button.btn.sm', { title: 'Play from Start to End', onclick: () => playSel() }, '▶ Play selection'), h('button.btn.sm.ghost', { title: 'Back to the whole recording', onclick: () => { startIn.value = 0; endIn.value = endIn.max; syncLbl(); } }, 'Reset trim')));
+  const keepBtn = h('button.btn', { disabled: true, title: 'Keep your own voice as a new take (a .lip is made from the line)' }, 'Keep my recording');
+  const convBtn = h('button.btn.primary', { disabled: true, title: target.ready ? `Convert the recording into ${target.voiceName} with the Voice Changer (ElevenLabs speech-to-speech), then keep it as a new take. Billed by audio length.` : target.why || 'The Voice Changer is not set up.' },
+    `Convert to ${target.voiceName || 'the voice pack voice'} and keep`);
+  const actions = h('div.row', { style: { flexWrap: 'wrap' } }, keepBtn, convBtn, h('div.spacer'), h('button.btn.ghost', { title: 'Throw this recording away', onclick: () => discard() }, 'Discard'));
+
+  const syncLbl = () => {
+    if (+startIn.value > +endIn.value - 0.05) startIn.value = Math.max(0, +endIn.value - 0.05);
+    startLbl.textContent = fmt(+startIn.value);
+    endLbl.textContent = fmt(+endIn.value);
+  };
+  startIn.addEventListener('input', syncLbl);
+  endIn.addEventListener('input', syncLbl);
+
+  function playSel() {
+    if (!url) return;
+    audio.src = url;
+    audio.currentTime = +startIn.value;
+    const stopAt = +endIn.value;
+    const tick = () => { if (audio.currentTime >= stopAt) { audio.pause(); audio.removeEventListener('timeupdate', tick); } };
+    audio.addEventListener('timeupdate', tick);
+    audio.play().catch(fail);
+  }
+
+  function discard() {
+    blob = null; if (url) URL.revokeObjectURL(url); url = null;
+    trim.classList.add('hidden'); keepBtn.disabled = true; convBtn.disabled = true;
+    clock.textContent = '0.00 s';
+    status.textContent = 'Recording discarded. Press Record to try again.';
+  }
+
+  async function startRec() {
+    try {
+      if (!stream) stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    } catch (e) { status.textContent = 'No microphone available: ' + (e.message || e) + '. Check Windows Settings → Privacy → Microphone.'; return; }
+    discard();
+    const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'].find((t) => MediaRecorder.isTypeSupported(t)) || '';
+    rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    chunks = [];
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    rec.onstop = () => {
+      blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+      url = URL.createObjectURL(blob);
+      const dur = (performance.now() - startT) / 1000;
+      startIn.max = endIn.max = dur.toFixed(2); startIn.value = 0; endIn.value = dur.toFixed(2); syncLbl();
+      trim.classList.remove('hidden');
+      keepBtn.disabled = false; convBtn.disabled = !target.ready;
+      status.textContent = 'Listen, trim the start and end if needed, then keep it.';
+      audio.src = url; audio.play().catch(() => {});
+    };
+    // level meter
+    const ctx = new AudioContext();
+    const an = ctx.createAnalyser(); an.fftSize = 1024;
+    ctx.createMediaStreamSource(stream).connect(an);
+    const buf = new Float32Array(an.fftSize);
+    const bar = meter.firstChild;
+    const draw = () => {
+      an.getFloatTimeDomainData(buf);
+      let peak = 0; for (const x of buf) peak = Math.max(peak, Math.abs(x));
+      bar.style.width = Math.min(100, peak * 100) + '%';
+      bar.classList.toggle('hot', peak > 0.97);
+      raf = requestAnimationFrame(draw);
+    };
+    draw();
+    rec.start(200);
+    startT = performance.now();
+    timer = setInterval(() => { clock.textContent = fmt((performance.now() - startT) / 1000); }, 50);
+    recBtn.textContent = '■ Stop';
+    recBtn.classList.add('danger');
+    status.textContent = 'Recording… read the line, then press Stop.';
+    recBtn.onclick = stopRec;
+    stopRec.ctx = ctx;
+  }
+  function stopRec() {
+    if (rec && rec.state !== 'inactive') rec.stop();
+    clearInterval(timer); cancelAnimationFrame(raf);
+    if (stopRec.ctx) stopRec.ctx.close().catch(() => {});
+    meter.firstChild.style.width = '0%';
+    recBtn.textContent = '● Record again';
+    recBtn.classList.remove('danger');
+    recBtn.onclick = startRec;
+  }
+  recBtn.onclick = startRec;
+
+  async function keep(convert) {
+    if (!blob) return;
+    keepBtn.disabled = convBtn.disabled = recBtn.disabled = true;
+    status.textContent = convert ? `Converting to ${target.voiceName} and making the .lip…` : 'Saving and making the .lip…';
+    try {
+      const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
+      const ext = (blob.type || '').includes('ogg') ? '.ogg' : '.webm';
+      const r = await rpc('patch.record', { id: patchId, lineId: line.lineId, data, ext, start: +startIn.value, end: +endIn.value, convert });
+      saved = r.line;
+      if (onSaved) onSaved(r.line, r.takeId);
+      toast(convert ? 'Converted and kept as a new take.' : 'Recording kept as a new take.');
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); // closes the recorder
+    } catch (e) {
+      fail(e);
+      status.textContent = 'Not saved: ' + (e.message || e);
+      keepBtn.disabled = false; convBtn.disabled = !target.ready; recBtn.disabled = false;
+    }
+  }
+  keepBtn.onclick = () => keep(false);
+  convBtn.onclick = () => keep(true);
+
+  await modal('Record this line', [
+    h('div.box.rec-line', line.spoken || line.finalLine),
+    h('div.row', recBtn, meter, clock),
+    status, trim,
+    target.ready ? h('div.faint', `Voice Changer: ${target.voiceName}. Your delivery and timing are kept; only the voice changes.`) : h('div.faint', target.why),
+    actions,
+  ], [{ label: 'Close', value: null }], { help: 'recording-a-take' });
+  // closed: release the microphone
+  if (rec && rec.state !== 'inactive') { try { rec.stop(); } catch { /* already stopped */ } }
+  clearInterval(timer); cancelAnimationFrame(raf);
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  audio.pause();
+  if (url) URL.revokeObjectURL(url);
+  return saved;
+}
