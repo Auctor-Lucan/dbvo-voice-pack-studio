@@ -142,6 +142,7 @@ public sealed class RevoiceProject
     public bool ReferenceByEditorId { get; set; } = true;
     /// <summary>Use the game's original audio as the Voice Changer source instead of text-to-speech.</summary>
     public bool VoiceChanger { get; set; }
+    /// <summary>No longer used (the Voice Changer no longer asks first); kept so older project files load unchanged.</summary>
     public bool VoiceChangerWarningAccepted { get; set; }
     public bool EmotionTags { get; set; } = true;
     public List<RevoiceLine> Lines { get; set; } = new();

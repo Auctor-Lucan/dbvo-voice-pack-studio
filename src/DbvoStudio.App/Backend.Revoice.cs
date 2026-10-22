@@ -92,12 +92,7 @@ public sealed partial class Backend
                     proj.VoiceTypePlugin = S(p, "voiceTypePlugin", proj.VoiceTypePlugin);
                     if (NB(p, "emotionTags") is { } et) proj.EmotionTags = et;
                     if (NB(p, "referenceByEditorId") is { } re) proj.ReferenceByEditorId = re;
-                    if (NB(p, "voiceChangerWarningAccepted") is { } wa) proj.VoiceChangerWarningAccepted = wa;
-                    if (NB(p, "voiceChanger") is { } vc)
-                    {
-                        if (vc && !proj.VoiceChangerWarningAccepted) throw new InvalidOperationException("Read and accept the Voice Changer warning first.");
-                        proj.VoiceChanger = vc;
-                    }
+                    if (NB(p, "voiceChanger") is { } vc) proj.VoiceChanger = vc;
                     if (NB(p, "useBaseGame") is { } bg && bg != proj.UseBaseGame) { proj.UseBaseGame = bg; RvService().ApplyBaseGame(proj); }
                     if (B(p, "refreshBaseGame")) RvService().ApplyBaseGame(proj);
                     if (p.TryGetProperty("voice", out var vs) && vs.ValueKind == JsonValueKind.Object)
@@ -472,7 +467,7 @@ public sealed partial class Backend
         return new
         {
             proj.Id, proj.Name, proj.OutputFolder, proj.UseBaseGame, proj.Language, proj.EmotionTags, proj.ReferenceByEditorId,
-            proj.VoiceChanger, proj.VoiceChangerWarningAccepted, voice = proj.Voice, voiceTypePlugin = RvService().PluginName(proj),
+            proj.VoiceChanger, voice = proj.Voice, voiceTypePlugin = RvService().PluginName(proj),
             plugins = proj.Plugins.Select(x => new { x.Path, x.FileName, x.Target, x.BaseGame, exists = File.Exists(x.Path) }),
             sources = proj.Sources.OrderByDescending(x => x.Priority).Select(x => new { x.Id, x.Kind, x.Path, x.Priority, x.BaseGame, exists = x.Kind == "folder" ? Directory.Exists(x.Path) : File.Exists(x.Path) }),
             baseGameFolder = RevoiceService.DataFolder(_settings.BaseGameFolder),

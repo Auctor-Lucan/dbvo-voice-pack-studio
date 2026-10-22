@@ -83,27 +83,14 @@ export async function revoiceView(id) {
       tabs,
       helpButton({ setup: 'setup', speakers: 'speakers', lines: 'lines', voicetypes: 'new-voice-types-optional' }[tab] || 'npc-revoice-tool'),
       h('div.spacer'),
-      switchEl(proj.voiceChanger, toggleVc, 'Voice Changer', { title: 'Convert the game\'s current recordings instead of text-to-speech. Not for uploading: see the warning.' }),
+      switchEl(proj.voiceChanger, toggleVc, 'Voice Changer', { title: 'Convert the game\'s current recordings into the new voice instead of text-to-speech' }),
       h('button.btn', { title: 'Read the plugins and voice sources again and rebuild the line list (keeps your takes and edits)', disabled: !!app.job, onclick: scan }, proj.lastScan ? '⟳ Rescan' : 'Scan'),
       exp,
       h('button.btn.ghost.danger.sm', { title: 'Delete this project and its takes (exported files stay)', onclick: async () => { if (await confirmBox('Delete revoice project?', 'Deletes its takes too. Exported files stay where they are.', 'Delete', true)) { try { await rpc('revoice.delete', { id }); go('revoices'); } catch (e) { fail(e); } } } }, 'Delete'));
   }
 
   async function toggleVc(on) {
-    if (!on) { await save({ voiceChanger: false }); return; }
-    if (!proj.voiceChangerWarningAccepted) {
-      const tick = h('input', { type: 'checkbox' });
-      const ok = await modal('Voice Changer on other people\'s recordings', [
-        h('div.help.bad',
-          h('p', h('b', 'These lines were performed by voice actors. '), 'Converting their performances without their consent must not be uploaded to Nexus Mods or used commercially.'),
-          h('p', 'Even for private use in your own modlist, check ElevenLabs\' terms and your local law; that responsibility is yours.'),
-          h('p', 'To publish, generate from text with a voice you have the rights to (turn the Voice Changer off).')),
-        h('label.row', tick, 'I have read this'),
-      ], [{ label: 'Cancel', value: false }, { label: 'Turn on', primary: true, value: () => tick.checked }], { help: 'voice-changer-and-export' });
-      if (!ok) { toast(ok === false ? 'Voice Changer stays off.' : 'Tick "I have read this" to continue.', ok !== false); renderHead(); return; }
-      await save({ voiceChangerWarningAccepted: true });
-    }
-    await save({ voiceChanger: true });
+    await save({ voiceChanger: on });
   }
 
   async function save(o) {
