@@ -554,4 +554,6 @@ html.has-bg .vgrid { background: var(--bg); }
 .has-bg .home-start > .home-lbl { color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, .7); }
 /* Pages you work in (a mod's lines, a patch, a revoice project, the FOMOD editor, the guide) stay solid over a background image */
 html.has-bg .view.work, html.has-bg .view.help-page { background: var(--bg); }
+/* The Global Settings sidebar matches the page header above it: the same see-through shade */
+html.has-bg .subnav { background: color-mix(in srgb, var(--panel) 86%, transparent); backdrop-filter: blur(8px); }
 .tool-top .section-head, .tool-bottom .section-head { min-height: 58px; padding-top: 8px; padding-bottom: 8px; }
