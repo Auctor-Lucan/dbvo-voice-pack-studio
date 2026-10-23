@@ -133,9 +133,9 @@ export async function homeView() {
   const items = recentItems(s, revoices, books);
   const bottom = h('section.home-recent', h('div.home-lbl', 'Pick up where you left off'),
     items.length ? h('div.home-rcs', items.map((x) => h('button.home-rc', { style: { '--c': x.color }, title: 'Open ' + x.name, onclick: () => go(x.view, { id: x.id }) },
-      h('b.ellipsis', x.name), h('small.ellipsis', x.sub),
-      h('span.home-bar', h('i', { style: { width: (x.total ? Math.round((100 * x.done) / x.total) : 0) + '%', background: x.total && x.done >= x.total ? 'var(--ok)' : x.color } })),
-      h('span.home-ct', x.count))))
+      h('span.rc-top', h('b.ellipsis', x.name), h('span.home-ct', x.count)),
+      h('span.rc-bot', h('small.ellipsis', x.sub),
+        h('span.home-bar', h('i', { style: { width: (x.total ? Math.round((100 * x.done) / x.total) : 0) + '%', background: x.total && x.done >= x.total ? 'var(--ok)' : x.color } }))))))
       : h('div.faint', 'Nothing yet. Start with one of the options above; your work shows up here.'));
 
   view.append(h('div.home-top', left, right), bottom);
@@ -162,8 +162,8 @@ function recentItems(s, revoices, books = []) {
   for (const b of books) {
     all.push({ view: 'book', id: b.id, name: b.name, sub: `Voiced Books · ${b.books} books`, done: b.generated, total: b.lines, count: `${b.generated} / ${b.lines} parts`, color: '#e3b341' });
   }
-  // Most recently opened first; then the rest in the order above (patches before mods), four in all.
+  // Most recently opened first; then the rest in the order above (patches before mods), eight in all (two rows).
   const order = store.get(RECENT_KEY, []);
   const rank = (x) => { const i = order.findIndex((r) => r.view === x.view && r.id === x.id); return i < 0 ? 1000 : i; };
-  return all.map((x, i) => ({ x, i })).sort((a, b) => rank(a.x) - rank(b.x) || a.i - b.i).slice(0, 4).map((y) => y.x);
+  return all.map((x, i) => ({ x, i })).sort((a, b) => rank(a.x) - rank(b.x) || a.i - b.i).slice(0, 8).map((y) => y.x);
 }

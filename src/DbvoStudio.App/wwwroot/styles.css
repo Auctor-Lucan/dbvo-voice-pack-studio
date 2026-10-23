@@ -766,3 +766,12 @@ mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: in
 /* Other Tools: always a blue button, like + New DBVO Patch */
 #tools-btn, #tools-btn.active { background: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--on-accent); box-shadow: none; }
 #tools-btn:hover { background: var(--accent); color: var(--on-accent); }
+/* Pick up where you left off: two rows of compact cards in the same space */
+.home-recent { padding-top: 14px; padding-bottom: 16px; }
+.home-rcs { gap: 8px 12px; }
+.home-rc { gap: 4px; padding: 7px 12px; }
+.rc-top, .rc-bot { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.rc-top b { flex: 1; min-width: 0; }
+.rc-bot small { flex: 0 1 auto; max-width: 55%; font-size: 12px; }
+.rc-bot .home-bar { flex: 1; min-width: 40px; }
+.home-rc .home-ct { white-space: nowrap; }
