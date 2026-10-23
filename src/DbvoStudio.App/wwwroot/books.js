@@ -171,7 +171,7 @@ export async function bookProjectView(id) {
           : h('div.banner.warn', { style: { margin: 0 } }, 'Without the base game folder the editor shows only the spoken text, and the checks against the game text are off. Generating and exporting work.'));
     } else {
       const drop = h('div.dropzone', h('div', h('b', 'Drop plugins (.esp / .esm / .esl), their .bsa archives or a mod folder here')),
-        h('div.faint', 'Books defined or changed by the plugins you tick are read. Masters only provide NPC records and voice types. Strings come from a Strings folder or an archive next to the plugin.'),
+        h('div.faint', 'Books defined or changed by the plugins you tick are read. Also add every required master a patch changes books from: a book record belongs to the plugin it originates in, the .ini names that plugin, and without it the book is silent. Masters also provide NPC records and voice types. Strings come from a Strings folder or an archive next to the plugin.'),
         h('div.row', { style: { justifyContent: 'center', marginTop: '10px' } },
           h('button.btn.sm', { title: 'Add plugins', onclick: async () => add(await rpc('pick.files', { title: 'Plugins with books', filter: 'Plugins|*.esp;*.esm;*.esl' })) }, 'Add plugins…'),
           h('button.btn.sm', { title: 'Add a mod folder', onclick: async () => { const f = await rpc('pick.folder', { title: 'Mod folder' }); if (f) add([f]); } }, 'Add folder…')));
@@ -181,7 +181,15 @@ export async function bookProjectView(id) {
       textsBody = h('div.col', { style: { padding: '10px 0' } }, drop,
         ls ? h('div.stat-row', h('span', h('b', ls.books.toLocaleString()), ' books'), h('span', h('b', String(ls.records)), ' records'), ls.merged ? h('span', { title: 'Records with exactly the same text share one audio file' }, h('b', String(ls.merged)), ' shared texts') : null,
           h('span', h('b', String(ls.excluded)), ' left out'), h('span', h('b', String(ls.npc)), ' read by NPC voices'), h('span.faint', 'scanned ' + new Date(ls.scannedUtc).toLocaleString())) : h('div.dim', 'Not scanned yet. Add the plugins, then Scan.'),
-        ls && ls.missingMasters.length ? h('div.banner.warn', { style: { margin: 0 } }, 'Missing masters: ' + ls.missingMasters.join(', ') + '. NPC records from them are unknown, so authors there can\'t be matched. Drop them in, or set the base game folder.') : null,
+        ls && ls.missingMasters.length ? (() => {
+          const miss = new Set(ls.missingMasters.map((m) => m.toLowerCase()));
+          const owned = proj.books.filter((b) => miss.has(String(b.plugin || '').toLowerCase()));
+          const from = [...new Set(owned.map((b) => b.plugin))];
+          return h('div.banner.' + (owned.length ? 'bad' : 'warn'), { style: { margin: 0, display: 'block' } },
+            h('b', 'Required masters not added: ' + ls.missingMasters.join(', ') + '. '),
+            owned.length ? h('span', `${owned.length} book(s) originate in ${from.join(', ')}. A book record belongs to the plugin it comes from, so the .ini must name that master, not the patch that changes it. Add ${from.length > 1 ? 'these masters' : 'this master'} to the project (they don't need "Read its books"), or those books stay silent in game.`)
+              : h('span', 'NPC records from them are unknown, so authors there can\'t be matched. Drop them in, or set the base game folder.'));
+        })() : null,
         ls && ls.missingStrings.length ? h('div.banner.warn', { style: { margin: 0 } }, 'No strings for localized plugin(s): ' + ls.missingStrings.join(', ') + '. Their books have no text. Add the Strings folder or the archive that holds them.') : null,
         h('table.tbl', h('thead', h('tr', h('th', 'Plugin'), h('th', { title: 'Read this plugin\'s books (otherwise it only provides masters and NPCs)' }, 'Read its books'), h('th', ''))),
           h('tbody', proj.plugins.map((pl) => h('tr',
