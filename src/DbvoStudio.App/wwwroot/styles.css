@@ -775,3 +775,7 @@ mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: in
 .rc-bot small { flex: 0 1 auto; max-width: 55%; font-size: 12px; }
 .rc-bot .home-bar { flex: 1; min-width: 40px; }
 .home-rc .home-ct { white-space: nowrap; }
+/* Colour themes: always two rows (ten themes, five a row) that fill the panel at any reading text size */
+.theme-picks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; width: 100%; }
+.theme-pick { width: auto; min-width: 0; }
+.theme-pick .tp-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
