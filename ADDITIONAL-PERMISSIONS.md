@@ -1,53 +1,29 @@
-## Network Connections, AI Services, and Privacy
+# Additional Permissions for DBVO Studio
 
-DBVO Studio is a Windows application for Skyrim Special Edition that helps authors create Dragonborn Voice Over (DBVO) voice packs and revoice NPCs.
+Copyright (c) 2026 Auctor Lucan
 
-**DBVO Studio does not have an automatic updater, telemetry, or an account system operated by the developer.** It only makes network connections for features that users choose to use.
+These additional permissions supplement the PolyForm Noncommercial License 1.0.0 that applies to DBVO Studio. They apply only to the activities described below. All other terms of the PolyForm Noncommercial License remain in effect.
 
-### Network Connections
+## Permission to Create and Share Voice Packs
 
-The application may communicate with the following services, depending on the features the user enables and configures:
+Notwithstanding the non-commercial limitation in the main software licence, users are expressly permitted to use DBVO Studio to create, edit, generate, and package Dragonborn Voice Over (DBVO) voice packs and NPC revoice projects for Skyrim.
 
-- **ElevenLabs API:** Generates voice lines using the user's own ElevenLabs API key. This is a core voice-generation feature.
-- **Hugging Face:** Downloads a Whisper speech-recognition model for transcription. The model is downloaded on first use of the WAV-to-LIP workflow and can then be reused locally.
-- **Optional AI provider:** Suggests delivery tags for dialogue lines. The user may configure a local provider, such as Ollama or LM Studio, or an online provider, such as OpenAI or Anthropic, using their own credentials.
-- **Optional local voice servers:** Connects to VoxCPM or OmniVoice through localhost when the user runs and selects those services.
+Users may publish and distribute voice packs and revoice projects they create using DBVO Studio on Nexus Mods and other community modding platforms, provided they have the necessary rights and permissions for all included content.
 
-The application does not operate a developer-hosted account or telemetry service. Online providers process requests under their own terms and privacy policies. The information sent to a provider depends on the feature used and the request made.
+This permission includes participation in Nexus Mods' standard Donation Points system and receipt of voluntary donations associated with a user's own voice packs, where permitted by the platform's current rules and the licences and rights applicable to the content.
 
-### API Key Storage
+Voluntary donations must be genuine, optional support and must not be required in exchange for access to a mod, updates, assistance, commissions, or other content or services where prohibited by the relevant platform's rules.
 
-API keys are stored encrypted for the current Windows user account and are sent to the service to which they belong when the corresponding feature is used.
+This permission does not authorise users to sell DBVO Studio itself, sell access to the software, redistribute the software as a commercial product, or charge for access to the software without separate written permission from the copyright holder.
 
-Users should protect their API keys and review the privacy, retention, and usage policies of any online provider they choose.
+## Third-Party Content
 
-### Third-Party Components
+These permissions do not grant rights to third-party software, game assets, dialogue, voice models, generated audio, datasets, or other material. Users remain responsible for complying with the licences, terms, and permissions applicable to those materials.
 
-The distributed application includes the following third-party components:
+## Scope
 
-- **FFmpeg:** Included unmodified under its applicable LGPL licence and notices.
-- **7-Zip:** Included unmodified under its applicable LGPL licence and notices.
+These additional permissions apply only to DBVO Studio and do not modify the terms of any third-party component included with or used by the application.
 
-The distribution includes the applicable licence information and source links for these components.
+For uses not expressly permitted here, the PolyForm Noncommercial License 1.0.0 governs.
 
-The following tools are not bundled and must be obtained separately by the user:
-
-- FaceFXWrapper
-- FonixData.cdf
-- xWMAEncode
-
-These tools are associated with the Skyrim Creation Kit toolchain and are subject to their own distribution terms.
-
-### AI-Generated Content
-
-DBVO Studio can be used to generate voice audio and to assist with dialogue tagging through AI services. The content created depends on the services and settings chosen by the user.
-
-Authors publishing content made with DBVO Studio are responsible for accurately disclosing AI-generated or AI-assisted content, applying the appropriate platform tags, and complying with the terms of the services they use.
-
-### Nexus Mods Submission
-
-DBVO Studio makes network connections for functionality that depends on downloading models or communicating with user-selected services. Nexus Mods' File Submission Guidelines specifically address software that connects to the internet and recommend contacting staff with the reasoning and source code for review.
-
-The developer has sought clarification from Nexus Mods before submitting the application. Acceptance remains subject to Nexus Mods' review and applicable policies.
-
-DBVO Studio is an independent community tool and is not affiliated with or endorsed by Bethesda Softworks, Nexus Mods, ElevenLabs, Hugging Face, OpenAI, or Anthropic.
+For permission to use DBVO Studio outside these terms, contact the copyright holder.
