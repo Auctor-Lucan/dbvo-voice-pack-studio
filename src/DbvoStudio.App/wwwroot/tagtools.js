@@ -1,5 +1,5 @@
 // Shared ElevenLabs tag tools for Phase 2 and NPC Revoice: the "Add a [tag] to all shown…" dialog and caret insertion.
-import { h, toast, modal, segmented } from './lib.js';
+import { h, clear, toast, modal, segmented } from './lib.js';
 
 /** Insert a tag at the caret of a text box (spaces added as needed); returns the new value. */
 export function insertTagAtCaret(el, t) {
@@ -73,4 +73,88 @@ export async function bulkTagDialog({ pool, idOf, original, originalLabel, origi
   const ids = matches().map(idOf);
   if (!ids.length) { toast('No line in the current filter matches.', true); return; }
   apply(tags, mode, ids, mode === 'add' ? (o5.cb.checked ? 'replace' : 'after') : '');
+}
+
+/**
+ * "Find and replace in all shown…": the classic find / replace over the texts in the current filter.
+ * pool: the rows shown; idOf(row); textOf(row): the text that is searched and changed; what: how that text is called;
+ * tags: [tag] chips that can be put into either box (omit where tags aren't allowed); apply(items [{k, v}]) saves the changes.
+ */
+export async function findReplaceDialog({ pool, idOf, textOf, what = 'spoken text', tags = null, apply }) {
+  const find = h('textarea.fr-box', { rows: 2, placeholder: 'Text to find', spellcheck: false });
+  const repl = h('textarea.fr-box', { rows: 2, placeholder: 'Replace with (leave empty to delete what is found)', spellcheck: false });
+  let last = find;
+  find.addEventListener('focus', () => { last = find; });
+  repl.addEventListener('focus', () => { last = repl; });
+  let matchCase = false, whole = false;
+  const opt = (label, tip, get, set) => { const c = h('input', { type: 'checkbox' }); c.checked = get(); c.addEventListener('change', () => { set(c.checked); update(); }); return h('label.row', { title: tip, style: { gap: '6px' } }, c, label); };
+  const summary = h('div.fr-sum');
+  const preview = h('div.fr-preview');
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const rx = () => {
+    if (!find.value) return null;
+    const src = esc(find.value);
+    return new RegExp(whole ? `(?<![\\p{L}\\p{N}_])${src}(?![\\p{L}\\p{N}_])` : src, 'gu' + (matchCase ? '' : 'i'));
+  };
+  let changes = [];
+  const mark = (txt, re, cls) => {
+    const out = []; let i = 0;
+    for (const m of txt.matchAll(re)) { out.push(txt.slice(i, m.index), h('mark.' + cls, m[0] || '·')); i = m.index + m[0].length; }
+    out.push(txt.slice(i)); return out;
+  };
+  function update() {
+    const re = rx();
+    changes = []; let hits = 0;
+    clear(preview);
+    if (re) for (const r of pool) {
+      const t = textOf(r) || '';
+      const n = [...t.matchAll(re)].length;
+      if (!n) continue;
+      hits += n;
+      const v = t.replace(re, () => repl.value);
+      if (v !== t) changes.push({ k: idOf(r), v, before: t });
+    }
+    summary.textContent = !re ? `Searches the ${what} of the ${pool.length.toLocaleString()} row(s) shown.`
+      : hits ? `${hits.toLocaleString()} match(es) in ${changes.length.toLocaleString()} of ${pool.length.toLocaleString()} row(s) shown.` : 'No matches in the rows shown.';
+    summary.className = 'fr-sum' + (re && !hits ? ' dim' : '');
+    if (re) {
+      const reR = repl.value ? new RegExp(esc(repl.value), 'g') : null;
+      for (const c of changes.slice(0, 6)) {
+        preview.append(h('div.fr-item', h('div.fr-before', mark(c.before, rx(), 'del')), h('div.fr-after', reR ? mark(c.v, reR, 'ins') : c.v)));
+      }
+      if (changes.length > 6) preview.append(h('div.faint', `…and ${changes.length - 6} more.`));
+    }
+    okBtn && (okBtn.disabled = !changes.length, okBtn.textContent = changes.length ? `Replace in ${changes.length.toLocaleString()} row(s)` : 'Replace');
+  }
+  find.addEventListener('input', update); repl.addEventListener('input', update);
+  const insert = (t) => { insertTagAtCaret(last, t); update(); };
+  let tagRow = null;
+  if (tags) {
+    const custom = h('input', { type: 'text', placeholder: '[custom tag]', title: 'Type any [tag] and press Enter to put it in the box you were typing in', style: { width: '140px' } });
+    custom.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !custom.value.trim()) return;
+      e.preventDefault();
+      let t = custom.value.trim();
+      if (!t.startsWith('[')) t = `[${t.replace(/[\[\]]/g, '')}]`;
+      custom.value = ''; insert(t);
+    });
+    tagRow = h('div.row.wrap', { style: { gap: '6px' } }, h('span.faint', 'Tags:'),
+      tags.map((t) => { const c = h('span.chip.tag-chip', { title: 'Put this tag in the box you were typing in, at the cursor' }, t); c.addEventListener('mousedown', (e) => e.preventDefault()); c.addEventListener('click', () => insert(t)); return c; }),
+      custom);
+  }
+  let okBtn = null;
+  const body = [
+    h('div.col', { style: { gap: '4px' } }, h('div.field-label', 'Find'), find),
+    h('div.col', { style: { gap: '4px' } }, h('div.field-label', 'Replace with'), repl),
+    tagRow,
+    h('div.row', { style: { gap: '18px' } }, opt('Match case', 'Only find text with the same capital letters', () => matchCase, (v) => { matchCase = v; }),
+      opt('Whole words only', 'Skip matches inside a longer word', () => whole, (v) => { whole = v; })),
+    summary, preview,
+  ];
+  const p = modal('Find and replace in all shown', body, [{ label: 'Cancel', value: false }, { label: 'Replace', primary: true, value: true }]);
+  okBtn = document.querySelector('#modal .modal-card .btn.primary');
+  update();
+  if (!(await p) || !changes.length) return;
+  await apply(changes.map(({ k, v }) => ({ k, v })));
+  toast(`Replaced in ${changes.length.toLocaleString()} row(s).`);
 }

@@ -1,7 +1,7 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
 import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats, withBusy } from './lib.js';
 import { app, go, refreshState } from './app.js';
-import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret } from './tagtools.js';
+import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
 
 const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Edited since take' };
@@ -309,7 +309,7 @@ export async function patchView(id) {
       { id: 'file', title: 'Filename', flex: 1, width: 240, render: (l) => h('span.faint.mono', { title: `In-game line: ${l.finalLine}\nFile: ${l.stem}.wav / .lip / .fuz` }, l.editedInPhase1 ? h('span.mark.info', { title: 'Edited in Phase 1' }, 'P1 ') : null, l.stem + '.wav') },
       vc ? { id: 'src', title: 'Source', width: 80, render: (l) => l.hasSource ? h('span.row', h('button.icon-btn', { title: 'Play the source: ' + l.sourceWav, onclick: () => playSource(l) }, '▶'), h('span.badge.b-valid', { title: l.sourceWav }, l.sourceWav.toLowerCase().endsWith('.fuz') ? '.fuz' : '✓')) : h('span.badge.b-broken', { title: `No ${l.stem}.wav or .fuz (Legacy or DBVO 2.0 name) in the source folders. New lines from a mod update have no source until the source pack has them.` }, patch.ttsForMissing ? 'TTS' : 'missing') } : null,
       { id: 'spoken', title: vc ? 'Text for the LIP (and TTS without a source)' : 'Spoken text (tags anywhere)', flex: 1.3, width: 320, render: (l) => spokenCell(l) },
-      { id: 'take', title: 'Take', width: 92, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
+      { id: 'take', title: 'Take', width: 72, resizable: false, render: (l) => h('span.row', { style: { gap: '5px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s); #${(l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot} is used. Click to play, switch, keep or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } },
           l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—'),
         qaBadge(l)) },
@@ -644,6 +644,9 @@ export async function patchView(id) {
       custom,
       h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick the box of one or more rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
       h('button.btn.sm.ghost', { title: 'Add a [tag] to every line in the current filter…', onclick: () => bulkTagDialog() }, 'Add a [tag] to all shown…'),
+      h('button.btn.sm.ghost', { title: 'Find text in the spoken text of every line shown and replace it, with [tags] if you like', onclick: () => findReplaceDialog({
+        pool: grid.rows.filter((l) => !l.omitted), idOf: (l) => l.lineId, textOf: (l) => l.spoken, tags: voice.tags || [],
+        apply: async (items) => { try { patch = await rpc('line2.replaceTexts', { id, items }); reindex(); grid.setRows(visible()); renderCounts(); renderActions(); renderInspector(); } catch (e) { fail(e); } } }) }, 'Find and replace in all shown…'),
       h('div.spacer'),
       null);
   }

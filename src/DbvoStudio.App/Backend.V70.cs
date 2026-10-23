@@ -236,6 +236,76 @@ public sealed partial class Backend
         });
         return true;
     }
+
+    private object StartRvQa(string id, List<string>? lineIds)
+    {
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
+        _jobCts = new CancellationTokenSource();
+        var ct = _jobCts.Token;
+        _ = Task.Run(async () =>
+        {
+            int flagged = 0, done = 0, failed = 0;
+            try
+            {
+                var patch = LoadRv(id);
+                var only = lineIds?.ToHashSet();
+                // The take in use, and with DBVO 2.0 naming every kept (★) take too, since each is exported as a variant.
+                var todo = patch.Lines.Where(l => !l.Excluded && !l.Gone && l.SelectedTake != null && (only == null || only.Contains(l.LineId)))
+                    .Select(l => (Line: (Phase2Line)l, Take: l.SelectedTake!)).ToList();
+                if (todo.Count == 0) { Emit("jobDone", new { kind = "revoice-qa", projectId = id, ok = true, message = "No takes to check." }); return; }
+                Emit("progress", new { kind = "revoice-qa", done = 0, total = todo.Count, failed = 0, message = "Loading Whisper" });
+                var tool = new WavToLip(_settings.WavToLip, Tools(), WhisperModelsFolder(), e =>
+                {
+                    if (e.Kind == "log") App.Log("Whisper: " + e.Text);
+                    else if (e.Kind == "status") Emit("progress", new { kind = "revoice-qa", done, total = todo.Count, failed, message = e.Text });
+                });
+                var (transcribe, engine) = await tool.CreateTranscriberAsync(ct);
+                await using var _e = engine;
+                var tools = Tools();
+                var root = _lib.RevoiceFolder(patch.Id);
+                foreach (var (line, take) in todo)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var qa = new TakeQa();
+                    try
+                    {
+                        var wav = Path.Combine(root, take.WavPath);
+                        var intended = string.IsNullOrWhiteSpace(take.SpokenText) ? line.Spoken : take.SpokenText;
+                        qa.Heard = (await transcribe(wav, ct)).Trim();
+                        qa.Score = Math.Round(QaText.Score(intended, qa.Heard), 2);
+                        (qa.Lufs, qa.TruePeak) = await tools.MeasureAsync(wav, ct);
+                        if (qa.Score < QaMinScore) qa.Flags.Add("words");
+                        if (qa.Lufs is { } l && l < QaQuietLufs) qa.Flags.Add("quiet");
+                        if (qa.TruePeak is { } tp && tp > QaPeakDbtp) qa.Flags.Add("clipping");
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { failed++; qa.Flags.Add("error"); qa.Heard = "Could not check: " + FriendlyError.From(ex); }
+                    if (qa.Flags.Count > 0) flagged++;
+                    await _gate.WaitAsync(CancellationToken.None);
+                    try { take.Qa = qa; } finally { _gate.Release(); }
+                    done++;
+                    Emit("progress", new { kind = "revoice-qa", done, total = todo.Count, failed, current = line.FinalLine });
+                    if (done % 25 == 0) { await _gate.WaitAsync(CancellationToken.None); try { _lib.Save(patch); } finally { _gate.Release(); } }
+                }
+                await _gate.WaitAsync(CancellationToken.None);
+                try { _lib.Save(patch); } finally { _gate.Release(); }
+                Emit("jobDone", new { kind = "revoice-qa", projectId = id, ok = true, flagged, checkedCount = done,
+                    message = flagged == 0 ? $"All {done} take(s) passed." : $"{flagged} of {done} take(s) flagged. Filter by \"QA flagged\" to listen to them." });
+            }
+            catch (OperationCanceledException)
+            {
+                try { await _gate.WaitAsync(CancellationToken.None); try { _lib.Save(LoadRv(id)); } finally { _gate.Release(); } } catch { }
+                Emit("jobDone", new { kind = "revoice-qa", projectId = id, ok = false, message = $"Cancelled after {done} take(s); their results are kept." });
+            }
+            catch (Exception ex)
+            {
+                App.Log("Check takes failed: " + ex);
+                Emit("jobDone", new { kind = "revoice-qa", projectId = id, ok = false, message = FriendlyError.From(ex) });
+            }
+            finally { _jobCts = null; }
+        });
+        return true;
+    }
 }
 
 /// <summary>

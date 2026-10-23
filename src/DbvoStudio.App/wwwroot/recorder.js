@@ -5,8 +5,9 @@ import { rpc, h, clear, toast, fail, modal } from './lib.js';
 const fmt = (s) => (Math.max(0, s) || 0).toFixed(2) + ' s';
 
 /** Opens the recorder for one line. Resolves to the updated line (or null when nothing was kept). */
-export async function recordTake({ patchId, line, onSaved }) {
-  const target = await rpc('patch.recordTarget', { id: patchId }).catch(() => ({ ready: false, why: '' }));
+export async function recordTake({ patchId, line, onSaved, kind = 'patch' }) {
+  const lineId = line.lineId || line.id;
+  const target = await rpc(kind + '.recordTarget', { id: patchId, lineId }).catch(() => ({ ready: false, why: '' }));
   let stream = null, rec = null, chunks = [], blob = null, url = null, startT = 0, raf = 0, timer = 0, saved = null;
   const audio = new Audio();
   const meter = h('div.rec-meter', h('i'));
@@ -126,7 +127,7 @@ export async function recordTake({ patchId, line, onSaved }) {
     try {
       const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
       const ext = (blob.type || '').includes('ogg') ? '.ogg' : '.webm';
-      const r = await rpc('patch.record', { id: patchId, lineId: line.lineId, data, ext, start: +startIn.value, end: +endIn.value, convert });
+      const r = await rpc(kind + '.record', { id: patchId, lineId, data, ext, start: +startIn.value, end: +endIn.value, convert });
       saved = r.line;
       if (onSaved) onSaved(r.line, r.takeId);
       toast(convert ? 'Converted and kept as a new take.' : 'Recording kept as a new take.');
@@ -142,7 +143,7 @@ export async function recordTake({ patchId, line, onSaved }) {
   convBtn.onclick = () => keep(true);
 
   await modal('Record this line', [
-    h('div.box.rec-line', line.spoken || line.finalLine),
+    h('div.box.rec-line', line.spoken || line.finalLine || line.text),
     h('div.row', recBtn, meter, clock),
     status, trim,
     target.ready ? h('div.faint', `Voice Changer: ${target.voiceName}. Your delivery and timing are kept; only the voice changes.`) : h('div.faint', target.why),

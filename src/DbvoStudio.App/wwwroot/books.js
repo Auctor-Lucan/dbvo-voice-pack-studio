@@ -3,7 +3,7 @@
 // reverb and loudness chain, encodes xWMA and packs archives, the VBoS .ini and a FOMOD.
 import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy } from './lib.js';
 import { app, go, refreshState } from './app.js';
-import { insertTagAtCaret } from './tagtools.js';
+import { insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { creditsButton, LANGS } from './phase2.js';
 
 const CERT = { Confirmed: 'CONFIRMED', Unverified: 'UNVERIFIED', Inferred: 'INFERRED', None: '' };
@@ -478,6 +478,13 @@ export async function bookProjectView(id) {
     return proj.books.filter((b) => (!voiceFilter || b.voices.some((v) => v.v === voiceFilter)) && matches(b, filter)
       && (!q || b.title.toLowerCase().includes(q) || b.stem.includes(q) || (b.author || '').toLowerCase().includes(q) || (b.vt || '').toLowerCase().includes(q) || (b.edid || '').toLowerCase().includes(q)));
   }
+  async function findReplace() {
+    const rows = grid.rows.filter((b) => !b.excl);
+    let texts;
+    try { texts = await rpc('books.texts', { id, stems: rows.map((b) => b.stem) }); } catch (e) { fail(e); return; }
+    findReplaceDialog({ pool: texts, idOf: (t) => t.stem, textOf: (t) => t.spoken, what: 'spoken text', tags: (proj.voice && proj.voice.tags) || [],
+      apply: async (items) => { try { const r = await rpc('books.replaceTexts', { id, items }); proj = r.project; reindex(); renderAll(); } catch (e) { fail(e); } } });
+  }
   function renderFilters() {
     const c = counts();
     const chip = (k, label, tip) => (k === 'all' || filter === k || c[k] ? h('button.chip' + (filter === k ? '.on' : ''), { title: tip, onclick: () => { filter = k; store.set('bk-filter:' + id, k); renderFilters(); grid.setRows(visible()); } }, label, ' ', h('span.n', String(c[k]))) : null);
@@ -490,7 +497,7 @@ export async function bookProjectView(id) {
       chip('unconfirmed', 'Author unconfirmed', 'NPC voice from an automatic match: check, then Confirm'), chip('problems', 'Check found problems', 'Alias markup, leftover markup or short ALL-CAPS words'),
       chip('updated', 'Updated text', 'The built-in set has a newer text for a book you edited'), chip('suggest', 'Suggested', 'Spell tomes or recipes with real text: left out, but worth voicing'),
       chip('marked', 'Flagged', 'Flagged to revisit'), chip('excl', 'Left out', 'Not generated or exported'),
-      h('div.spacer'), q, columnsMenu(grid),
+      h('div.spacer'), h('button.btn.sm.ghost', { title: 'Find text in the spoken text of every book shown and replace it, with [tags] if you like', onclick: findReplace }, 'Find and replace…'), q, columnsMenu(grid),
       h('button.btn.sm', { title: 'Show or hide the book panel', onclick: () => { showInsp = !showInsp; store.set('bk-insp', showInsp); renderAll(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel'));
   }
 

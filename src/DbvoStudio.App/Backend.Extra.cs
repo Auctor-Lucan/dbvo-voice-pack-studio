@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Books;
 using DbvoStudio.Core.Text;
 using System.IO;
 using System.Text.Json;
@@ -183,6 +184,73 @@ public sealed partial class Backend
                     foreach (var l in patch.Lines.Where(l => ids.Contains(l.LineId))) l.Marked = value;
                     _lib.Save(patch);
                     return PatchDto(patch);
+                });
+            // Find and replace in all shown: each tool sends the new texts of the lines that changed; one save.
+            case "line1.replaceTexts":
+                return await Locked(() =>
+                {
+                    var mod = LoadMod(S(p, "modId"));
+                    var plugin = mod.Plugins.First(x => x.FileName == S(p, "plugin"));
+                    var items = Items(p);
+                    foreach (var line in plugin.Lines) if (items.TryGetValue(line.Key, out var v)) Phase1Service.SetFinal(line, v);
+                    _lib.Save(mod);
+                    return ModDto(mod);
+                });
+            case "line2.replaceTexts":
+                return await Locked(() =>
+                {
+                    var patch = LoadPatch(S(p, "id"));
+                    var items = Items(p);
+                    foreach (var line in patch.Lines)
+                    {
+                        if (!items.TryGetValue(line.LineId, out var v) || v == line.Spoken) continue;
+                        line.UndoSpoken = null;
+                        line.Spoken = v;
+                        line.SpokenEdited = line.Spoken != SpokenText.DefaultFor(line.FinalLine);
+                        line.TagSuggestion = null;
+                        line.RefreshStale();
+                    }
+                    _lib.Save(patch);
+                    return PatchDto(patch);
+                });
+            case "revoice.replaceTexts":
+                return await Locked(() =>
+                {
+                    var proj = LoadRv(S(p, "id"));
+                    var items = Items(p);
+                    var changed = new List<string>();
+                    foreach (var l in proj.Lines)
+                    {
+                        if (!items.TryGetValue(l.LineId, out var v) || v == l.Spoken) continue;
+                        l.UndoSpoken = null; l.Spoken = v; l.SpokenEdited = l.Spoken != l.FinalLine; l.RefreshStale();
+                        changed.Add(l.LineId);
+                    }
+                    _lib.Save(proj);
+                    return new { changed = changed.Count, lines = proj.Lines.Where(x => changed.Contains(x.LineId)).Select(RvLineDto).ToList() };
+                });
+            case "books.texts":
+                return await Locked(() =>
+                {
+                    var proj = LoadBk(S(p, "id"));
+                    var stems = Strings(p, "stems").ToHashSet();
+                    return proj.Books.Where(b => stems.Contains(b.Stem)).Select(b => new { b.Stem, spoken = b.Spoken }).ToList();
+                });
+            case "books.replaceTexts":
+                return await Locked(() =>
+                {
+                    var proj = LoadBk(S(p, "id"));
+                    var items = Items(p);
+                    int n = 0;
+                    foreach (var b in proj.Books)
+                    {
+                        if (!items.TryGetValue(b.Stem, out var t) || t == b.Spoken) continue;
+                        b.Spoken = t; b.SpokenEdited = true;
+                        if (b.ManualBreaks) b.Breaks = b.Breaks.Where(x => x > 0 && x < t.Length).ToList();
+                        n++;
+                    }
+                    BooksService.RebuildLines(proj);
+                    _lib.Save(proj);
+                    return new { changed = n, project = BkDto(proj) };
                 });
             case "line2.bulkExclude":
                 return await Locked(() =>
@@ -612,5 +680,13 @@ public sealed partial class Backend
         foreach (var pattern in new[] { "background.*", "landing-background.*" }) // the second: build 6.7's name
             foreach (var f in Directory.GetFiles(UserFilesDir, pattern))
                 try { File.Delete(f); } catch (IOException) { } // in use: the next pick overwrites it
+    }
+
+    private static Dictionary<string, string> Items(JsonElement p)
+    {
+        var d = new Dictionary<string, string>();
+        if (p.TryGetProperty("items", out var a) && a.ValueKind == JsonValueKind.Array)
+            foreach (var x in a.EnumerateArray()) d[x.GetProperty("k").GetString() ?? ""] = x.GetProperty("v").GetString() ?? "";
+        return d;
     }
 }

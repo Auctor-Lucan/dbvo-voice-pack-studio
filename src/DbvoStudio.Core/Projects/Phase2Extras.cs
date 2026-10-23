@@ -259,7 +259,8 @@ public sealed partial class Phase2Service
     /// ElevenLabs speech-to-speech, apply the voice pack's loudness and tail trim, then make the LIP from the line's text.
     /// </summary>
     public async Task<Take> AddRecordingAsync(DbvoPatch patch, VoicePack voice, Phase2Line line, byte[] audio, string extension,
-        double startSec, double endSec, bool convert, ExternalTools tools, CancellationToken ct, SemaphoreSlim? stateGate = null)
+        double startSec, double endSec, bool convert, ExternalTools tools, CancellationToken ct, SemaphoreSlim? stateGate = null,
+        string? root = null, string? stem = null, Action? save = null)
     {
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
         Directory.CreateDirectory(workRoot);
@@ -312,10 +313,10 @@ public sealed partial class Phase2Service
         await gate.WaitAsync(CancellationToken.None);
         try
         {
-            var take = AddRecordedTake(patch, voice, line, wav, lip, convert);
+            var take = AddRecordedTake(patch, voice, line, wav, lip, convert, root, stem);
             take.DurationSeconds = w.DurationSeconds;
             line.NoAdopt = false;
-            _lib.Save(patch);
+            if (save != null) save(); else _lib.Save(patch);
             return take;
         }
         finally { gate.Release(); }

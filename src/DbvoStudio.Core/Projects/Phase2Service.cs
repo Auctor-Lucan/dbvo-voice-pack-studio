@@ -221,9 +221,10 @@ public sealed partial class Phase2Service
         return n;
     }
 
-    private Take AddExistingTake(DbvoPatch patch, VoicePack voice, Phase2Line line, string wav, string lip, string source, string? originalFuz = null, string? label = null)
+    private Take AddExistingTake(DbvoPatch patch, VoicePack voice, Phase2Line line, string wav, string lip, string source, string? originalFuz = null, string? label = null, string? root = null, string? stemOverride = null)
     {
-        var stem = LineNaming.Stem(line.FinalLine, voice.Naming);
+        var stem = stemOverride ?? LineNaming.Stem(line.FinalLine, voice.Naming);
+        var folder = root ?? _lib.PatchFolder(patch.Id);
         var take = new Take
         {
             Slot = line.Takes.Count == 0 ? 1 : line.Takes.Max(t => t.Slot) + 1,
@@ -234,12 +235,12 @@ public sealed partial class Phase2Service
         var rel = Path.Combine("takes", line.LineId, take.Slot.ToString("00"));
         take.WavPath = Path.Combine(rel, stem + ".wav");
         take.LipPath = Path.Combine(rel, stem + ".lip");
-        FileLinks.LinkOrCopy(wav, Path.Combine(_lib.PatchFolder(patch.Id), take.WavPath), true);
-        FileLinks.LinkOrCopy(lip, Path.Combine(_lib.PatchFolder(patch.Id), take.LipPath), true);
+        FileLinks.LinkOrCopy(wav, Path.Combine(folder, take.WavPath), true);
+        FileLinks.LinkOrCopy(lip, Path.Combine(folder, take.LipPath), true);
         if (originalFuz != null && File.Exists(originalFuz))
         {
             take.OriginalFuz = Path.Combine(rel, stem + ".fuz");
-            FileLinks.LinkOrCopy(originalFuz, Path.Combine(_lib.PatchFolder(patch.Id), take.OriginalFuz), true);
+            FileLinks.LinkOrCopy(originalFuz, Path.Combine(folder, take.OriginalFuz), true);
         }
         line.Takes.Add(take);
         line.SelectedTakeId = take.Id;
@@ -249,10 +250,10 @@ public sealed partial class Phase2Service
     }
 
     /// <summary>A finished WAV + LIP made outside generation (a microphone recording, converted or not) becomes a new take.</summary>
-    public Take AddRecordedTake(DbvoPatch patch, VoicePack voice, Phase2Line line, string wav, string lip, bool converted)
+    public Take AddRecordedTake(DbvoPatch patch, VoicePack voice, Phase2Line line, string wav, string lip, bool converted, string? root = null, string? stem = null)
     {
         var t = AddExistingTake(patch, voice, line, wav, lip, converted ? "microphone+vc" : "microphone",
-            label: converted ? "microphone, converted with the Voice Changer" : "microphone recording");
+            label: converted ? "microphone, converted with the Voice Changer" : "microphone recording", root: root, stemOverride: stem);
         t.SpokenText = line.Spoken;
         return t;
     }

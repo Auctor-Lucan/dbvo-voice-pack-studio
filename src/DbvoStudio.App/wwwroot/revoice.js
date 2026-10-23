@@ -3,7 +3,8 @@
 import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
-import { bulkTagDialog, insertTagAtCaret } from './tagtools.js';
+import { bulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
+import { recordTake } from './recorder.js';
 
 const CERT = { Exact: 'Speaker known', Probable: 'Probable speakers', Unknown: 'Speaker unknown' };
 
@@ -470,6 +471,8 @@ export async function revoiceView(id) {
   const tagbar = h('div.tagbar');
   const vbar = h('div.toolbar');
   const actions = h('div.statusbar');
+  const reviewBar = h('div.review-bar.hidden');
+  let review = false, reviewAutoplay = store.get('reviewAutoplay', true);
   let lastEdit = null; // { el, line }: the last spoken-text box the user was in
   const grid = new VGrid(left, {
     storageKey: 'revoice',
@@ -540,6 +543,8 @@ export async function revoiceView(id) {
       silent: L.filter((l) => !l.original).length,
       unsure: L.filter((l) => l.cert !== 'Exact').length,
       marked: L.filter((l) => l.marked).length,
+      approved: L.filter((l) => l.approved).length,
+      qa: L.filter((l) => qaFlagged(l)).length,
       excl: L.filter((l) => l.excl).length,
     };
   }
@@ -547,22 +552,32 @@ export async function revoiceView(id) {
     const q = search.toLowerCase();
     return proj.lines.filter((l) => (!speakerFilter || l.speaker === speakerFilter)
       && (filter === 'all' || (filter === 'todo' && !l.excl && !l.gone && isMissing(l)) || (filter === 'edited' && !l.excl && !l.gone && isEdited(l)) || (filter === 'done' && l.sel) || (filter === 'failed' && l.status === 'Failed')
-        || (filter === 'orig' && l.original) || (filter === 'silent' && !l.original) || (filter === 'unsure' && l.cert !== 'Exact') || (filter === 'marked' && l.marked) || (filter === 'excl' && l.excl))
+        || (filter === 'orig' && l.original) || (filter === 'silent' && !l.original) || (filter === 'unsure' && l.cert !== 'Exact') || (filter === 'marked' && l.marked) || (filter === 'approved' && l.approved) || (filter === 'qa' && qaFlagged(l)) || (filter === 'excl' && l.excl))
       && (!q || l.text.toLowerCase().includes(q) || l.spoken.toLowerCase().includes(q) || (l.stem || '').toLowerCase().includes(q) || l.speakerName.toLowerCase().includes(q) || (l.quest || '').toLowerCase().includes(q)));
   }
   function renderFilters() {
     const c = counts();
     // Like Phase 2: a filter only shows when it has lines (All and the active one always show).
     const chip = (k, label, tip) => (k === 'all' || filter === k || c[k] ? h('button.chip' + (filter === k ? '.on' : ''), { title: tip, onclick: () => { filter = k; renderFilters(); grid.setRows(visible()); } }, label, ' ', h('span.n', String(c[k]))) : null);
-    const q = h('input', { type: 'text', placeholder: 'Search text, file, speaker, quest…', value: search, title: 'Filter the list' });
-    q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 200));
     clear(filters).append(
       chip('all', 'All', 'Every voice file to make'), chip('todo', 'Missing', 'No take yet'), chip('edited', 'Edited since take', 'Has a take, but the spoken text changed since (or the last attempt failed)'), chip('done', 'Generated', 'Has a take'),
       chip('failed', 'Failed', 'The last attempt failed'), chip('orig', 'Has current file', 'The game plays a file for this line now (▶ in the Now column)'),
       chip('silent', 'Silent now', 'No voice file yet: subtitles only in game'), chip('unsure', 'Speaker unsure', 'The speaker was worked out as probable or unknown — check before generating'),
-      chip('marked', 'Flagged', 'Flagged to revisit'), chip('excl', 'Excluded', 'Left out of generation and export'),
-      h('div.spacer'), q, columnsMenu(grid),
-      h('button.btn.sm', { title: 'Show or hide the line panel', onclick: () => { showInsp = !showInsp; store.set('rv-insp', showInsp); renderAll(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel'));
+      chip('marked', 'Flagged', 'Flagged to revisit'), chip('qa', 'QA flagged', 'Check takes flagged the take in use: words differ, too quiet or clipping'), chip('approved', 'Approved', 'Approved in Review'), chip('excl', 'Excluded', 'Left out of generation and export'),
+      h('div.spacer'), folderButton());
+  }
+  // Search, Columns and Hide panel sit on the tag row (as in Phase 2); Open folder sits on the filter row.
+  function viewTools() {
+    const q = h('input', { type: 'text', placeholder: 'Search text, file, speaker, quest…', value: search, title: 'Filter the list' });
+    q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 200));
+    return [q, columnsMenu(grid),
+      h('button.btn.sm', { title: 'Show or hide the line panel', onclick: () => { showInsp = !showInsp; store.set('rv-insp', showInsp); renderAll(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel')];
+  }
+  function findReplace() {
+    findReplaceDialog({ pool: grid.rows.filter((l) => !l.gone), idOf: (l) => l.id, textOf: (l) => l.spoken, tags: proj.voice.tags || [],
+      apply: async (items) => {
+        try { const r = await rpc('revoice.replaceTexts', { id, items }); for (const nl of r.lines) replaceLine(nl, false); grid.setRows(visible()); renderFilters(); renderActions(); renderInspector(); } catch (e) { fail(e); }
+      } });
   }
 
   function renderInspector() {
@@ -598,26 +613,35 @@ export async function revoiceView(id) {
     meta.open = store.get('rv-meta-open', true);
     meta.addEventListener('toggle', () => store.set('rv-meta-open', meta.open));
     const status = l.status || 'Pending';
+    const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Stale: 'Edited since take' };
+    const vcOn = proj.voiceChanger;
+    const sp = proj.speakers.find((x) => x.key === l.speaker);
+    const eleven = !sp || !sp.voiceId || (sp.engine || 'elevenlabs') === 'elevenlabs';
     insp.append(
-      h('h3', 'Line'),
+      h('div.row', { title: l.err || '' }, statusDot(l), h('span.dim', l.gone ? 'No longer in the plugins' : STATUS_TEXT[status] || status), h('div.spacer'),
+        h('button.act-btn' + (l.excl ? '.on.bad' : ''), { title: l.excl ? 'Excluded - click to clear' : 'Exclude from generate and export', onclick: () => upd(l, l.excl ? 'include' : 'exclude') }, icon('ban')),
+        h('button.act-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit', onclick: () => upd(l, 'mark') }, icon('flag')),
+        h('button.act-btn' + (l.approved ? '.on' : ''), { title: !l.takes.length ? 'No take to approve yet' : l.approved ? 'Approved - click to clear' : 'Approve: heard and accepted (A in Review)', disabled: !l.takes.length, onclick: () => upd(l, 'approve', !l.approved) }, icon('check'))),
+      l.err && status === 'Failed' ? h('div.banner.bad', { style: { margin: 0 } }, l.err) : null,
       meta,
       h('div', h('div.field-label', 'File'), h('div.file-row', h('span.mono.ellipsis', { title: path }, l.stem + '.fuz'),
         h('button.icon-btn', { title: 'Copy the file name (hover the name for the full game path)', onclick: () => navigator.clipboard.writeText(l.stem).then(() => toast('Copied.')) }, '⧉'))),
       h('div.row', { style: { gap: '8px' } },
         l.original ? h('button.btn.sm', { title: 'Play the file the game uses now: ' + l.original, onclick: () => playOriginal(l) }, '▶ Now') : h('span.faint', { title: 'No voice file for this line yet: subtitles only in game' }, 'Silent in game now'),
-        h('div.spacer'),
-        h('span.row', { style: { gap: '6px' }, title: l.err || '' }, statusDot(l), h('span.faint', { style: { fontSize: '12.5px' } }, status === 'Stale' ? 'Edited since the take' : status))),
+        h('div.spacer')),
       h('div', h('div.field-label', 'Subtitle (in game)'), h('div.box.ellipsis', { title: l.text }, l.text)),
       h('div', h('div.field-label', 'Spoken text (tags allowed)'), spoken,
         h('div.row', { style: { marginTop: '6px', gap: '6px' } },
+          vcOn || !eleven ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.excl, onclick: () => autotag([l.id]) }, 'AI tag'),
           l.spokenEdited ? h('button.btn.sm.ghost', { title: 'Use the subtitle as the spoken text again', onclick: () => upd(l, 'resetSpoken') }, '↺ Restore') : null,
           h('div.spacer'),
-          h('button.btn.sm', { title: l.excl ? 'Bring the line back' : 'Leave this line out of generation and export', onclick: () => upd(l, l.excl ? 'include' : 'exclude') }, l.excl ? 'Include' : 'Exclude'),
+          h('button.btn.sm', { title: app.job ? 'A job is running' : l.excl ? 'Excluded' : 'Record this line with your microphone, then keep it as it is or convert it into the speaker\'s voice', disabled: l.excl || l.gone || !!app.job, onclick: () => record(l) }, '🎙 Record'),
           h('button.btn.sm.primary', { title: genBlock(l) || 'Make a new take of this line', disabled: !!genBlock(l), onclick: () => generate('selected', [l.id], { autoplay: true }) }, l.takes.length ? 'New take' : 'Generate'))),
       l.takes.length ? h('div', h('div.field-label', `Takes (${l.takes.length})`), h('div.col', { style: { gap: '4px' } }, l.takes.slice().reverse().map((t) => h('div.take.compact' + (t.id === l.sel ? '.sel' : ''),
         h('button.icon-btn', { title: 'Play this take', onclick: () => play(l, t) }, '▶'),
         h('div.grow', { style: { minWidth: 0 } },
           h('div.row', { style: { gap: '6px', flexWrap: 'nowrap' } }, h('b', '#' + t.slot), t.id === l.sel ? h('span.faint', { title: 'This take is exported' }, 'used') : null,
+            t.qa ? h('span', { title: qaText(t.qa), style: { color: t.qa.flags.length ? 'var(--warn)' : 'var(--ok)' } }, t.qa.flags.length ? '⚠ ' + t.qa.flags.map((f) => QA_WHY[f] || f).join(', ') : '✓') : null,
             h('span.meta.ellipsis', { title: `${t.engine || ''} ${t.model || ''}` }, `${t.durationSeconds.toFixed(1)} s · ${t.model || t.engine || ''}`)),
           t.spokenText && t.spokenText !== l.spoken ? h('div.meta.ellipsis', { title: t.spokenText }, 'Text then: ' + t.spokenText) : null),
         t.id !== l.sel ? h('button.btn.sm', { title: 'Use this take for export', onclick: () => upd(l, 'selectTake', t.id) }, 'Use') : null,
@@ -671,8 +695,77 @@ export async function revoiceView(id) {
       h('span.stat', h('b', String(c.done)), ` / ${c.all} generated`, c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', ` · ${c.silent} silent now`, who ? h('span.faint', ` · ${who} only`) : ''),
       h('div.spacer'),
       sel.length ? bulkBtn : null,
+      h('button.btn' + (review ? '.review-on' : ''), { title: review ? 'End Review (Esc)' : 'Listen through the lines with the keyboard: Space plays, A approves and moves on, R makes a new take, F flags', onclick: () => setReview(!review) }, review ? '■ End review' : '▶ Review'),
+      h('button.btn', { disabled: !!app.job, title: `Check takes${sel.length ? ` of the ${sel.length} ticked line(s)` : ' of every line shown'}: Whisper compares what is said with the line, plus loudness and clipping. Flags only, deletes nothing.`, onclick: () => qaRun(sel.length ? sel : grid.rows.filter((l) => l.takes.length && !l.excl).map((l) => l.id)) }, 'Check takes'),
       genBtn);
   }
+
+  // ---- Review, Check takes and recording (as in Phase 2)
+  function qaText(q) { return q ? [q.score != null ? `Words match ${(q.score * 100).toFixed(0)}%` : null, q.heard ? `Heard: "${q.heard}"` : null,
+    q.lufs != null ? `Loudness ${q.lufs.toFixed(1)} LUFS` : null, q.truePeak != null ? `Peak ${q.truePeak.toFixed(1)} dBTP` : null].filter(Boolean).join('\n') : ''; }
+  var QA_WHY = { words: 'words differ', quiet: 'too quiet', clipping: 'clipping', error: 'not checked' };
+  function qaFlagged(l) { const t = l.takes.find((x) => x.id === l.sel); return !!(t && t.qa && t.qa.flags.length); }
+  async function record(l) {
+    if (app.job) { toast('Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.', true); return; }
+    await recordTake({ patchId: id, line: l, kind: 'revoice', onSaved: (nl) => { replaceLine(nl); play(nl); } });
+  }
+  async function qaRun(ids) {
+    const n = ids.length;
+    if (!n) { toast('No takes to check yet.', true); return; }
+    const ok = await modal('Check takes', [h('div.help',
+      h('p', `Whisper listens to the take in use of ${n} line(s) and compares what it hears with the spoken text. Loudness and peak are measured too.`),
+      h('p', 'A take is flagged when the words match less than 75 % (wrong line, cut off, extra words), when it is very quiet, or when it clips. Nothing is deleted or regenerated: use the "QA flagged" filter to listen and decide.'),
+      h('p.faint', 'Uses the Whisper settings of the WAV to LIP tool. The first run downloads the model.'))],
+    [{ label: 'Cancel', value: false }, { label: `Check ${n} take(s)`, primary: true, value: true }], { help: 'checking-takes' });
+    if (!ok) return;
+    try { await rpc('revoice.qa', { id, lineIds: ids }); renderActions(); } catch (e) { fail(e); }
+  }
+  function setReview(on) {
+    review = on;
+    reviewBar.classList.toggle('hidden', !on);
+    if (on) {
+      if (!focusedId || !grid.rows.some((r) => r.id === focusedId)) { const first = grid.rows.find((r) => r.takes.length); if (first) { focusedId = first.id; grid.focus(first.id, true); renderInspector(); } }
+      renderReviewBar();
+      grid.el.focus();
+    }
+    renderActions();
+  }
+  function renderReviewBar() {
+    const k = (x) => h('kbd', x);
+    const L = grid.rows;
+    clear(reviewBar).append(h('b', 'Review'),
+      h('span', k('Space'), ' play / stop'), h('span', k('↑'), k('↓'), ' move'), h('span', k('A'), ' approve + next'), h('span', k('R'), ' new take'), h('span', k('F'), ' flag'), h('span', k('Esc'), ' end'),
+      h('div.spacer'),
+      h('span.faint', `${L.filter((l) => l.approved).length} of ${L.filter((l) => l.takes.length).length} approved`),
+      switchEl(reviewAutoplay, (v) => { reviewAutoplay = v; store.set('reviewAutoplay', v); }, 'Autoplay', { title: 'Play each line as you land on it' }),
+      helpButton('review'));
+  }
+  function moveFocus(step) {
+    const i = grid.rows.findIndex((r) => r.id === focusedId);
+    const next = grid.rows[Math.max(0, Math.min(grid.rows.length - 1, i + step))];
+    if (!next) return;
+    focusedId = next.id;
+    grid.focus(next.id, true);
+    renderInspector();
+    if (reviewAutoplay) play(next);
+  }
+  const reviewKeys = (e) => {
+    if (!review) return;
+    if (!document.body.contains(view)) { window.removeEventListener('keydown', reviewKeys, true); return; }
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.target.closest && e.target.closest('input,textarea,select,[contenteditable]')) return;
+    if (!document.getElementById('modal').classList.contains('hidden')) return;
+    const l = focusedId && index.get(focusedId);
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const eat = () => { e.preventDefault(); e.stopImmediatePropagation(); };
+    if (key === ' ') { eat(); if (l) { if (!audio.paused) audio.pause(); else play(l); } }
+    else if (key === 'ArrowDown' || key === 'ArrowUp') { eat(); moveFocus(key === 'ArrowDown' ? 1 : -1); }
+    else if (key === 'a') { eat(); if (l && l.takes.length) { upd(l, 'approve', true).then(() => { renderReviewBar(); moveFocus(1); }); } else toast('This line has no take to approve.', true); }
+    else if (key === 'r') { eat(); if (l && !genBlock(l)) generate('selected', [l.id], { autoplay: true }); }
+    else if (key === 'f') { eat(); if (l) upd(l, 'mark'); }
+    else if (key === 'Escape') { eat(); setReview(false); }
+  };
+  window.addEventListener('keydown', reviewKeys, true);
 
   // ---------------------------------------------------------------- toolbar above the lines (laid out like Phase 2's)
   let creditsEl = null;
@@ -787,7 +880,8 @@ export async function revoiceView(id) {
   function renderTagbar() {
     clear(tagbar);
     if (proj.voiceChanger) {
-      tagbar.append(h('span.lbl', 'Voice Changer'), h('span.dim', 'The current recording decides the delivery, so audio tags are not used. The spoken text only feeds the .lip.'), h('div.spacer'), folderButton());
+      tagbar.append(h('span.lbl', 'Voice Changer'), h('span.dim', 'The current recording decides the delivery, so audio tags are not used. The spoken text only feeds the .lip.'),
+        h('button.btn.sm.ghost', { title: 'Find text in the spoken text of every line shown and replace it', onclick: findReplace }, 'Find and replace in all shown…'), h('div.spacer'), ...viewTools());
       return;
     }
     const engines = new Set(proj.speakers.filter((sp) => sp.voiceId && !sp.skip).map((sp) => sp.engine || 'elevenlabs'));
@@ -819,8 +913,9 @@ export async function revoiceView(id) {
         originalNote: 'Searches the in-game subtitle, the actor notes from the plugin and the emotion name (Anger, Fear, Happy…). Separate several with commas.',
         apply: applyTags,
       }) }, 'Add a [tag] to all shown…'),
+      h('button.btn.sm.ghost', { title: 'Find text in the spoken text of every line shown and replace it, with [tags] if you like', onclick: findReplace }, 'Find and replace in all shown…'),
       engines.size && !engines.has('elevenlabs') ? h('span.dim', 'Your speakers use local engines, which ignore audio tags.') : null,
-      h('div.spacer'), folderButton());
+      h('div.spacer'), ...viewTools());
   }
   function folderButton() {
     const btn = h('button.btn.sm.ghost', { title: 'Open this project\'s folders in Explorer' }, icon('folder', { size: 14 }), ' Open folder ▾');
@@ -1039,7 +1134,8 @@ export async function revoiceView(id) {
     split.append(left, insp);
     if (!elevenModels) loadVoices();
     renderVbar();
-    body.append(vbar, filters, tagbar, split, actions);
+    body.append(vbar, filters, tagbar, reviewBar, split, actions);
+    if (review) renderReviewBar();
     renderFilters();
     renderTagbar();
     grid.setRows(visible());
@@ -1067,7 +1163,8 @@ export async function revoiceView(id) {
     if (inFlight.size) markInFlight(null);
     const d = e.detail || {};
     if (d.kind === 'revoice-orphans' && d.id === id) { if (d.message) toast(d.message, !d.ok); if (d.ok) orphansModal(); }
-    if ((d.kind === 'revoice-scan' && d.id === id) || (d.kind === 'generate' && d.revoiceId === id) || (d.kind === 'revoice-export' && d.id === id)) {
+    if ((d.kind === 'revoice-scan' && d.id === id) || (d.kind === 'generate' && d.revoiceId === id) || (d.kind === 'revoice-export' && d.id === id) || (d.kind === 'revoice-qa' && d.projectId === id)) {
+      if (d.kind === 'revoice-qa' && d.message) toast(d.message, !d.ok);
       try { proj = await rpc('revoice.get', { id }); reindex(); } catch { /* keep */ }
       if (d.kind === 'revoice-scan' && d.ok) { if (proj.lines.length && tab === 'setup') { tab = 'speakers'; store.set('rv-tab:' + id, tab); } toast(`Scan done: ${d.report.lines.toLocaleString()} voice files to make, ${d.report.withOriginal.toLocaleString()} with a current file.`); }
       if (d.kind === 'revoice-export' && d.ok !== undefined && d.report) {

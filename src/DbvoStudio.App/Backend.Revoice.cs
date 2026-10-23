@@ -158,6 +158,33 @@ public sealed partial class Backend
                 });
             case "revoice.line": return await Locked(() => RvLine(p));
             case "revoice.bulk": return await Locked(() => RvBulk(p));
+            case "revoice.recordTarget":
+            {
+                var proj = LoadRv(S(p, "id"));
+                var l = proj.Lines.FirstOrDefault(x => x.LineId == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
+                var v = RvVoiceFor(proj, l, _lib.LoadVoicePacks().ToDictionary(x => x.Id));
+                var (voiceId, voiceName) = v == null ? ("", "") : Phase2Service.RecordingTarget(v);
+                bool ready = !string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey) && !string.IsNullOrWhiteSpace(voiceId) && (v?.Engine ?? "elevenlabs") == "elevenlabs";
+                return new { ready, voiceName = string.IsNullOrWhiteSpace(voiceName) ? (l.SpeakerName ?? "") : voiceName,
+                    why = string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey) ? "Add your ElevenLabs API key in Global Settings to convert recordings."
+                        : v == null || string.IsNullOrWhiteSpace(voiceId) ? "Pick an ElevenLabs voice for this speaker (Speakers tab) to convert recordings." : (v.Engine ?? "elevenlabs") != "elevenlabs" ? "Converting needs an ElevenLabs voice; this speaker uses a local engine." : "" };
+            }
+            case "revoice.record":
+            {
+                if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
+                var proj = LoadRv(S(p, "id"));
+                var l = proj.Lines.FirstOrDefault(x => x.LineId == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
+                var v = RvVoiceFor(proj, l, _lib.LoadVoicePacks().ToDictionary(x => x.Id)) ?? JsonSerializer.Deserialize<VoicePack>(JsonSerializer.Serialize(proj.Voice, Library.Json), Library.Json)!;
+                var data = Convert.FromBase64String(S(p, "data"));
+                double D(string n) => p.TryGetProperty(n, out var x) && x.ValueKind == JsonValueKind.Number ? x.GetDouble() : 0;
+                var shim = new DbvoPatch { Id = proj.Id, Name = proj.Name, VoicePackId = v.Id, Kind = "tts" };
+                await new Phase2Service(_lib, Runtime()).AddRecordingAsync(shim, v, l, data, S(p, "ext", ".webm"), D("start"), D("end"), B(p, "convert"), Tools(), CancellationToken.None, _gate,
+                    _lib.RevoiceFolder(proj.Id), l.FileStem, () => _lib.Save(proj));
+                return new { line = RvLineDto(l) };
+            }
+            case "revoice.qa": return StartRvQa(S(p, "id"), p.TryGetProperty("lineIds", out var rli) && rli.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds") : null);
+            case "revoice.clearQa":
+                return await Locked(() => { var pr = LoadRv(S(p, "id")); foreach (var t in pr.Lines.SelectMany(l => l.Takes)) t.Qa = null; _lib.Save(pr); return RvDto(pr); });
             case "revoice.original":
             {
                 var proj = LoadRv(S(p, "id"));
@@ -486,8 +513,8 @@ public sealed partial class Backend
         id = l.LineId, l.Info, resp = l.Response, pf = l.PluginFolder, vt = l.VoiceType, stem = l.FileStem, text = l.FinalLine, spoken = l.Spoken,
         l.SpokenEdited, tag = l.TagSuggestion, speaker = l.SpeakerKey, speakerName = l.SpeakerName, l.Npcs, cert = l.Certainty, l.Via,
         emo = ResponseInfo.EmotionNames.ElementAtOrDefault(l.Emotion) ?? "Neutral", emoV = l.EmotionValue, l.Notes, l.Quest, l.Topic, l.Plugin,
-        l.Original, excl = l.Excluded, undo = l.UndoSpoken != null, plan = l.PlanId, status = l.Status.ToString(), err = l.LastError, sel = l.SelectedTakeId, l.Marked, l.Gone, newSpeaker = l.NewSpeakerName,
-        takes = l.Takes.Select(t => new { t.Id, t.Slot, t.CreatedUtc, t.SpokenText, engine = t.Settings.Engine, model = t.Settings.ModelId, wav = t.WavPath.Replace('\\', '/'), t.DurationSeconds }),
+        l.Original, excl = l.Excluded, undo = l.UndoSpoken != null, plan = l.PlanId, status = l.Status.ToString(), err = l.LastError, sel = l.SelectedTakeId, l.Marked, approved = l.Approved, l.Gone, newSpeaker = l.NewSpeakerName,
+        takes = l.Takes.Select(t => new { t.Id, t.Slot, t.CreatedUtc, t.SpokenText, engine = t.Settings.Engine, model = t.Settings.ModelId, wav = t.WavPath.Replace('\\', '/'), t.DurationSeconds, t.Qa }),
     };
 
     private object RvLine(JsonElement p)
@@ -526,6 +553,7 @@ public sealed partial class Backend
             case "exclude": l.Excluded = true; break;
             case "include": l.Excluded = false; break;
             case "mark": l.Marked = !l.Marked; break;
+            case "approve": l.Approved = B(p, "value") && l.Takes.Count > 0; break;
             case "markOn": l.Marked = true; break;
             case "markOff": l.Marked = false; break;
             case "selectTake":

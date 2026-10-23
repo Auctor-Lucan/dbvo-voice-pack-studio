@@ -1,4 +1,5 @@
 // Phase 1: Mods list and the per-plugin workspace.
+import { findReplaceDialog } from './tagtools.js';
 import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
@@ -557,6 +558,9 @@ export async function modView(id) {
             : h('span', { style: { color: 'var(--ok)' } }, 'no DBVO Fix plugin needed'),
         c.unreviewed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.unreviewed} flagged not reviewed`) : null),
       helpButton('fix-voice-and-exclude'),
+      h('button.btn.sm.ghost', { title: 'Find text in the in-game text of every line shown and replace it (goes into the DBVO Fix plugin like any edit)', onclick: () => findReplaceDialog({
+        pool: grid.rows, idOf: (l) => l.key, textOf: (l) => l.final, what: 'in-game text',
+        apply: async (items) => { try { mod = await rpc('line1.replaceTexts', { modId: mod.id, plugin: plugin.fileName, items }); plugin = mod.plugins.find((p) => p.fileName === plugin.fileName); renderAll(); } catch (e) { fail(e); } } }) }, 'Find and replace in all shown…'),
       h('div.spacer'),
       sel.length ? h('span.dim', `${sel.length} selected`) : null,
       sel.length ? h('button.btn.sm', { title: 'Use the script\'s suggestion for the ticked lines', onclick: () => bulk('accept') }, 'Use suggestions') : null,

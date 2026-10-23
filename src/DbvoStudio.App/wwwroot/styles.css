@@ -752,3 +752,10 @@ select.bad-sel { border-color: var(--bad); color: var(--bad); }
 html { --read-zoom: 1.15; }
 .reading, .help-drawer .help-body, .modal-card:not(.wide) { zoom: var(--read-zoom); }
 .reading .guide img, .help-drawer .help-body img { zoom: calc(1 / var(--read-zoom)); } /* screenshots stay at their own size */
+.fr-box { width: 100%; resize: vertical; font-size: 13.5px; }
+.fr-sum { font-weight: 600; }
+.fr-preview { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow: auto; }
+.fr-item { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; display: grid; gap: 3px; font-size: 12.5px; }
+.fr-before { color: var(--dim); } .fr-after { color: var(--text); }
+mark.del { background: color-mix(in srgb, var(--bad) 35%, transparent); color: inherit; border-radius: 3px; text-decoration: line-through; }
+mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: inherit; border-radius: 3px; }
