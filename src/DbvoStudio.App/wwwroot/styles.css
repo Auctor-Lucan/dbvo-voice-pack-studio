@@ -759,3 +759,7 @@ html { --read-zoom: 1.15; }
 .fr-before { color: var(--dim); } .fr-after { color: var(--text); }
 mark.del { background: color-mix(in srgb, var(--bad) 35%, transparent); color: inherit; border-radius: 3px; text-decoration: line-through; }
 mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: inherit; border-radius: 3px; }
+.vgrid-head .cell.sortable { cursor: pointer; user-select: none; }
+.vgrid-head .cell.sortable:hover { color: var(--text); }
+.vgrid-head .cell.sorted { color: var(--accent); }
+.sort-ind { font-size: 10px; }

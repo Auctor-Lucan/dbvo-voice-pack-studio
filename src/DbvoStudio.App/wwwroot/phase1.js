@@ -533,17 +533,24 @@ export async function modView(id) {
     q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visibleLines()); }, 150));
     // Only filters that match at least one line (the open one always stays).
     const opt = (key, label, title) => (key === 'all' || filter === key || c[key] ? chip(key, label, title) : null);
+    const legend = h('div.legend',
+      h('span.legend-item', h('span.appr.on.demo.fix', 'Fix'), '= Edit in the DBVO Fix plugin'),
+      h('span.legend-item', h('span.appr.on.demo', h('span.note', '♪')), '= Voiced in Phase 2'),
+      h('span.legend-item', h('span.demo-ex', icon('ban', { size: 14 })), '= Not voiced (excluded)'));
     filters.append(h('div.filter-chips', opt('all', 'All', 'Every player line of this plugin'), opt('fixes', 'In DBVO Fix', 'Lines whose in-game text goes into the DBVO Fix plugin'), opt('notvoiced', 'Not voiced', 'Lines that won\'t be voiced in Phase 2'), opt('flagged', 'Flagged', 'BROKEN or TOO LONG WILL CTD lines to review'), opt('unreviewed', 'Not reviewed', 'Lines you haven\'t looked at yet'),
       opt('stage', 'Stage directions', 'Lines that are only an action, such as (Intimidate)'), opt('player', 'Player names', 'Lines with the player\'s name, voiced in a player-name patch'),
-      opt('changed', 'Changed in mod', 'Lines a newer version of the mod changed'), opt('edited', 'Edited by you', 'Lines whose in-game text you edited'), opt('hidden', 'Hidden by prompts', 'Topic texts the player never sees, because each of their responses shows its own prompt instead'), opt('excluded', 'Excluded', 'Lines left out of voicing'), opt('removed', 'Removed', 'Lines a newer version of the mod removed')),
+      opt('changed', 'Changed in mod', 'Lines a newer version of the mod changed'), opt('edited', 'Edited by you', 'Lines whose in-game text you edited'), opt('hidden', 'Hidden by prompts', 'Topic texts the player never sees, because each of their responses shows its own prompt instead'), opt('excluded', 'Excluded', 'Lines left out of voicing'), opt('removed', 'Removed', 'Lines a newer version of the mod removed'), h('div.spacer'), legend),
       h('div.filter-tools',
-        h('div.legend',
-          h('span.legend-note', 'Review ', h('b', 'BROKEN'), ' and ', h('b', 'TOO LONG WILL CTD'), ' lines before Phase 2.'),
-          h('span.legend-item', h('span.appr.on.demo.fix', 'Fix'), '= Edit in the DBVO Fix plugin'),
-          h('span.legend-item', h('span.appr.on.demo', h('span.note', '♪')), '= Voiced in Phase 2'),
-          h('span.legend-item', h('span.demo-ex', icon('ban', { size: 14 })), '= Not voiced (excluded)')),
-        h('div.spacer'), helpButton('review-the-lines'), q, columnsMenu(grid),
+        h('span.legend-note', 'Review ', h('b', 'BROKEN'), ' and ', h('b', 'TOO LONG WILL CTD'), ' lines before Phase 2.'),
+        h('div.spacer'), helpButton('review-the-lines'),
+        h('button.btn.sm.ghost', { title: 'Find text in the in-game text of every line shown and replace it (goes into the DBVO Fix plugin like any edit)', onclick: findReplace }, 'Find and replace in all shown…'),
+        q, columnsMenu(grid),
         h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp1', showInsp); split.classList.toggle('no-insp', !showInsp); renderFilters(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel')));
+  }
+  function findReplace() {
+    findReplaceDialog({
+      pool: grid.rows, idOf: (l) => l.key, textOf: (l) => l.final, what: 'in-game text',
+      apply: async (items) => { try { mod = await rpc('line1.replaceTexts', { modId: mod.id, plugin: plugin.fileName, items }); plugin = mod.plugins.find((p) => p.fileName === plugin.fileName); renderAll(); } catch (e) { fail(e); } } });
   }
 
   function renderActions() {
@@ -558,9 +565,6 @@ export async function modView(id) {
             : h('span', { style: { color: 'var(--ok)' } }, 'no DBVO Fix plugin needed'),
         c.unreviewed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.unreviewed} flagged not reviewed`) : null),
       helpButton('fix-voice-and-exclude'),
-      h('button.btn.sm.ghost', { title: 'Find text in the in-game text of every line shown and replace it (goes into the DBVO Fix plugin like any edit)', onclick: () => findReplaceDialog({
-        pool: grid.rows, idOf: (l) => l.key, textOf: (l) => l.final, what: 'in-game text',
-        apply: async (items) => { try { mod = await rpc('line1.replaceTexts', { modId: mod.id, plugin: plugin.fileName, items }); plugin = mod.plugins.find((p) => p.fileName === plugin.fileName); renderAll(); } catch (e) { fail(e); } } }) }, 'Find and replace in all shown…'),
       h('div.spacer'),
       sel.length ? h('span.dim', `${sel.length} selected`) : null,
       sel.length ? h('button.btn.sm', { title: 'Use the script\'s suggestion for the ticked lines', onclick: () => bulk('accept') }, 'Use suggestions') : null,

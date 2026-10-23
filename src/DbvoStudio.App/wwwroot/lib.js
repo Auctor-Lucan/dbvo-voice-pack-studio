@@ -202,6 +202,11 @@ export class VGrid {
     const saved = storageKey ? store.get('cols:' + storageKey, {}) : {};
     for (const c of this.columns) if (saved[c.id]) { c.width = saved[c.id]; c.flex = 0; }
     this.hidden = new Set(storageKey ? store.get('hide:' + storageKey, []) : []);
+    // Click a column title to sort: ascending, descending, then back to the usual order.
+    const ss = storageKey ? store.get('sort:' + storageKey, null) : null;
+    this.sortId = ss && this.columns.some((c) => c.id === ss.id) ? ss.id : null;
+    this.sortDir = ss ? ss.dir : 0;
+    this.rawRows = [];
     this.rowHeight = rowHeight;
     this.rowKey = rowKey;
     this.rowClass = rowClass;
@@ -246,7 +251,11 @@ export class VGrid {
     this.setRowWidth();
     clear(this.head);
     for (const c of this.shown()) {
-      const cell = h('div.cell' + (c.align === 'center' ? '.center' : ''), { title: c.tip || '' }, c.title || '');
+      const sortable = c.title && c.sortable !== false;
+      const on = sortable && this.sortId === c.id && this.sortDir;
+      const cell = h('div.cell' + (c.align === 'center' ? '.center' : '') + (sortable ? '.sortable' : '') + (on ? '.sorted' : ''),
+        { title: (c.tip ? c.tip + '\n' : '') + (sortable ? 'Click to sort (again: reverse, a third time: the usual order)' : '') }, c.title || '', on ? h('span.sort-ind', this.sortDir > 0 ? ' ▲' : ' ▼') : null);
+      if (sortable) cell.addEventListener('click', (e) => { if (e.target.closest('.resizer')) return; this.toggleSort(c.id); });
       this.sizeCell(cell, c);
       if (c.resizable && c.title) {
         const grip = h('div.resizer', { title: 'Drag to resize. Double-click to reset.' });
@@ -292,7 +301,45 @@ export class VGrid {
     this.paint(true);
   }
 
+  toggleSort(id) {
+    if (this.sortId !== id) { this.sortId = id; this.sortDir = 1; }
+    else if (this.sortDir === 1) this.sortDir = -1;
+    else { this.sortId = null; this.sortDir = 0; }
+    if (this.storageKey) store.set('sort:' + this.storageKey, this.sortId ? { id: this.sortId, dir: this.sortDir } : null);
+    this.renderHead();
+    // Rows replaced in place (grid.rows[i] = …) since are picked up by their key.
+    const cur = new Map(this.rows.map((r) => [String(this.rowKey(r)), r]));
+    this.setRows(this.rawRows.map((r) => cur.get(String(this.rowKey(r))) || r));
+  }
+
+  /** The value a column sorts by: its sort(row) when given, else the text it shows (text boxes count by their value). */
+  sortKey(c, r) {
+    let v;
+    if (c.sort) v = c.sort(r);
+    else {
+      const n = c.render(r, 0);
+      if (n instanceof Node) {
+        const f = n.matches && n.matches('input,textarea,select') ? n : n.querySelector && n.querySelector('input:not([type=checkbox]),textarea,select');
+        v = f ? f.value : n.textContent;
+      } else v = n;
+    }
+    if (typeof v === 'string') { const t = v.trim(); if (/^-?[\d,]+(\.\d+)?$/.test(t)) return Number(t.replace(/,/g, '')); return t.toLowerCase(); }
+    return v == null ? '' : v;
+  }
+
   setRows(rows) {
+    this.rawRows = rows;
+    const c = this.sortId && this.sortDir ? this.columns.find((x) => x.id === this.sortId) : null;
+    if (c) {
+      const keyed = rows.map((r, i) => ({ r, i, k: this.sortKey(c, r) }));
+      const coll = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+      keyed.sort((a, b) => {
+        const x = a.k, y = b.k;
+        const d = typeof x === 'number' && typeof y === 'number' ? x - y : coll.compare(String(x), String(y));
+        return d ? d * this.sortDir : a.i - b.i;
+      });
+      rows = keyed.map((x) => x.r);
+    }
     this.rows = rows;
     const keys = new Set(rows.map((r) => String(this.rowKey(r))));
     for (const k of [...this.selected]) if (!keys.has(k)) this.selected.delete(k);

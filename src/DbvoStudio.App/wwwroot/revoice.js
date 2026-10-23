@@ -518,8 +518,8 @@ export async function revoiceView(id) {
     if (l.tag) {
       return h('span.row', { style: { width: '100%' } },
         h('span.grow.ellipsis', { title: l.tag }, diffAdded(l.spoken, l.tag)),
-        h('button.icon-btn', { title: 'Accept the suggested tag', onclick: (e) => { e.stopPropagation(); upd(l, 'acceptTags'); } }, '✓'),
-        h('button.icon-btn', { title: 'Undo', onclick: (e) => { e.stopPropagation(); upd(l, 'rejectTags'); } }, '✕'));
+        h('button.icon-btn', { title: 'Accept the suggested tag. To approve all shown [Tags], hold Shift when clicking.', onclick: (e) => { e.stopPropagation(); tagAll(e, l, 'acceptTags'); } }, '✓'),
+        h('button.icon-btn', { title: 'Undo the suggested tag. To undo all shown [Tags], hold Shift when clicking.', onclick: (e) => { e.stopPropagation(); tagAll(e, l, 'rejectTags'); } }, '✕'));
     }
     const inp = h('input', { type: 'text', value: l.spoken, disabled: l.excl });
     if (l.spokenEdited) { inp.style.color = 'var(--link)'; inp.title = 'Blue: differs from the subtitle. The arrow on the left restores it.'; }
@@ -916,6 +916,12 @@ export async function revoiceView(id) {
       h('button.btn.sm.ghost', { title: 'Find text in the spoken text of every line shown and replace it, with [tags] if you like', onclick: findReplace }, 'Find and replace in all shown…'),
       engines.size && !engines.has('elevenlabs') ? h('span.dim', 'Your speakers use local engines, which ignore audio tags.') : null,
       h('div.spacer'), ...viewTools());
+  }
+  // ✓ / ✕ on a suggested tag: this line, or with Shift every line shown that has a suggestion.
+  function tagAll(e, l, action) {
+    if (!e.shiftKey) { upd(l, action); return; }
+    const ids = grid.rows.filter((x) => x.tag && !x.excl).map((x) => x.id);
+    if (ids.length) bulk(action, ids);
   }
   function folderButton() {
     const btn = h('button.btn.sm.ghost', { title: 'Open this project\'s folders in Explorer' }, icon('folder', { size: 14 }), ' Open folder ▾');

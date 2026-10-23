@@ -236,15 +236,18 @@ public sealed partial class Backend
     {
         var used = proj.Books.Where(b => !b.Excluded && !b.Gone && b.Reader == "npc" && b.VoiceType.Length > 0).GroupBy(b => b.VoiceType, StringComparer.OrdinalIgnoreCase);
         var rows = new List<object>();
-        foreach (var g in used.OrderBy(g => g.Key))
+        var groups = used.Select(g => (Key: g.Key, Books: g.ToList())).ToList();
+        foreach (var c in proj.VoiceTypes.Values.Where(v => v.Custom && !groups.Any(g => g.Key.Equals(v.VoiceType, StringComparison.OrdinalIgnoreCase))))
+            groups.Add((c.VoiceType, new List<Book>()));
+        foreach (var g in groups.OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
         {
             proj.VoiceTypes.TryGetValue(g.Key, out var a);
             var key = BooksProject.VoiceTypeKey(g.Key);
             rows.Add(new
             {
-                voiceType = g.Key, key, books = g.Count(), engine = a?.Engine ?? "elevenlabs", voiceId = a?.VoiceId, voiceName = a?.VoiceName,
+                voiceType = g.Key, key, books = g.Books.Count, custom = a?.Custom ?? false, engine = a?.Engine ?? "elevenlabs", voiceId = a?.VoiceId, voiceName = a?.VoiceName,
                 female = a?.Female ?? IsFemaleVt(g.Key), level = a?.Level ?? "loud", useNarrator = a?.UseNarrator ?? false,
-                titles = g.Select(b => b.Title).Take(6).ToList(), stats = stats.GetValueOrDefault(key),
+                titles = g.Books.Select(b => b.Title).Take(6).ToList(), stats = stats.GetValueOrDefault(key),
             });
         }
         return rows;
@@ -262,7 +265,7 @@ public sealed partial class Backend
             excl = b.Excluded, exReason = b.ExcludeReason, suggest = b.SuggestInclude, gone = b.Gone, marked = b.Marked, updated = b.UpdatedText != null,
             chars = b.Spoken.Length, edited = b.SpokenEdited, records = b.Records.Count, edid = b.First?.EditorId ?? "", plugin = b.First?.Plugin ?? "",
             variants = b.Variants.Count, parts = lines.Count(l => l.Voice == voices.FirstOrDefault() && l.Variant.Length == 0),
-            voices = voices.Select(v => { var ls = BooksService.LinesOf(proj, v, b.Stem); return new { v, status = BooksService.StatusOf(ls), miss = ls.Any(l => l.IsMissing), edited = ls.Any(l => l.IsEdited) }; }).ToList(),
+            voices = voices.Select(v => { var ls = BooksService.LinesOf(proj, v, b.Stem); return new { v, status = BooksService.StatusOf(ls), miss = ls.Any(l => l.IsMissing), edited = ls.Any(l => l.IsEdited), playable = ls.Count > 0 && ls.All(l => !l.IsMissing) }; }).ToList(),
             serious = issues.Count(i => i.Serious), notes = issues.Count(i => !i.Serious),
             hasText = b.InGame.Length > 0,
         };
@@ -452,7 +455,9 @@ public sealed partial class Backend
         {
             foreach (var vt in Strings(p, "voiceTypes").DefaultIfEmpty(S(p, "voiceType")).Where(x => x.Length > 0))
             {
+                if (B(p, "remove")) { if (proj.VoiceTypes.TryGetValue(vt, out var r)) r.Custom = false; if (!proj.Books.Any(b => b.Reader == "npc" && b.VoiceType.Equals(vt, StringComparison.OrdinalIgnoreCase))) proj.VoiceTypes.Remove(vt); continue; }
                 if (!proj.VoiceTypes.TryGetValue(vt, out var a)) proj.VoiceTypes[vt] = a = new VoiceTypeVoice { VoiceType = vt, Female = IsFemaleVt(vt) };
+                if (B(p, "add")) a.Custom = true;
                 if (p.TryGetProperty("engine", out var en) && en.ValueKind == JsonValueKind.String) { a.Engine = en.GetString()!; a.VoiceId = null; a.VoiceName = null; }
                 if (p.TryGetProperty("voiceId", out var vi)) { a.VoiceId = vi.ValueKind == JsonValueKind.String && vi.GetString()!.Length > 0 ? vi.GetString() : null; a.VoiceName = a.VoiceId == null ? null : S(p, "voiceName", a.VoiceId); }
                 if (NB(p, "female") is { } f) a.Female = f;
@@ -502,6 +507,7 @@ public sealed partial class Backend
         if (s != null) foreach (var v in s.Index.VoiceTypes.Values.Where(v => BookAuthors.IsVanillaPlugin(v.Key.Plugin))) names.Add(v.EditorId);
         else foreach (var v in VoiceTypeTemplates.Shared.VoiceTypes) names.Add(v);
         foreach (var b in proj.Books) { if (b.VoiceType.Length > 0) names.Add(b.VoiceType); foreach (var c in b.VoiceTypeCandidates) names.Add(c); }
+        foreach (var v in proj.VoiceTypes.Values.Where(v => v.Custom)) names.Add(v.VoiceType);
         return names.Where(n => !n.StartsWith("Cr", StringComparison.Ordinal)).ToList();
     }
 

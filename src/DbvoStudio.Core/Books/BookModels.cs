@@ -131,6 +131,8 @@ public sealed class VoiceTypeVoice
     public string Level { get; set; } = "loud";
     /// <summary>Leave these books to the narrator(s) instead.</summary>
     public bool UseNarrator { get; set; }
+    /// <summary>Added by the user (Narrators &amp; authors → Add a voice type): listed and selectable for every book even before a book uses it.</summary>
+    public bool Custom { get; set; }
 }
 
 /// <summary>One part of one book for one voice: the unit that is generated (a take per part).</summary>

@@ -98,6 +98,7 @@ export async function bookProjectView(id) {
   const body = h('div', { style: { flex: '1', minHeight: '0', display: 'flex', flexDirection: 'column' } });
   view.append(head, body);
 
+  let vtCache = null; // voice types for the pickers (refreshed when you add one)
   const allVoices = () => [...proj.narrators.map((n) => ({ key: n.key, name: n.name, kind: 'narrator' })), ...proj.voiceTypes.map((v) => ({ key: v.key, name: v.voiceType, kind: 'vt' }))];
 
   // ---------------------------------------------------------------- head
@@ -374,16 +375,35 @@ export async function bookProjectView(id) {
           h('td', proj.narrators.length > 1 ? h('button.icon-btn', { title: 'Remove this narrator', onclick: async () => { if (await confirmBox('Remove narrator?', `${n.name}'s takes stay on disk but leave the project.`, 'Remove', true)) { try { proj = await rpc('books.voice', { id, kind: 'narrator', narratorId: n.id, remove: true, force: true }); reindex(); renderAll(); } catch (e) { fail(e); } } } }, '×') : null))))),
       h('div.section-head', { style: { marginTop: '16px', maxWidth: '1200px' } }, h('h2', 'NPC voice types'), h('span.faint', proj.npcVoices ? `${proj.voiceTypes.length} · ${vtt.books.toLocaleString()} books · ${vtt.left.toLocaleString()} characters left` : 'off: narrated books only (Setup)')),
       !proj.npcVoices ? h('div.faint', { style: { padding: '8px 0' } }, 'NPC voices are off, so books written by NPCs are left out. Turn them on in Setup → Names and output.')
-        : !proj.voiceTypes.length ? h('div.faint', { style: { padding: '8px 0' } }, 'No book is read by an NPC voice. In the Books tab, set a book\'s reader to an NPC voice type to add one here.')
-          : h('table.tbl.voices-tbl', h('thead', h('tr', h('th', 'Voice type'), h('th', { title: 'Books this voice type reads' }, 'Books'), h('th', 'Engine · voice'), h('th', 'Level'), h('th', { title: 'Let the narrator(s) read these books instead' }, 'Narrator instead'), h('th', 'Progress'))),
+        : !proj.voiceTypes.length ? [h('div.faint', { style: { padding: '8px 0' } }, 'No book is read by an NPC voice yet. Set a book\'s reader to an NPC voice type in the Books tab, or add voice types below.'), addVtRow()]
+          : [h('table.tbl.voices-tbl', h('thead', h('tr', h('th', 'Voice type'), h('th', { title: 'Books this voice type reads' }, 'Books'), h('th', 'Engine · voice'), h('th', 'Level'), h('th', { title: 'Let the narrator(s) read these books instead' }, 'Narrator instead'), h('th', 'Progress'), h('th', ''))),
             h('tbody', proj.voiceTypes.slice().sort((a, b) => (a.useNarrator - b.useNarrator) || (state(a.stats, a.voiceId) - state(b.stats, b.voiceId)) || a.voiceType.localeCompare(b.voiceType)).map((v) => h('tr' + (v.useNarrator ? '.muted' : v.voiceId ? '' : '.needs-voice'),
               h('td', h('b.mono', v.voiceType), h('div.faint.ellipsis', { title: v.titles.join('\n'), style: { maxWidth: '240px', fontSize: '12px' } }, v.titles.slice(0, 3).join(' · '))),
               h('td', h('button.btn.sm.ghost', { title: 'Show these books', onclick: () => { voiceFilter = v.key; tab = 'books'; store.set('bk-tab:' + id, tab); renderAll(); } }, String(v.books))),
               h('td', v.useNarrator ? h('span.faint', 'read by the narrator(s)') : voicePick(v, 'vt')),
               h('td', v.useNarrator ? null : level(v, 'vt')),
               h('td', switchEl(v.useNarrator, (x) => setVoice(v, 'vt', { useNarrator: x }), '', { title: 'The narrator(s) read these books' })),
-              h('td', v.useNarrator ? null : progressCell(v.stats)))))));
+              h('td', v.useNarrator ? null : progressCell(v.stats)),
+              h('td', v.custom && !v.books ? h('button.icon-btn', { title: 'Remove this voice type you added (no book uses it)', onclick: () => setVoice(v, 'vt', { remove: true }).then(() => { vtCache = null; }) }, '×') : null))))), addVtRow()]);
     return wrap;
+  }
+
+  /** Add any voice type (its EditorID, e.g. FemaleCommoner or a mod's own): it can then be picked for every book. */
+  function addVtRow() {
+    const dl = h('datalist', { id: 'bk-vt-list' });
+    rpc('books.voiceTypes', { id }).then((l) => dl.append(...l.map((v) => h('option', { value: v })))).catch(() => {});
+    const inp = h('input', { type: 'text', placeholder: 'Voice type EditorID, e.g. FemaleCommoner', list: 'bk-vt-list', style: { width: '300px' }, title: 'Any voice type: the vanilla ones are suggested, a mod\'s own works too' });
+    const add = async () => {
+      const vt = inp.value.trim();
+      if (!vt) return;
+      if (proj.voiceTypes.some((x) => x.voiceType.toLowerCase() === vt.toLowerCase())) { toast(`${vt} is already listed.`, true); return; }
+      vtCache = null;
+      await setVoice({ voiceType: vt }, 'vt', { add: true });
+      toast(`${vt} added: pick it as the reader of any book.`);
+    };
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+    return h('div.row', { style: { gap: '8px', marginTop: '10px', maxWidth: '1200px' } }, h('span.faint', 'Add a voice type:'), inp, dl,
+      h('button.btn.sm', { title: 'Add this voice type so any book can be read in it', onclick: add }, '+ Add'));
   }
 
   // ---------------------------------------------------------------- books
@@ -414,7 +434,7 @@ export async function bookProjectView(id) {
         h('button.act-btn' + (inFlight.has(b.stem) ? '.spinning' : ''), { title: genBlock(b) || (b.voices.some((v) => v.miss || v.edited) ? 'Generate this book\'s missing and edited parts (every voice that reads it)' : 'A new take of every part (every voice that reads it)'), disabled: !!genBlock(b), onclick: (e) => { e.stopPropagation(); generate('ticked', [b.stem], { single: true }); } }, icon('regen')),
         h('button.act-btn', { title: 'Open the editor (or double-click the row)', onclick: (e) => { e.stopPropagation(); openEditor(b.stem); } }, icon('edit')),
         h('button.act-btn.flag-btn' + (b.marked ? '.on.warn' : ''), { title: b.marked ? 'Flagged - click to clear' : 'Flag to revisit', onclick: (e) => { e.stopPropagation(); bookAct(b, 'mark'); } }, icon('flag')),
-        h('button.act-btn', { title: b.voices.some((v) => v.status === 'ready') ? 'Play the whole book (joined, with reverb and loudness)' : 'No complete take yet', disabled: !b.voices.some((v) => v.status === 'ready'), onclick: (e) => { e.stopPropagation(); playBook(b); } }, icon('play')),
+        h('button.act-btn', { title: b.voices.some((v) => v.playable) ? 'Play the whole book (joined, with reverb and loudness)' : 'No complete take yet', disabled: !b.voices.some((v) => v.playable), onclick: (e) => { e.stopPropagation(); playBook(b); } }, icon('play')),
         h('button.act-btn', { title: 'Stop playback', onclick: (e) => { e.stopPropagation(); audio.pause(); } }, h('span', { style: { fontSize: '11px' } }, '■'))) },
     ],
   });
@@ -546,7 +566,7 @@ export async function bookProjectView(id) {
           b.reader === 'npc' && !b.confirmed && b.vt ? h('button.btn.sm', { title: 'This attribution is right: mark it CONFIRMED', onclick: () => bookAct(b, 'confirm') }, '✓ Confirm') : null),
         b.via ? h('div.faint', { style: { fontSize: '12px', marginTop: '4px' } }, b.via, b.reader === 'npc' ? ` · ${CERT[b.confirmed ? 'Confirmed' : b.vtCert] || ''}` : '') : null),
       h('div', h('div.field-label', 'Audio'), b.voices.length ? h('div.col', { style: { gap: '4px' } }, b.voices.map((v) => h('div.row', h('span.dot.' + DOT[v.status], { title: DOT_TIP[v.status] }), h('span.grow.ellipsis', voiceName(v.v)), h('span.faint', DOT_TIP[v.status].split(':')[0]),
-        h('button.icon-btn', { title: 'Play the whole book in this voice', disabled: v.status !== 'ready', onclick: () => playBook(b, v.v) }, '▶')))) : h('div.faint', genBlock(b))),
+        h('button.icon-btn', { title: 'Play the whole book in this voice', disabled: !v.playable, onclick: () => playBook(b, v.v) }, '▶')))) : h('div.faint', genBlock(b))),
       b.serious || b.notes ? h('div', h('div.field-label', 'Checks'), h('div', { style: { color: b.serious ? 'var(--warn)' : 'var(--dim)' } }, `${b.serious ? b.serious + ' problem(s) · ' : ''}${b.notes} note(s): see them in the editor.`)) : null,
       b.updated ? h('div.banner.info', { style: { margin: 0 } }, h('span', 'The built-in set has an updated text for this book.'), h('div.spacer'), h('button.btn.sm', { title: 'Open the editor to compare and choose', onclick: () => openEditor(b.stem) }, 'Compare')) : null,
       h('div.row', h('button.btn.primary', { title: 'Edit the spoken text, the parts and the takes', onclick: () => openEditor(b.stem) }, icon('edit', { size: 14 }), ' Open editor'), h('div.spacer'),
@@ -625,7 +645,7 @@ export async function bookProjectView(id) {
   }
 
   async function playBook(b, voice) {
-    const v = voice || (b.voices.find((x) => x.status === 'ready') || {}).v;
+    const v = voice || (b.voices.find((x) => x.status === 'ready') || b.voices.find((x) => x.playable) || {}).v;
     if (!v) return;
     try { toast('Joining the parts…'); const r = await rpc('books.join', { id, stem: b.stem, voice: v }); audio.src = r.url; audio.play().catch(fail); toast(`${voiceName(v)} · ${fmtTime(r.seconds)} · ${r.lufs.toFixed(1)} LUFS · peak ${r.peakDb.toFixed(1)} dB`); } catch (e) { fail(e); }
   }
@@ -716,6 +736,16 @@ export async function bookProjectView(id) {
     const countEl = h('span.faint');
     function renderCount() { countEl.textContent = `${ta.value.length.toLocaleString()} characters${dirty ? ' · unsaved (Ctrl+S)' : ''}`; }
 
+    // Who reads this book: the narrator(s), or any NPC voice type (the project's own and the ones you added).
+    function readerSel() {
+      const bk = d.book;
+      const sel = h('select', { title: 'Who reads this book: the narrator(s), or an NPC voice type', style: { maxWidth: '230px' } },
+        h('option', { value: '', selected: bk.reader !== 'npc' }, 'Read by the narrator(s)'));
+      const fill = (list) => { const names = new Set(list); if (bk.vt) names.add(bk.vt); sel.append(...[...names].sort((a, b) => a.localeCompare(b)).map((v) => h('option', { value: v, selected: bk.reader === 'npc' && v === bk.vt }, 'Voice type: ' + v))); };
+      if (vtCache) fill(vtCache); else rpc('books.voiceTypes', { id }).then((l) => { vtCache = l; fill(l); }).catch(() => fill([]));
+      sel.addEventListener('change', () => { if (sel.value) act('reader', 'npc', { voiceType: sel.value }); else act('reader', 'narrator'); });
+      return sel;
+    }
     async function act(action, value, extra = {}) {
       try { if (dirty) await saveText(); d = await rpc('books.book', { id, stem, action, value, ...extra }); renderEd(true); replaceBook(d.book); } catch (e) { fail(e); }
     }
@@ -769,6 +799,7 @@ export async function bookProjectView(id) {
       breaks = d.breaks; manual = d.manual;
       clear(headBox).append(
         h('div.grow', h('h2', b.title || stem), h('div.faint.mono', `${stem}.xwm · ${d.records.map((r) => `${r.editorId} ${r.formId}~${r.plugin}`).join(' · ')}`)),
+        readerSel(),
         d.voices.length > 1 ? segmented(d.voices.map((x) => [x.key, x.name, x.hasVoice ? 'Show this voice\'s takes' : 'This voice has no voice picked yet']), voice, (k) => { voice = k; store.set('bk-ed-voice', k); renderEd(false); }) : d.voices.length ? h('span.faint', d.voices[0].name) : h('span.faint', 'No voice reads this book'),
         helpButton('books-and-the-editor'),
         h('button.btn', { title: 'Close (Esc). The text is saved when you leave the box.', onclick: close }, 'Close'));
