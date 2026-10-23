@@ -131,6 +131,44 @@ public class Phase1ExtrasTests : IDisposable
     }
 
     [Fact]
+    public void An_older_fix_import_is_removed_by_choosing_the_fix_plugin_again()
+    {
+        var b = new TestPluginBuilder();
+        b.Masters.Add("Update.esm");
+        b.AddTopic(0x02000800, "T1", "What is your homeland like? ", (0x02000801, null));
+        b.AddTopic(0x02000802, "T2", "No Serana. *laughs*", (0x02000803, null));
+        var srcPath = Path.Combine(_dir, "Old.esp");
+        File.WriteAllBytes(srcPath, b.Build());
+        var mod = new Mod { Name = "Old" };
+        var svc = new Phase1Service(_lib, _settings);
+        svc.Import(mod, srcPath);
+        var p = mod.Plugins.Single();
+        var t1Script = p.Lines.Single(l => l.FormId == 0x02000800).Final;
+        var t2Script = p.Lines.Single(l => l.FormId == 0x02000802).Final;
+
+        var fx = new TestPluginBuilder();
+        fx.Masters.Clear();
+        fx.Masters.Add("Old.esp");
+        fx.AddTopic(0x00000800, "T1", "Where are you from?");
+        fx.AddTopic(0x00000802, "T2", "No Serana. (laughs)");
+        var fixPath = Path.Combine(_dir, "DBVO Fix - Old.esp");
+        File.WriteAllBytes(fixPath, fx.Build());
+        svc.ImportFixPlugin(mod, p, fixPath);
+
+        // As 7.3 and older imported it: no record of the earlier text. T2 was edited by hand afterwards.
+        foreach (var l in p.Lines) l.FixImport = null;
+        Phase1Service.SetFinal(p.Lines.Single(l => l.FormId == 0x02000802), "No Serana. Ha.");
+
+        var (restored, kept) = svc.RemoveFixPlugin(mod, p, fixPath);
+        Assert.Equal(1, restored);
+        Assert.Equal(1, kept);
+        Assert.Equal(t1Script, p.Lines.Single(l => l.FormId == 0x02000800).Final);
+        Assert.Equal("No Serana. Ha.", p.Lines.Single(l => l.FormId == 0x02000802).Final);
+        Assert.NotEqual(t2Script, "No Serana. Ha.");
+        Assert.Null(p.ImportedFixPlugin);
+    }
+
+    [Fact]
     public void Voice_dictionary_wins_and_longer_words_first()
     {
         var merged = Phase2Service.MergePronunciations(

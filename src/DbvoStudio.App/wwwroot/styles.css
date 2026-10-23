@@ -728,6 +728,7 @@ select.bad-sel { border-color: var(--bad); color: var(--bad); }
 
 /* Phase 1: the imported DBVO Fix chip shows a cross on hover; clicking removes the import */
 .fix-remove { position: relative; cursor: pointer; font: inherit; }
+.appr.demo.fix-remove { pointer-events: auto; cursor: pointer; } /* the legend chips ignore the mouse; this one is a button */
 .fix-remove:hover { color: transparent !important; border-color: var(--bad) !important; background: color-mix(in srgb, var(--bad) 18%, transparent) !important; }
 .fix-remove:hover::after { content: '✕'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--bad); font-weight: 700; }
 
@@ -745,3 +746,9 @@ select.bad-sel { border-color: var(--bad); color: var(--bad); }
 @keyframes busy-march { from { background-position: 0 0, 0 0; } to { background-position: 18px 0, 0 0; } }
 @keyframes busy-sweep { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
 @keyframes busy-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Reading text size (Global Settings → Appearance): the landing page, the guide, settings pages and dialogs are scaled up;
+   the workspaces (grids, toolbars, line panels) keep their compact size. */
+html { --read-zoom: 1.15; }
+.reading, .help-drawer .help-body, .modal-card:not(.wide) { zoom: var(--read-zoom); }
+.reading .guide img, .help-drawer .help-body img { zoom: calc(1 / var(--read-zoom)); } /* screenshots stay at their own size */

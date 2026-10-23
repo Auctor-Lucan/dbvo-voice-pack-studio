@@ -151,7 +151,7 @@ export async function bookProjectView(id) {
 
   // ---------------------------------------------------------------- setup
   function renderSetup() {
-    const wrap = h('div.view-body');
+    const wrap = h('div.view-body.reading');
     const sec = (title, help, extra, ...rows) => h('div.section', h('div.section-head', h('h2', title), help ? helpButton(help) : null, h('div.spacer'), extra), h('div.section-body', rows));
     const srow = (label, help, control) => h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', { title: typeof help === 'string' ? help : label }, control));
     const text = (val, onSet, o = {}) => { const i = h('input', { type: 'text', value: val || '', placeholder: o.placeholder || '', style: { width: o.width || '100%' }, title: o.title || '' }); i.addEventListener('change', () => onSet(i.value.trim())); return i; };
@@ -341,7 +341,7 @@ export async function bookProjectView(id) {
   }
 
   function renderVoices() {
-    const wrap = h('div.view-body');
+    const wrap = h('div.view-body.reading');
     if (Object.values(voiceLists).every((x) => x == null)) loadVoices();
     const level = (row, kind) => segmented([['loud', 'Loud', 'The IVBOS release chain: −12 LUFS and the limiter'], ['normal', 'Normal', 'Limiter only; female voices get +1.8 dB']], row.level || 'loud', (v) => setVoice(row, kind, { level: v }));
     const gender = (row, kind) => segmented([[false, 'Male'], [true, 'Female']], !!row.female, (v) => setVoice(row, kind, { female: v === true || v === 'true' }));

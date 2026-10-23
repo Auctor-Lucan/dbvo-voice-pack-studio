@@ -89,7 +89,7 @@ export async function homeView() {
   const s = await refreshState();
   const revoices = await rpc('revoice.list').catch(() => []);
   const books = await rpc('books.list').catch(() => []);
-  const view = h('div.view.home');
+  const view = h('div.view.home.reading');
 
   // ---- left: welcome, counts and the studio check
   const voiced = s.patches.reduce((a, p) => a + (p.generated || 0), 0);

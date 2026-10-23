@@ -28,7 +28,10 @@ export function applyBackground(ui) {
     root.classList.add('shade-' + (ui.homeBgShade || 'normal'));
     root.style.setProperty('--app-bg', `url("https://user.dbvo/${encodeURIComponent(ui.homeBg)}?v=${ui.homeBgV || ''}")`);
   } else root.style.removeProperty('--app-bg');
+  root.style.setProperty('--read-zoom', String(READ_ZOOM[ui.readSize] || READ_ZOOM.larger));
 }
+/** Reading text size for the landing page, the guide, settings pages and dialogs (not the workspaces). */
+export const READ_ZOOM = { normal: 1, larger: 1.15, largest: 1.3 };
 
 export async function refreshState() {
   app.state = await rpc('state');

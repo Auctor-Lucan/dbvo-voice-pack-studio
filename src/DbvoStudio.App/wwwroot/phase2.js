@@ -1205,7 +1205,7 @@ export async function patchView(id) {
       h('span.badge.b-skip', { title: voice.naming === 'Legacy' ? 'File names: Legacy (DBVO 1.0), from the line text. Set per voice pack.' : 'File names: DBVO 2.0 hashes. Set per voice pack.' }, voice.naming === 'Legacy' ? 'Legacy names' : 'DBVO 2.0 names'),
       foldersMenu(),
       h('button.btn.sm.ghost', { title: 'Re-read Phase 1 now (also happens every time you open this patch)', onclick: sync }, '⟳ Refresh'),
-      h('button.btn.sm.ghost.danger', { title: 'Delete this patch and its takes', onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes its takes too. Files already exported stay where they are. A backup of the project is made first.', 'Delete', true)) { await rpc('patch.delete', { id }); go('patches'); } } }, 'Delete'));
+      h('button.btn.sm.ghost.danger', { title: 'Delete this patch and its takes', onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes the patch and every take it made (their WAV and LIP files in the Library). Stays: the Phase 1 mods, the voice pack, and every WAV + LIP, .fuz and DBVO Fix file already exported to your folders; a new patch with the same WAV + LIP folder picks those WAV + LIP files up again as takes. A backup of the project files is made first (backups hold no audio).', 'Delete', true)) { await rpc('patch.delete', { id }); go('patches'); } } }, 'Delete'));
   }
 
   async function sync() {
@@ -1257,6 +1257,10 @@ export async function patchView(id) {
     const s = app.state;
     const name = h('input', { type: 'text', value: patch.name });
     const refOn = new Set(patch.referenceIds);
+    // The Phase 1 mods this patch reads. A mod deleted and imported again is a new mod: tick it here and the takes the
+    // patch kept aside for its lines come back.
+    const modOn = new Set(patch.modIds.filter((m) => s.mods.some((x) => x.id === m)));
+    const goneMods = patch.modIds.length - modOn.size;
     const sources = [...(patch.sourceFolders || [])];
     let owWav = patch.overwriteWavLip, owFuz = patch.overwriteFuz, owFix = patch.overwriteFix !== false;
     let apprOnly = !!patch.exportApprovedOnly;
@@ -1317,12 +1321,17 @@ export async function patchView(id) {
             switchEl(owFix, (v) => { owFix = v; }, 'DBVO Fix', { title: 'DBVO Fix plugins in the final folder. Off: you are asked before one with the same name is replaced. The working copy in the DBVO Fix folder is always replaced.' }))),
         row('Export', 'Off (the usual): every line with a take is exported; approving is optional. On: only lines approved in Review (▶ Review, then A). Files of lines not approved that earlier exports wrote are listed before anything is deleted.',
           switchEl(apprOnly, (v) => { apprOnly = v; }, 'Only lines approved in Review', { title: 'Export and build .fuz for approved lines only. Approving never changes anything else.' })),
+        row('Mods', 'The Phase 1 mods this patch voices. Lines of a mod you untick leave the patch, but their takes are kept and come back if you tick it again.',
+          h('div.col', { style: { gap: '4px' } },
+            goneMods ? h('div', { style: { color: 'var(--warn)', fontSize: '12.5px' } }, `${goneMods} mod(s) of this patch were deleted in Phase 1. Imported again, they are new mods: tick them here to bring their lines (and the kept takes) back.`) : null,
+            h('div.box', { style: { maxHeight: '170px', overflow: 'auto', padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } }, s.mods.map((m) => switchEl(modOn.has(m.id), (v) => { if (v) modOn.add(m.id); else modOn.delete(m.id); }, `${m.name}  ·  ${m.category || ''}`))))),
         row('Omit lines users have', 'Only packs every user installs',
           s.references.length ? h('div.col', { style: { gap: '4px' } }, s.references.map((r) => switchEl(refOn.has(r.id), (v) => { if (v) refOn.add(r.id); else refOn.delete(r.id); }, `${r.name}  ·  ${r.lineCount} lines`)))
             : h('div.faint', 'None yet: Global Settings → Omit references.'))),
     ], [{ label: 'Cancel', value: false }, { label: 'Save', primary: true, value: true }], { wide: true, help: 'folders-options' });
     if (!ok) return;
-    const modIds = patch.modIds;
+    if (!modOn.size) { toast('A patch needs at least one mod: nothing was saved.', true); return; }
+    const modIds = [...modOn];
     try {
       patch = await withBusy(rpc('patch.saveMeta', {
         id, name: name.value, modIds, referenceIds: [...refOn],

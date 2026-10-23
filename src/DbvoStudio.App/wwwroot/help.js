@@ -142,7 +142,7 @@ export async function helpView(anchor) {
   view.append(
     h('div.view-head', h('h1', 'User Guide'), h('span.sub', 'Every screen and button, explained. The ? buttons in the app open the matching section.'), h('div.spacer'),
       h('button.btn.sm.ghost', { title: 'Back to the landing page', onclick: () => go('home') }, '← Home')),
-    h('div.help-split', h('div.help-side', h('div.help-search', icon('search', { size: 15 }), q), results, toc), content));
+    h('div.help-split.reading', h('div.help-side', h('div.help-search', icon('search', { size: 15 }), q), results, toc), content));
   requestAnimationFrame(() => { if (anchor) jump(anchor); });
   return view;
 }

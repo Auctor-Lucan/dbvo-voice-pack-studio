@@ -772,15 +772,30 @@ export async function modView(id) {
 
   async function removeFix() {
     const name = plugin.importedFixPlugin;
-    if (!await confirmBox('Remove the imported DBVO Fix plugin?', `The lines ${name} changed get their earlier text back. Lines you edited by hand after importing keep your edit. The file itself is not touched.`, 'Remove', true)) return;
+    let path = '';
+    if (plugin.fixUndo) {
+      if (!await confirmBox('Remove the imported DBVO Fix plugin?', `The lines ${name} changed get their earlier text back. Lines you edited by hand after importing keep your edit. The file itself is not touched.`, 'Remove', true)) return;
+    } else {
+      // Imported by 7.3 or older: the earlier texts weren't kept, so the fix plugin itself shows which lines it set.
+      const v = await modal('Remove the imported DBVO Fix plugin?', [
+        h('div', `${name} was imported by an older version of DBVO Studio, which didn't keep the lines' earlier text.`),
+        h('div', 'Choose the same DBVO Fix plugin file again: every line that still reads as that plugin wrote it goes back to the script\'s version. Lines you edited by hand since keep your edit.'),
+        h('div.faint', 'Without the file, the import is removed but its texts stay; ↶ on a row then takes that line back to the original.'),
+      ], [{ label: 'Cancel', value: null }, { label: 'Remove, keep the texts', value: 'keep' }, { label: 'Choose the file…', primary: true, value: 'file' }]);
+      if (!v) return;
+      if (v === 'file') {
+        path = await rpc('pick.file', { title: `Choose ${name} again`, filter: 'Skyrim plugins|*.esp;*.esm;*.esl' });
+        if (!path) return;
+      }
+    }
     try {
-      const r = await rpc('mod.removeFix', { id, plugin: plugin.fileName });
+      const r = await rpc('mod.removeFix', { id, plugin: plugin.fileName, path });
       mod = r.mod;
       plugin = mod.plugins.find((p) => p.fileName === plugin.fileName);
       renderAll();
       toast(r.restored || r.kept
         ? `${name} removed: ${r.restored} line(s) back to their earlier text${r.kept ? `, ${r.kept} kept your later edit` : ''}.`
-        : `${name} removed. Its lines were imported by an older version, so their texts stay: use ↶ on a row to go back to the original.`);
+        : `${name} removed. ${path ? 'No line still read as it wrote them.' : 'Its texts stay: use ↶ on a row to go back to the original.'}`);
     } catch (e) { fail(e); }
   }
 
@@ -809,7 +824,15 @@ export async function modView(id) {
   }
 
   async function delMod() {
-    if (!(await confirmBox('Delete mod?', `Delete "${mod.name}" and its Phase 1 work? A backup is made first.`, 'Delete', true))) return;
+    // Say exactly what goes and what stays, and which DBVO Patches lose their lines.
+    const users = (app.state.patches || []).filter((p) => (p.modIds || []).includes(id));
+    const ok = await modal('Delete mod?', [
+      h('div', `Deletes "${mod.name}" and its Phase 1 work: the line review, your text edits, the DBVO Fix decisions and the copies of its plugins kept in the Library.`),
+      h('div', h('b', 'Stays: '), 'your original plugin files, and every DBVO Fix plugin, topic file, WAV, LIP and .fuz already exported to your folders.'),
+      users.length ? h('div.banner.warn', { style: { margin: 0 } }, h('div', h('b', `${users.length} DBVO Patch(es) read this mod: `), users.map((p) => p.name).join(', '), '. They lose its lines. Their takes are kept in the patch, and come back if you import the mod again and tick it in the patch\'s Folders & options → Mods.')) : null,
+      h('div.faint', 'A backup of the project files is made first (backups hold no audio).'),
+    ], [{ label: 'Cancel', value: false }, { label: 'Delete', danger: true, value: true }]);
+    if (!ok) return;
     await rpc('mod.delete', { id });
     go('mods');
   }

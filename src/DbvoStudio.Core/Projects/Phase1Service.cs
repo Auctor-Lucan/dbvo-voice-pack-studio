@@ -265,20 +265,10 @@ public sealed class Phase1Service
     public (int Applied, int Markers, int Unmatched) ImportFixPlugin(Mod mod, ModPlugin target, string fixPath)
     {
         if (target.IsTopicFile) throw new InvalidOperationException("A topic file has no DBVO Fix plugin.");
-        var fix = PluginFile.Read(fixPath);
-        var source = PluginFile.Read(target.StoredFile, new HashSet<string>());
         int applied = 0, markers = 0, unmatched = 0;
-        var byKey = target.Lines.ToDictionary(l => l.Key);
-        foreach (var rec in fix.Records)
+        foreach (var (line, text) in FixTexts(target, fixPath))
         {
-            var sub = rec.Signature == "DIAL" ? rec.Get("FULL") : rec.Get("RNAM");
-            if (sub == null) continue;
-            var text = fix.DecodeLString(sub.Data);
-            if (text == null) continue;
-            uint? local = MapFormId(rec.FormId, fix, source);
-            if (local == null) { unmatched++; continue; }
-            var key = new Phase1Line { FormId = local.Value, Field = rec.Signature == "DIAL" ? LineField.TopicText : LineField.Prompt }.Key;
-            if (!byKey.TryGetValue(key, out var line)) { unmatched++; continue; }
+            if (line == null) { unmatched++; continue; }
             if (text.Contains("BROKEN LINE", StringComparison.Ordinal) || text.Contains("TOO LONG WILL CTD", StringComparison.Ordinal))
             {
                 markers++;
@@ -296,11 +286,32 @@ public sealed class Phase1Service
         return (applied, markers, unmatched);
     }
 
+    /// <summary>The dialogue texts of a DBVO Fix plugin, matched to the target plugin's lines (line is null when no line matches).</summary>
+    private static IEnumerable<(Phase1Line? Line, string Text)> FixTexts(ModPlugin target, string fixPath)
+    {
+        var fix = PluginFile.Read(fixPath);
+        var source = PluginFile.Read(target.StoredFile, new HashSet<string>());
+        var byKey = target.Lines.ToDictionary(l => l.Key);
+        foreach (var rec in fix.Records)
+        {
+            var sub = rec.Signature == "DIAL" ? rec.Get("FULL") : rec.Get("RNAM");
+            if (sub == null) continue;
+            var text = fix.DecodeLString(sub.Data);
+            if (text == null) continue;
+            uint? local = MapFormId(rec.FormId, fix, source);
+            if (local == null) { yield return (null, text); continue; }
+            var key = new Phase1Line { FormId = local.Value, Field = rec.Signature == "DIAL" ? LineField.TopicText : LineField.Prompt }.Key;
+            yield return (byKey.TryGetValue(key, out var line) ? line : null, text);
+        }
+    }
+
     /// <summary>
     /// Remove an imported DBVO Fix plugin: lines it changed get their earlier text back. Lines edited by hand after the
-    /// import keep the hand edit. Returns (restored, keptEdits).
+    /// import keep the hand edit. Imports made before the earlier text was kept (7.3 and older) need the fix plugin
+    /// file again (fixPath): its lines that still read as the plugin wrote them go back to the script's version.
+    /// Returns (restored, keptEdits).
     /// </summary>
-    public (int Restored, int Kept) RemoveFixPlugin(Mod mod, ModPlugin target)
+    public (int Restored, int Kept) RemoveFixPlugin(Mod mod, ModPlugin target, string? fixPath = null)
     {
         int restored = 0, kept = 0;
         foreach (var line in target.Lines.Where(l => l.FixImport != null))
@@ -310,6 +321,17 @@ public sealed class Phase1Service
             else kept++;
             line.FixImport = null;
         }
+        if (!string.IsNullOrWhiteSpace(fixPath))
+            foreach (var (line, text) in FixTexts(target, fixPath))
+            {
+                if (line == null || text.Contains("BROKEN LINE", StringComparison.Ordinal) || text.Contains("TOO LONG WILL CTD", StringComparison.Ordinal)) continue;
+                // As the script left it before the import: its suggestion for valid and fixed lines, empty for broken ones.
+                var script = line.Kind is LineKind.Valid or LineKind.Fixed ? line.Suggested : null;
+                if (line.Final == script) continue;                       // the import changed nothing here
+                if (line.Final != Rules.ScriptRules.Detofu(text.Trim())) { kept++; continue; }   // edited by hand since
+                line.Final = script; line.UserEdited = false; line.Reviewed = false;
+                restored++;
+            }
         target.ImportedFixPlugin = null;
         _lib.Save(mod);
         return (restored, kept);

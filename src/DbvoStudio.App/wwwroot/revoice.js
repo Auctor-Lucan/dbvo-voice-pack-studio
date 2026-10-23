@@ -150,7 +150,7 @@ export async function revoiceView(id) {
 
   // ---------------------------------------------------------------- setup
   function renderSetup() {
-    const wrap = h('div.view-body');
+    const wrap = h('div.view-body.reading');
     const sec = (title, extra, ...rows) => h('div.section', h('div.section-head', h('h2', title), h('div.spacer'), extra), h('div.section-body', rows));
     const srow = (label, help, control) => h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', { title: typeof help === 'string' ? help : label }, control));
     const drop = h('div.dropzone', h('div', h('b', 'Drop plugins, .bsa archives, .zip / .7z files or folders here')),
@@ -939,7 +939,7 @@ export async function revoiceView(id) {
 
   // ---------------------------------------------------------------- new voice types
   function renderVoiceTypes() {
-    const wrap = h('div.view-body');
+    const wrap = h('div.view-body.reading');
     wrap.append(
       h('div.help', { style: { maxWidth: '1100px', marginBottom: '12px' } },
         h('p', h('b', 'Only when you need it. '), 'Replacing files in place needs no plugin. A new voice type is for one NPC who shares a vanilla voice type (Aela uses FemaleCommander with Uthgerd, Rayya, Legate Rikke…) and should sound different in all of their lines, including greetings and combat.'),

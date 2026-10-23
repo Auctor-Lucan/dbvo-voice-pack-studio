@@ -234,7 +234,7 @@ public sealed partial class Backend
                 {
                     var mod = LoadMod(S(p, "id"));
                     var pl = mod.Plugins.First(x => x.FileName == S(p, "plugin"));
-                    var (restored, kept) = new Phase1Service(_lib, Runtime()).RemoveFixPlugin(mod, pl);
+                    var (restored, kept) = new Phase1Service(_lib, Runtime()).RemoveFixPlugin(mod, pl, S(p, "path"));
                     return new { mod = ModDto(LoadMod(mod.Id)), restored, kept };
                 });
             case "mod.exportPlayerNames":
@@ -672,6 +672,7 @@ public sealed partial class Backend
     private static object PluginDto(Phase1Service svc, Mod m, ModPlugin p, bool withLines) => new
     {
         p.FileName, p.FixFileName, p.Masters, p.Localized, p.Notices, p.ImportedUtc, p.FixPrefix, p.IsTopicFile, p.ImportedFixPlugin,
+        fixUndo = p.Lines.Any(l => l.FixImport != null),
         missingMasters = withLines && !p.IsTopicFile ? SafeMissing(svc, m, p) : new List<MissingMaster>(),
         needsFix = p.NeedsFixPlugin,
         fixes = p.IsTopicFile ? 0 : Phase1Service.FixEdits(p).Count,

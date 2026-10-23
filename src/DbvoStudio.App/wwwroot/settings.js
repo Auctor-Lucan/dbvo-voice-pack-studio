@@ -80,7 +80,7 @@ export async function settingsView(tab, selectedId) {
   const view = h('div.view');
   const sub = h('div.subnav');
   const body = h('div.view-body');
-  view.append(h('div.view-head', h('h1', 'Global Settings'), h('span.sub', 'Everything here is saved as you change it.')), h('div.settings', sub, body));
+  view.append(h('div.view-head', h('h1', 'Global Settings'), h('span.sub', 'Everything here is saved as you change it.')), h('div.settings.reading', sub, body));
 
   let voiceSel = selectedId;
   const show = async (t, id) => {
@@ -304,6 +304,9 @@ async function general(_, rerender) {
           h('div.tp-name', t.name + (t.id === 'github-dark' ? ' (default)' : '')));
       }))),
       backgroundImage(st, save, rerender)),
+    section('Reading text size', null,
+      switchRow('Text size outside the workspaces', 'Larger (default) makes the landing page, this guide, every settings page and the dialogs easier to read. The workspaces (the grids, toolbars and line panels of Phase 1, Phase 2, the FOMOD builder, NPC Revoice, Voiced Books and the WAV to LIP tool) keep their compact size so more lines fit.',
+        segmented([['normal', 'Normal'], ['larger', 'Larger'], ['largest', 'Largest']], (st.ui || {}).readSize || 'larger', async (x) => { applyBackground({ ...(st.ui || {}), readSize: x }); await save({ ui: { readSize: x } }); }))),
     section('Start page', null,
       switchRow('When DBVO Studio opens', 'Landing page (default): the welcome page with what to do, the studio check and your recent work. Where I left off: the page you had open last time. The DBVO Studio logo at the top left always opens the landing page.',
         segmented([['home', 'Landing page'], ['last', 'Where I left off']], (st.ui || {}).startPage === 'last' ? 'last' : 'home', (x) => save({ ui: { startPage: x } })))),
