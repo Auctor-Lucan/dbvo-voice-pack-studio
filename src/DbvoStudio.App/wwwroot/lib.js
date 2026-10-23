@@ -793,14 +793,14 @@ export function keepScroll(root, rebuild, keep = true) {
 }
 
 /**
- * A full-window "please wait" screen with the warrior art, for slow steps (reading thousands of voice lines).
+ * A full-window "please wait" screen with a large glowing progress bar, for slow steps (reading thousands of voice lines).
  * It only appears when the step takes longer than delayMs, so quick steps don't flash. Returns close().
  */
 export function busyOverlay(title = 'Loading voice lines', sub = 'Reading the takes and files from disk…', delayMs = 350) {
   let el = null;
   const timer = setTimeout(() => {
     el = h('div.busy-overlay', { role: 'status', 'aria-live': 'polite' },
-      h('div.busy-card', h('img.busy-art', { src: 'warrior.png', alt: '' }), h('div.busy-title', title), h('div.busy-sub', sub), h('div.busy-bar', h('i'))));
+      h('div.busy-card', h('div.busy-title', title), h('div.busy-bar', h('i')), h('div.busy-sub', sub)));
     document.body.append(el);
   }, delayMs);
   return () => { clearTimeout(timer); if (el) { el.classList.add('out'); const e = el; setTimeout(() => e.remove(), 220); } };
