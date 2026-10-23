@@ -53,7 +53,7 @@ a:hover { text-decoration: underline; }
 .crumb-sep { color: var(--accent); font-size: 18px; font-weight: 700; padding: 0 2px; }
 .top-btn { white-space: nowrap; flex-shrink: 0; background: none; border: 1px solid transparent; color: var(--dim); padding: 6px 12px; border-radius: var(--radius); cursor: pointer; font-weight: 600; }
 .top-btn:hover { color: var(--text); background: var(--panel); border-color: var(--line); }
-.top-btn.active { color: var(--text); background: var(--raised); border-color: var(--line); }
+.top-btn.active { color: var(--text); background: var(--raised); border-color: var(--line); box-shadow: inset 3px 0 0 var(--accent); }
 .logo { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(90deg, transparent 8%, var(--accent) 8% 16%, transparent 16% 30%, var(--accent) 30% 38%, transparent 38% 46%, var(--accent) 46% 54%, transparent 54% 62%, var(--accent) 62% 70%, transparent 70% 84%, var(--accent) 84% 92%, transparent 92%), var(--panel); -webkit-mask: radial-gradient(circle at 50% 50%, #000 70%, transparent 71%); }
 .brand-name { font-weight: 650; letter-spacing: .2px; white-space: nowrap; }
 .brand-sub { color: var(--faint); font-size: 11px; }
