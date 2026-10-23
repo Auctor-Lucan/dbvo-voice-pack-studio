@@ -763,3 +763,6 @@ mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: in
 .vgrid-head .cell.sortable:hover { color: var(--text); }
 .vgrid-head .cell.sorted { color: var(--accent); }
 .sort-ind { font-size: 10px; }
+/* Other Tools: always a blue button, like + New DBVO Patch */
+#tools-btn, #tools-btn.active { background: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--on-accent); box-shadow: none; }
+#tools-btn:hover { background: var(--accent); color: var(--on-accent); }
