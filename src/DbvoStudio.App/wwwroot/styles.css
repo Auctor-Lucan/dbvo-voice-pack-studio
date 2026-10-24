@@ -783,3 +783,13 @@ mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: in
 .iter-chip:hover { color: var(--text); border-color: var(--accent); }
 .iter-chip.on { border-style: solid; border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }
 .fr-preview > * { flex: none; }
+/* The running-task indicator in the top bar: an accent frame and a marching, glowing fill so it is never overlooked. */
+.job:not(.hidden) { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent); }
+.job .bar { height: 8px; border-radius: 4px; }
+.job .bar-fill { min-width: 8%; background: repeating-linear-gradient(-45deg, color-mix(in srgb, #fff 26%, transparent) 0 6px, transparent 6px 12px), var(--accent);
+  background-size: 18px 100%, 100% 100%; box-shadow: 0 0 8px var(--accent); animation: busy-march .6s linear infinite; }
+.job .job-label { color: var(--text); }
+.qa-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.qa-opt { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.qa-opt-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.qa-opt small { color: var(--faint); font-size: 12px; }

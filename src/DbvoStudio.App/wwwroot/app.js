@@ -130,7 +130,7 @@ toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [
 
 // ---- background jobs (generation, .fuz, FOMOD, WAV to LIP)
 const jobEl = document.getElementById('job');
-const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to LIP', generate: 'Generating', import: 'Importing', qa: 'Checking takes' };
+const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to LIP', generate: 'Generating', import: 'Importing', qa: 'Checking takes', 'revoice-qa': 'Checking takes' };
 // Progress reports can arrive a moment after the job has finished (they travel separately); one of those must not
 // bring back the job bar and keep buttons disabled.
 let lastDone = null;
@@ -138,8 +138,13 @@ on('progress', (p) => {
   if (lastDone && lastDone.kind === p.kind && Date.now() - lastDone.t < 1500) return;
   app.job = p;
   jobEl.classList.remove('hidden');
-  jobEl.querySelector('.job-label').textContent = `${(p.kind === 'fomod' || p.kind === 'revoice' || (p.kind === 'qa' && p.message)) && p.message ? p.message : LABEL[p.kind] || 'Working'}${p.kind === 'revoice' ? '…' : ` ${p.done}/${p.total}`}${p.failed ? ` · ${p.failed} failed` : ''}`;
-  jobEl.title = p.current || '';
+  const qa = p.kind === 'qa' || p.kind === 'revoice-qa';
+  // Check takes: the count is always shown once checking starts; where Whisper runs and the speed go in the tooltip.
+  const label = qa
+    ? (p.done === 0 && p.message ? `${p.message} · 0/${p.total}` : `Checking takes ${p.done.toLocaleString()}/${p.total.toLocaleString()}${p.rate ? ` · ${p.rate}/s` : ''}`)
+    : `${(p.kind === 'fomod' || p.kind === 'revoice') && p.message ? p.message : LABEL[p.kind] || 'Working'}${p.kind === 'revoice' ? '…' : ` ${p.done}/${p.total}`}`;
+  jobEl.querySelector('.job-label').textContent = label + (p.failed ? ` · ${p.failed} failed` : '');
+  jobEl.title = [qa && p.device ? p.device + (p.rate ? ` · ${p.rate} takes per second` : '') : null, p.current || null].filter(Boolean).join('\n');
   jobEl.querySelector('.bar-fill').style.width = (p.total ? (100 * p.done) / p.total : 0) + '%';
   document.dispatchEvent(new CustomEvent('job-progress', { detail: p }));
 });
@@ -158,7 +163,7 @@ on('jobDone', async (d) => {
     if (d.files && d.files.length) body.push(h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), h('div.box.mono', { style: { whiteSpace: 'pre-wrap', maxHeight: '140px', overflow: 'auto' } }, d.files.join('\n'))));
     if (d.reminders && d.reminders.length) body.push(h('div.banner.warn', { style: { margin: 0 } }, h('div', h('b', 'Before you release: '), h('ul', d.reminders.map((x) => h('li', x))))));
     await modal('.fuz files built', body);
-  } else if (d.kind === 'import' || d.kind === 'qa') {
+  } else if (d.kind === 'import' || d.kind === 'qa' || d.kind === 'revoice-qa') {
     toast(d.message || 'Done.', !d.ok || (d.kind === 'qa' && d.flagged > 0));
   } else if (d.kind === 'wavlip') {
     if (d.message) toast(d.message, !d.ok);

@@ -280,11 +280,11 @@ public sealed class WavToLip
             return sb.ToString().Trim();
         }
 
-        public ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
-            _processor?.Dispose();
+            // A cancelled check can leave Whisper mid-file: DisposeAsync waits for it to stop instead of throwing.
+            try { if (_processor != null) await _processor.DisposeAsync(); } catch { }
             _factory?.Dispose();
-            return ValueTask.CompletedTask;
         }
 
         /// <summary>Model + compute type to the ggml file: float16 = unquantized, int8 / int8_float16 = q8_0.</summary>

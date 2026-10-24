@@ -279,8 +279,8 @@ public sealed partial class Backend
                     try { take.Qa = qa; } finally { _gate.Release(); }
                     done++;
                     var perSec = done / Math.Max(0.001, rate.Elapsed.TotalSeconds);
-                    Emit("progress", new { kind, done, total = todo.Count, failed, current = line.FinalLine,
-                        message = $"{(o.Words ? $"Whisper {o.Model} on {device()}" : "No Whisper (levels and start only)")} · {perSec:0.0} takes/s" });
+                    Emit("progress", new { kind, done, total = todo.Count, failed, current = line.FinalLine, rate = Math.Round(perSec, 1),
+                        device = o.Words ? $"Whisper {o.Model} on {device()}" : "No Whisper: loudness and start of take only" });
                     if (sinceSave.Elapsed.TotalSeconds >= 30)
                     {
                         await _gate.WaitAsync(CancellationToken.None);
@@ -292,10 +292,12 @@ public sealed partial class Backend
                 try { Save(); } finally { _gate.Release(); }
                 Emit("jobDone", DoneMsg(true, flagged == 0 ? $"All {done} take(s) passed." : $"{flagged} of {done} take(s) flagged. Filter by \"QA flagged\" to listen to them."));
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (ex is OperationCanceledException || ct.IsCancellationRequested)
             {
+                // Cancelled: whatever Whisper said while stopping is not worth showing; the results so far are kept.
+                App.Log("Check takes cancelled: " + ex.Message);
                 try { await _gate.WaitAsync(CancellationToken.None); try { Save(); } finally { _gate.Release(); } } catch { }
-                Emit("jobDone", DoneMsg(false, $"Cancelled after {done} take(s); their results are kept."));
+                Emit("jobDone", DoneMsg(false, $"Check takes cancelled. The {done} take(s) checked so far keep their results."));
             }
             catch (Exception ex)
             {

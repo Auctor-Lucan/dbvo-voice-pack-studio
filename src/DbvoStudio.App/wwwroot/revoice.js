@@ -490,6 +490,8 @@ export async function revoiceView(id) {
       { id: 'text', title: 'Subtitle (in game)', flex: 1, width: 260, render: (l) => h('span.ellipsis.dim', { title: l.text }, l.text) },
       { id: 'spoken', title: 'Spoken text (tags allowed)', flex: 1.2, width: 300, render: (l) => spokenCell(l) },
       { id: 'emo', title: 'Emotion', width: 90, render: (l) => l.emo === 'Neutral' ? h('span.faint', '—') : h('span.faint', { title: `${l.emo} ${l.emoV}` }, `${l.emo} ${l.emoV}`) },
+      { id: 'qa', title: 'QA', tip: 'Check takes: ⚠ flagged, ✓ passed, empty = not checked. Click to sort the flagged ones to the top.', width: 44, resizable: false, align: 'center',
+        sort: (l) => { const t = l.takes.find((x) => x.id === l.sel); return !t || !t.qa ? 2 : t.qa.flags.length ? 0 : 1; }, render: (l) => qaBadgeRv(l) },
       { id: 'take', title: 'Take', width: 64, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s). Click to play, switch or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } }, l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—')) },
       { id: 'act', title: '', width: 146, resizable: false, render: (l) => h('span.row.icon-bar', { style: { gap: '2px' } },
@@ -705,6 +707,14 @@ export async function revoiceView(id) {
   function qaText(q) { return q ? [q.score != null ? `Words match ${(q.score * 100).toFixed(0)}%` : null, q.heard ? `Heard: "${q.heard}"` : null,
     q.lufs != null ? `Loudness ${q.lufs.toFixed(1)} LUFS` : null, q.truePeak != null ? `Peak ${q.truePeak.toFixed(1)} dBTP` : null, q.onsetMs != null ? `Start: a ${Math.round(q.onsetMs)} ms burst, then ${Math.round(q.onsetGapMs)} ms of silence before the line` : null].filter(Boolean).join('\n') : ''; }
   var QA_WHY = { words: 'words differ', quiet: 'too quiet', clipping: 'clipping', onset: 'burst at the start', error: 'not checked' };
+  function qaBadgeRv(l) {
+    const t = l.takes.find((x) => x.id === l.sel);
+    if (!t || !t.qa) return null;
+    const q = t.qa;
+    return q.flags.length
+      ? h('span.qa-badge.bad', { title: 'Check takes flagged this take: ' + q.flags.map((f) => QA_WHY[f] || f).join(', ') + '\n' + qaText(q) }, '⚠')
+      : h('span.qa-badge.ok', { title: 'Check takes: passed\n' + qaText(q) }, '✓');
+  }
   function qaFlagged(l) { const t = l.takes.find((x) => x.id === l.sel); return !!(t && t.qa && t.qa.flags.length); }
   async function record(l) {
     if (app.job) { toast('Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.', true); return; }
@@ -1168,7 +1178,6 @@ export async function revoiceView(id) {
     const d = e.detail || {};
     if (d.kind === 'revoice-orphans' && d.id === id) { if (d.message) toast(d.message, !d.ok); if (d.ok) orphansModal(); }
     if ((d.kind === 'revoice-scan' && d.id === id) || (d.kind === 'generate' && d.revoiceId === id) || (d.kind === 'revoice-export' && d.id === id) || (d.kind === 'revoice-qa' && d.projectId === id)) {
-      if (d.kind === 'revoice-qa' && d.message) toast(d.message, !d.ok);
       try { proj = await rpc('revoice.get', { id }); reindex(); } catch { /* keep */ }
       if (d.kind === 'revoice-scan' && d.ok) { if (proj.lines.length && tab === 'setup') { tab = 'speakers'; store.set('rv-tab:' + id, tab); } toast(`Scan done: ${d.report.lines.toLocaleString()} voice files to make, ${d.report.withOriginal.toLocaleString()} with a current file.`); }
       if (d.kind === 'revoice-export' && d.ok !== undefined && d.report) {
