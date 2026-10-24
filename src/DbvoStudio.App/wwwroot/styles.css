@@ -782,3 +782,4 @@ mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: in
 .iter-chip { flex: none; font-size: 11px; padding: 1px 6px; border-radius: 10px; border: 1px dashed var(--line); background: none; color: var(--dim); cursor: pointer; white-space: nowrap; }
 .iter-chip:hover { color: var(--text); border-color: var(--accent); }
 .iter-chip.on { border-style: solid; border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }
+.fr-preview > * { flex: none; }

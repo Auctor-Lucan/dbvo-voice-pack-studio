@@ -432,7 +432,9 @@ export async function modView(id) {
       const missing = names.filter((n) => !vals[n.toLowerCase()].length);
       sum.textContent = `${total.toLocaleString()} iteration(s) for ${lines.length.toLocaleString()} line(s)` + (missing.length && names.length ? ` · fill in ${missing.length} alias(es) to write the rest out` : '');
       clear(prev);
-      for (const r of result.slice(0, 4)) for (const v of r.v.slice(0, 4)) prev.append(h('div.fr-item', { style: v.length > 150 ? { borderColor: 'var(--bad)' } : null }, v, v.length > 150 ? h('span', { style: { color: 'var(--bad)' } }, `  · ${v.length} characters: over 150 crashes DBVO`) : null));
+      const all = result.flatMap((r) => r.v);
+      if (all.length > 300) prev.append(h('div.faint', `Showing the first 300 of ${all.length.toLocaleString()}.`));
+      for (const r of result) for (const v of r.v) if (prev.childElementCount < 301) prev.append(h('div.fr-item', { style: v.length > 150 ? { borderColor: 'var(--bad)' } : null }, v, v.length > 150 ? h('span', { style: { color: 'var(--bad)' } }, `  · ${v.length} characters: over 150 crashes DBVO`) : null));
       if (long) prev.prepend(h('div.banner.bad', { style: { margin: 0 } }, `${long} iteration(s) are over 150 characters and would crash DBVO. Shorten those names, or fix the line itself.`));
     }
     const body = [
