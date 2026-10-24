@@ -67,6 +67,8 @@ public sealed class WavToLipSettings
     /// <summary>"builtin" = Whisper.net inside this app; "faster-whisper" = the user's Python faster-whisper install.</summary>
     public string Engine { get; set; } = "builtin";
     public string Model { get; set; } = "large-v3";
+    /// <summary>Check takes only: greedy decoding, one segment, no timestamps or context (much faster on short lines).</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public bool Quick { get; set; }
     public string Language { get; set; } = "auto";
     public string Device { get; set; } = "cuda";
     public string Compute { get; set; } = "float16";

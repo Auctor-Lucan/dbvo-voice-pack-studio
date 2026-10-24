@@ -182,7 +182,7 @@ public sealed partial class Backend
                     _lib.RevoiceFolder(proj.Id), l.FileStem, () => _lib.Save(proj));
                 return new { line = RvLineDto(l) };
             }
-            case "revoice.qa": return StartRvQa(S(p, "id"), p.TryGetProperty("lineIds", out var rli) && rli.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds") : null);
+            case "revoice.qa": return StartQa(p, true);
             case "revoice.clearQa":
                 return await Locked(() => { var pr = LoadRv(S(p, "id")); foreach (var t in pr.Lines.SelectMany(l => l.Takes)) t.Qa = null; _lib.Save(pr); return RvDto(pr); });
             case "revoice.original":

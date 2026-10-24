@@ -124,6 +124,25 @@ public sealed class WavToLip
     /// A transcriber using the WAV to LIP engine settings (built-in Whisper or faster-whisper), for other tools
     /// such as the NPC Revoice orphan matching. Dispose the returned engine when done.
     /// </summary>
+    /// <summary>
+    /// For Check takes: Transcribe takes a 16 kHz mono WAV when <c>Prepared16k</c> is true (built-in Whisper), any WAV otherwise
+    /// (faster-whisper reads files itself). Device = where the model runs, for the progress line.
+    /// </summary>
+    public async Task<(Func<string, CancellationToken, Task<string>> Transcribe, IAsyncDisposable Engine, bool Prepared16k, Func<string> Device)> CreateCheckerAsync(CancellationToken ct)
+    {
+        Directory.CreateDirectory(TempRoot);
+        if (_s.Engine == "faster-whisper")
+        {
+            var fw = new FasterWhisperProcess(_s, Log);
+            await fw.StartAsync(ct);
+            return (fw.TranscribeAsync, fw, false, () => fw.DeviceUsed ?? "faster-whisper");
+        }
+        var bw = await BuiltInWhisper.CreateAsync(_s, _modelsFolder, _tools, Log, Status, ct);
+        return (bw.TranscribePreparedAsync, bw, true, () => bw.DeviceUsed);
+    }
+
+    public static string CheckTempFolder => TempRoot;
+
     public async Task<(Func<string, CancellationToken, Task<string>> Transcribe, IAsyncDisposable Engine)> CreateTranscriberAsync(CancellationToken ct)
     {
         Directory.CreateDirectory(TempRoot);
@@ -208,8 +227,24 @@ public sealed class WavToLip
             _factory = WhisperFactory.FromPath(_modelPath, new WhisperFactoryOptions { UseGpu = gpu });
             var b = _factory.CreateBuilder();
             b = _s.Language == "auto" ? b.WithLanguageDetection() : b.WithLanguage(_s.Language);
-            b = b.WithBeamSearchSamplingStrategy(o => o.WithBeamSize(5));
+            b = _s.Quick
+                ? b.WithGreedySamplingStrategy(_ => { }).WithSingleSegment().WithNoContext().WithTemperatureInc(0)
+                : b.WithBeamSearchSamplingStrategy(o => o.WithBeamSize(5));
             _processor = b.Build();
+        }
+
+        /// <summary>A file that is already 16 kHz mono 16-bit (Check takes prepares it ahead).</summary>
+        public async Task<string> TranscribePreparedAsync(string wav16, CancellationToken ct)
+        {
+            try { return await Run(wav16, ct); }
+            catch (Exception ex) when (DeviceUsed.StartsWith("GPU") && _s.CpuFallback && ex is not OperationCanceledException)
+            {
+                _log($"GPU inference failed on {Path.GetFileName(wav16)}: {ex.Message}");
+                _log("Retrying this file on CPU.");
+                Build(false);
+                DeviceUsed = "CPU";
+                return await Run(wav16, ct);
+            }
         }
 
         public async Task<string> TranscribeAsync(string wav, CancellationToken ct)
@@ -260,6 +295,9 @@ public sealed class WavToLip
                 "medium" => GgmlType.Medium,
                 "small" => GgmlType.Small,
                 "base" => GgmlType.Base,
+                "large-v3-turbo" => GgmlType.LargeV3Turbo,
+                "small.en" => GgmlType.SmallEn,
+                "base.en" => GgmlType.BaseEn,
                 _ => GgmlType.LargeV3,
             };
             var q = compute is "int8" or "int8_float16" ? QuantizationType.Q8_0 : QuantizationType.NoQuantization;

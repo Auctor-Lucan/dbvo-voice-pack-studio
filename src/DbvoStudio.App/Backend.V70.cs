@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Revoice;
 using DbvoStudio.Core.Text;
 using System.Globalization;
 using System.IO;
@@ -21,7 +22,7 @@ public sealed partial class Backend
         {
             case "patch.legacyScan": return await Locked(() => new Phase2Service(_lib, Runtime()).ScanLegacy(LoadPatch(S(p, "id")), S(p, "folder")));
             case "patch.importLegacy": return StartImportLegacy(S(p, "id"), S(p, "folder"));
-            case "patch.qa": return StartQa(S(p, "id"), p.TryGetProperty("lineIds", out var li) && li.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds") : null);
+            case "patch.qa": return StartQa(p, false);
             case "patch.clearQa":
                 return await Locked(() =>
                 {
@@ -134,6 +135,172 @@ public sealed partial class Backend
         }
     }
 
+    /// <summary>Check takes options, chosen in the dialog before the run.</summary>
+    private sealed record QaOptions(bool Words, bool Levels, bool OnlyUnchecked, string Model, string Language, bool Quick);
+
+    private QaOptions QaOptionsFrom(JsonElement p) => new(
+        Words: !p.TryGetProperty("words", out var w) || w.ValueKind != JsonValueKind.False,
+        Levels: !p.TryGetProperty("levels", out var lv) || lv.ValueKind != JsonValueKind.False,
+        OnlyUnchecked: B(p, "onlyUnchecked"),
+        Model: S(p, "model", "large-v3-turbo"),
+        Language: S(p, "language", "en"),
+        Quick: !p.TryGetProperty("quick", out var q) || q.ValueKind != JsonValueKind.False);
+
+    /// <summary>
+    /// Check takes for a DBVO Patch (revoice = false) or an NPC Revoice project. Whisper transcribes the take in use of each
+    /// line (with DBVO 2.0 naming in a patch, its kept variants too) and the words are compared with the text the take was
+    /// made from; ffmpeg measures loudness and true peak in the same pass that prepares Whisper's 16 kHz copy. Up to six takes
+    /// are prepared ahead on the CPU while Whisper works, and the project is saved every 30 seconds. Nothing is deleted.
+    /// </summary>
+    private object StartQa(JsonElement p, bool revoice)
+    {
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
+        var id = S(p, "id");
+        var lineIds = p.TryGetProperty("lineIds", out var li) && li.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds").ToHashSet() : null;
+        var o = QaOptionsFrom(p);
+        if (!o.Words && !o.Levels) throw new InvalidOperationException("Pick at least one check: the words, or loudness and clipping.");
+        _jobCts = new CancellationTokenSource();
+        var ct = _jobCts.Token;
+        string kind = revoice ? "revoice-qa" : "qa";
+        _ = Task.Run(async () =>
+        {
+            int flagged = 0, done = 0, failed = 0;
+            object? project = null;
+            void Save() { if (project is DbvoPatch dp) _lib.Save(dp); else if (project is RevoiceProject rp) _lib.Save(rp); }
+            object DoneMsg(bool ok, string message) => revoice
+                ? new { kind, projectId = id, ok, flagged, checkedCount = done, message }
+                : new { kind, patchId = id, ok, flagged, checkedCount = done, message };
+            var temp = new List<string>();
+            try
+            {
+                List<(Phase2Line Line, Take Take)> todo;
+                string root;
+                if (revoice)
+                {
+                    var rp = LoadRv(id); project = rp; root = _lib.RevoiceFolder(rp.Id);
+                    todo = rp.Lines.Where(l => !l.Excluded && !l.Gone && l.SelectedTake != null && (lineIds == null || lineIds.Contains(l.LineId)))
+                        .Select(l => ((Phase2Line)l, l.SelectedTake!)).ToList();
+                }
+                else
+                {
+                    var patch = LoadPatch(id); project = patch; root = _lib.PatchFolder(patch.Id);
+                    var naming = LoadVoice(patch.VoicePackId).Naming;
+                    todo = patch.Lines.Where(l => !l.IsOmitted && !l.Excluded && l.SelectedTake != null && (lineIds == null || lineIds.Contains(l.LineId)))
+                        .SelectMany(l => Phase2Service.ExportTakes(l, naming).Select(x => x.Take).Append(l.SelectedTake!).Distinct().Select(t => (l, t))).ToList();
+                }
+                if (o.OnlyUnchecked) todo = todo.Where(x => x.Take.Qa == null).ToList();
+                if (todo.Count == 0) { Emit("jobDone", DoneMsg(true, o.OnlyUnchecked ? "Every take is checked already." : "No takes to check.")); return; }
+
+                Func<string, CancellationToken, Task<string>>? transcribe = null;
+                IAsyncDisposable? engine = null;
+                bool prepared16k = false;
+                Func<string> device = () => "";
+                if (o.Words)
+                {
+                    Emit("progress", new { kind, done = 0, total = todo.Count, failed = 0, message = $"Loading Whisper {o.Model}" });
+                    var ws = JsonSerializer.Deserialize<WavToLipSettings>(JsonSerializer.Serialize(_settings.WavToLip))!;
+                    ws.Model = o.Model; ws.Language = o.Language; ws.Quick = o.Quick;
+                    var tool = new WavToLip(ws, Tools(), WhisperModelsFolder(), e =>
+                    {
+                        if (e.Kind == "log") App.Log("Whisper: " + e.Text);
+                        else if (e.Kind == "status") Emit("progress", new { kind, done, total = todo.Count, failed, message = e.Text });
+                    });
+                    (transcribe, engine, prepared16k, device) = await tool.CreateCheckerAsync(ct);
+                }
+                await using var _e = engine;
+                var tools = Tools();
+                var tmpDir = Path.Combine(WavToLip.CheckTempFolder, "check");
+                Directory.CreateDirectory(tmpDir);
+
+                // Prepare ahead (ffmpeg: loudness + the 16 kHz copy) on a few CPU threads while Whisper works on the GPU.
+                int ahead = Math.Clamp(Environment.ProcessorCount / 2, 2, 6);
+                var prep = new Task<(string? Wav16, double? Lufs, double? Peak, string? Error)>[todo.Count];
+                var cpu = new SemaphoreSlim(ahead);
+                Task<(string?, double?, double?, string?)> Prepare(int i) => Task.Run(async () =>
+                {
+                    await cpu.WaitAsync(ct);
+                    try
+                    {
+                        var wav = Path.Combine(root, todo[i].Take.WavPath);
+                        string? w16 = o.Words && prepared16k ? Path.Combine(tmpDir, Guid.NewGuid().ToString("N")[..10] + ".wav") : null;
+                        if (w16 != null) lock (temp) temp.Add(w16);
+                        if (!o.Levels && w16 == null) return ((string?)null, (double?)null, (double?)null, (string?)null);
+                        var (lufs, peak) = await tools.PrepareForCheckAsync(wav, w16, ct);
+                        return (w16, lufs, peak, (string?)null);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { return ((string?)null, (double?)null, (double?)null, FriendlyError.From(ex)); }
+                    finally { cpu.Release(); }
+                }, ct);
+                for (int i = 0; i < Math.Min(todo.Count, ahead * 2); i++) prep[i] = Prepare(i);
+
+                var sinceSave = System.Diagnostics.Stopwatch.StartNew();
+                var rate = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < todo.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    int next = i + ahead * 2;
+                    if (next < todo.Count && prep[next] == null) prep[next] = Prepare(next);
+                    var (line, take) = todo[i];
+                    var qa = new TakeQa();
+                    try
+                    {
+                        var (w16, lufs, peak, error) = await prep[i];
+                        if (error != null) throw new InvalidOperationException(error);
+                        if (o.Levels)
+                        {
+                            (qa.Lufs, qa.TruePeak) = (lufs, peak);
+                            if (qa.Lufs is { } l && l < QaQuietLufs) qa.Flags.Add("quiet");
+                            if (qa.TruePeak is { } tp && tp > QaPeakDbtp) qa.Flags.Add("clipping");
+                        }
+                        if (o.Words && transcribe != null)
+                        {
+                            var intended = string.IsNullOrWhiteSpace(take.SpokenText) ? line.Spoken : take.SpokenText;
+                            qa.Heard = (await transcribe(w16 ?? Path.Combine(root, take.WavPath), ct)).Trim();
+                            qa.Score = Math.Round(QaText.Score(intended, qa.Heard), 2);
+                            if (qa.Score < QaMinScore) qa.Flags.Add("words");
+                        }
+                        if (w16 != null) { try { File.Delete(w16); } catch { } }
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { failed++; qa.Flags.Add("error"); qa.Heard = "Could not check: " + FriendlyError.From(ex); }
+                    if (qa.Flags.Count > 0) flagged++;
+                    await _gate.WaitAsync(CancellationToken.None);
+                    try { take.Qa = qa; } finally { _gate.Release(); }
+                    done++;
+                    var perSec = done / Math.Max(0.001, rate.Elapsed.TotalSeconds);
+                    Emit("progress", new { kind, done, total = todo.Count, failed, current = line.FinalLine,
+                        message = $"{(o.Words ? $"Whisper {o.Model} on {device()}" : "Loudness and clipping only")} · {perSec:0.0} takes/s" });
+                    if (sinceSave.Elapsed.TotalSeconds >= 30)
+                    {
+                        await _gate.WaitAsync(CancellationToken.None);
+                        try { Save(); } finally { _gate.Release(); }
+                        sinceSave.Restart();
+                    }
+                }
+                await _gate.WaitAsync(CancellationToken.None);
+                try { Save(); } finally { _gate.Release(); }
+                Emit("jobDone", DoneMsg(true, flagged == 0 ? $"All {done} take(s) passed." : $"{flagged} of {done} take(s) flagged. Filter by \"QA flagged\" to listen to them."));
+            }
+            catch (OperationCanceledException)
+            {
+                try { await _gate.WaitAsync(CancellationToken.None); try { Save(); } finally { _gate.Release(); } } catch { }
+                Emit("jobDone", DoneMsg(false, $"Cancelled after {done} take(s); their results are kept."));
+            }
+            catch (Exception ex)
+            {
+                App.Log("Check takes failed: " + ex);
+                Emit("jobDone", DoneMsg(false, FriendlyError.From(ex)));
+            }
+            finally
+            {
+                foreach (var t in temp) { try { File.Delete(t); } catch { } }
+                _jobCts = null;
+            }
+        });
+        return true;
+    }
+
     private object StartImportLegacy(string id, string folder)
     {
         if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
@@ -162,150 +329,7 @@ public sealed partial class Backend
         return true;
     }
 
-    /// <summary>
-    /// Check takes: Whisper transcribes the take in use of each line (and its kept variants with DBVO 2.0 naming) and the transcript is compared with the text the
-    /// take was made from; ffmpeg measures loudness and true peak. Results are stored on the take. Nothing is deleted.
-    /// </summary>
-    private object StartQa(string id, List<string>? lineIds)
-    {
-        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
-        _jobCts = new CancellationTokenSource();
-        var ct = _jobCts.Token;
-        _ = Task.Run(async () =>
-        {
-            int flagged = 0, done = 0, failed = 0;
-            try
-            {
-                var patch = LoadPatch(id);
-                var only = lineIds?.ToHashSet();
-                var naming = LoadVoice(patch.VoicePackId).Naming;
-                // The take in use, and with DBVO 2.0 naming every kept (★) take too, since each is exported as a variant.
-                var todo = patch.Lines.Where(l => !l.IsOmitted && !l.Excluded && l.SelectedTake != null && (only == null || only.Contains(l.LineId)))
-                    .SelectMany(l => Phase2Service.ExportTakes(l, naming).Select(x => x.Take).Append(l.SelectedTake!).Distinct().Select(t => (Line: l, Take: t))).ToList();
-                if (todo.Count == 0) { Emit("jobDone", new { kind = "qa", patchId = id, ok = true, message = "No takes to check." }); return; }
-                Emit("progress", new { kind = "qa", done = 0, total = todo.Count, failed = 0, message = "Loading Whisper" });
-                var tool = new WavToLip(_settings.WavToLip, Tools(), WhisperModelsFolder(), e =>
-                {
-                    if (e.Kind == "log") App.Log("Whisper: " + e.Text);
-                    else if (e.Kind == "status") Emit("progress", new { kind = "qa", done, total = todo.Count, failed, message = e.Text });
-                });
-                var (transcribe, engine) = await tool.CreateTranscriberAsync(ct);
-                await using var _e = engine;
-                var tools = Tools();
-                var root = _lib.PatchFolder(patch.Id);
-                foreach (var (line, take) in todo)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    var qa = new TakeQa();
-                    try
-                    {
-                        var wav = Path.Combine(root, take.WavPath);
-                        var intended = string.IsNullOrWhiteSpace(take.SpokenText) ? line.Spoken : take.SpokenText;
-                        qa.Heard = (await transcribe(wav, ct)).Trim();
-                        qa.Score = Math.Round(QaText.Score(intended, qa.Heard), 2);
-                        (qa.Lufs, qa.TruePeak) = await tools.MeasureAsync(wav, ct);
-                        if (qa.Score < QaMinScore) qa.Flags.Add("words");
-                        if (qa.Lufs is { } l && l < QaQuietLufs) qa.Flags.Add("quiet");
-                        if (qa.TruePeak is { } tp && tp > QaPeakDbtp) qa.Flags.Add("clipping");
-                    }
-                    catch (OperationCanceledException) { throw; }
-                    catch (Exception ex) { failed++; qa.Flags.Add("error"); qa.Heard = "Could not check: " + FriendlyError.From(ex); }
-                    if (qa.Flags.Count > 0) flagged++;
-                    await _gate.WaitAsync(CancellationToken.None);
-                    try { take.Qa = qa; } finally { _gate.Release(); }
-                    done++;
-                    Emit("progress", new { kind = "qa", done, total = todo.Count, failed, current = line.FinalLine });
-                    if (done % 25 == 0) { await _gate.WaitAsync(CancellationToken.None); try { _lib.Save(patch); } finally { _gate.Release(); } }
-                }
-                await _gate.WaitAsync(CancellationToken.None);
-                try { _lib.Save(patch); } finally { _gate.Release(); }
-                Emit("jobDone", new { kind = "qa", patchId = id, ok = true, flagged, checkedCount = done,
-                    message = flagged == 0 ? $"All {done} take(s) passed." : $"{flagged} of {done} take(s) flagged. Filter by \"QA flagged\" to listen to them." });
-            }
-            catch (OperationCanceledException)
-            {
-                try { await _gate.WaitAsync(CancellationToken.None); try { _lib.Save(LoadPatch(id)); } finally { _gate.Release(); } } catch { }
-                Emit("jobDone", new { kind = "qa", patchId = id, ok = false, message = $"Cancelled after {done} take(s); their results are kept." });
-            }
-            catch (Exception ex)
-            {
-                App.Log("Check takes failed: " + ex);
-                Emit("jobDone", new { kind = "qa", patchId = id, ok = false, message = FriendlyError.From(ex) });
-            }
-            finally { _jobCts = null; }
-        });
-        return true;
-    }
 
-    private object StartRvQa(string id, List<string>? lineIds)
-    {
-        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
-        _jobCts = new CancellationTokenSource();
-        var ct = _jobCts.Token;
-        _ = Task.Run(async () =>
-        {
-            int flagged = 0, done = 0, failed = 0;
-            try
-            {
-                var patch = LoadRv(id);
-                var only = lineIds?.ToHashSet();
-                // The take in use, and with DBVO 2.0 naming every kept (★) take too, since each is exported as a variant.
-                var todo = patch.Lines.Where(l => !l.Excluded && !l.Gone && l.SelectedTake != null && (only == null || only.Contains(l.LineId)))
-                    .Select(l => (Line: (Phase2Line)l, Take: l.SelectedTake!)).ToList();
-                if (todo.Count == 0) { Emit("jobDone", new { kind = "revoice-qa", projectId = id, ok = true, message = "No takes to check." }); return; }
-                Emit("progress", new { kind = "revoice-qa", done = 0, total = todo.Count, failed = 0, message = "Loading Whisper" });
-                var tool = new WavToLip(_settings.WavToLip, Tools(), WhisperModelsFolder(), e =>
-                {
-                    if (e.Kind == "log") App.Log("Whisper: " + e.Text);
-                    else if (e.Kind == "status") Emit("progress", new { kind = "revoice-qa", done, total = todo.Count, failed, message = e.Text });
-                });
-                var (transcribe, engine) = await tool.CreateTranscriberAsync(ct);
-                await using var _e = engine;
-                var tools = Tools();
-                var root = _lib.RevoiceFolder(patch.Id);
-                foreach (var (line, take) in todo)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    var qa = new TakeQa();
-                    try
-                    {
-                        var wav = Path.Combine(root, take.WavPath);
-                        var intended = string.IsNullOrWhiteSpace(take.SpokenText) ? line.Spoken : take.SpokenText;
-                        qa.Heard = (await transcribe(wav, ct)).Trim();
-                        qa.Score = Math.Round(QaText.Score(intended, qa.Heard), 2);
-                        (qa.Lufs, qa.TruePeak) = await tools.MeasureAsync(wav, ct);
-                        if (qa.Score < QaMinScore) qa.Flags.Add("words");
-                        if (qa.Lufs is { } l && l < QaQuietLufs) qa.Flags.Add("quiet");
-                        if (qa.TruePeak is { } tp && tp > QaPeakDbtp) qa.Flags.Add("clipping");
-                    }
-                    catch (OperationCanceledException) { throw; }
-                    catch (Exception ex) { failed++; qa.Flags.Add("error"); qa.Heard = "Could not check: " + FriendlyError.From(ex); }
-                    if (qa.Flags.Count > 0) flagged++;
-                    await _gate.WaitAsync(CancellationToken.None);
-                    try { take.Qa = qa; } finally { _gate.Release(); }
-                    done++;
-                    Emit("progress", new { kind = "revoice-qa", done, total = todo.Count, failed, current = line.FinalLine });
-                    if (done % 25 == 0) { await _gate.WaitAsync(CancellationToken.None); try { _lib.Save(patch); } finally { _gate.Release(); } }
-                }
-                await _gate.WaitAsync(CancellationToken.None);
-                try { _lib.Save(patch); } finally { _gate.Release(); }
-                Emit("jobDone", new { kind = "revoice-qa", projectId = id, ok = true, flagged, checkedCount = done,
-                    message = flagged == 0 ? $"All {done} take(s) passed." : $"{flagged} of {done} take(s) flagged. Filter by \"QA flagged\" to listen to them." });
-            }
-            catch (OperationCanceledException)
-            {
-                try { await _gate.WaitAsync(CancellationToken.None); try { _lib.Save(LoadRv(id)); } finally { _gate.Release(); } } catch { }
-                Emit("jobDone", new { kind = "revoice-qa", projectId = id, ok = false, message = $"Cancelled after {done} take(s); their results are kept." });
-            }
-            catch (Exception ex)
-            {
-                App.Log("Check takes failed: " + ex);
-                Emit("jobDone", new { kind = "revoice-qa", projectId = id, ok = false, message = FriendlyError.From(ex) });
-            }
-            finally { _jobCts = null; }
-        });
-        return true;
-    }
 }
 
 /// <summary>

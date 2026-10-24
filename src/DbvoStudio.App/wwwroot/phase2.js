@@ -3,6 +3,7 @@ import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, co
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
+import { qaDialog } from './qa.js';
 
 const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Edited since take' };
 
@@ -939,15 +940,12 @@ export async function patchView(id) {
   window.addEventListener('keydown', reviewKeys, true);
 
   async function qaRun(ids) {
-    const n = ids ? ids.length : patch.lines.filter((l) => !l.omitted && !l.excluded && l.takes.length).length;
-    if (!n) { toast('No takes to check yet.', true); return; }
-    const ok = await modal('Check takes', [h('div.help',
-      h('p', `Whisper listens to the take in use of ${n} line(s) and compares what it hears with the line. Loudness and peak are measured too.`),
-      h('p', 'A take is flagged when the words match less than 75 % (wrong line, cut off, extra words), when it is very quiet, or when it clips. Nothing is deleted or regenerated: use the "QA flagged" filter to listen and decide.'),
-      h('p.faint', 'Uses the Whisper settings of the WAV to LIP tool. The first run downloads the model.'))],
-    [{ label: 'Cancel', value: false }, { label: `Check ${n} take(s)`, primary: true, value: true }], { help: 'checking-takes' });
-    if (!ok) return;
-    try { await rpc('patch.qa', { id, lineIds: ids }); renderActions(); } catch (e) { fail(e); }
+    const pool = (ids ? ids.map((x) => index.get(x)).filter(Boolean) : patch.lines).filter((l) => !l.omitted && !l.excluded && l.takes.length);
+    if (!pool.length) { toast('No takes to check yet.', true); return; }
+    const unchecked = pool.filter((l) => { const t = l.takes.find((x) => x.id === l.selectedTakeId); return !(t && t.qa); }).length;
+    const o = await qaDialog({ total: pool.length, unchecked, ticked: !!ids });
+    if (!o) return;
+    try { await rpc('patch.qa', { id, lineIds: ids, ...o }); renderActions(); } catch (e) { fail(e); }
   }
 
   async function clearQa() {

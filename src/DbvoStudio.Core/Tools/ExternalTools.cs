@@ -95,6 +95,20 @@ public sealed class ExternalTools
     }
 
     /// <summary>Integrated loudness (LUFS) and true peak (dBTP) of an audio file (ffmpeg ebur128). Null where ffmpeg gave none.</summary>
+    /// <summary>
+    /// One ffmpeg run for Check takes: measures loudness and true peak (EBU R128) and, when <paramref name="wav16"/> is given,
+    /// writes the 16 kHz mono copy Whisper reads, so each take starts ffmpeg once instead of twice.
+    /// </summary>
+    public async Task<(double? Lufs, double? TruePeak)> PrepareForCheckAsync(string input, string? wav16, CancellationToken ct = default)
+    {
+        var args = new List<string> { "-y", "-hide_banner", "-nostats", "-i", input, "-af", "ebur128=peak=true" };
+        if (wav16 == null) args.AddRange(new[] { "-f", "null", "-" });
+        else args.AddRange(new[] { "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le", "-map_metadata", "-1", wav16 });
+        var r = await RunAsync(FfmpegPath, args, ct);
+        if (wav16 != null && (r.ExitCode != 0 || !File.Exists(wav16))) throw new ToolException($"ffmpeg couldn't read {Path.GetFileName(input)}. ({Tail(r.StdErr)})");
+        return ParseEbur128(r.StdErr);
+    }
+
     public async Task<(double? Lufs, double? TruePeak)> MeasureAsync(string input, CancellationToken ct = default)
     {
         var r = await RunAsync(FfmpegPath, new[] { "-hide_banner", "-nostats", "-i", input, "-af", "ebur128=peak=true", "-f", "null", "-" }, ct);

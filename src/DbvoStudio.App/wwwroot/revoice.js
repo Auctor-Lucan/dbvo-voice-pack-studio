@@ -5,6 +5,7 @@ import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
+import { qaDialog } from './qa.js';
 
 const CERT = { Exact: 'Speaker known', Probable: 'Probable speakers', Unknown: 'Speaker unknown' };
 
@@ -710,15 +711,12 @@ export async function revoiceView(id) {
     await recordTake({ patchId: id, line: l, kind: 'revoice', onSaved: (nl) => { replaceLine(nl); play(nl); } });
   }
   async function qaRun(ids) {
-    const n = ids.length;
-    if (!n) { toast('No takes to check yet.', true); return; }
-    const ok = await modal('Check takes', [h('div.help',
-      h('p', `Whisper listens to the take in use of ${n} line(s) and compares what it hears with the spoken text. Loudness and peak are measured too.`),
-      h('p', 'A take is flagged when the words match less than 75 % (wrong line, cut off, extra words), when it is very quiet, or when it clips. Nothing is deleted or regenerated: use the "QA flagged" filter to listen and decide.'),
-      h('p.faint', 'Uses the Whisper settings of the WAV to LIP tool. The first run downloads the model.'))],
-    [{ label: 'Cancel', value: false }, { label: `Check ${n} take(s)`, primary: true, value: true }], { help: 'checking-takes' });
-    if (!ok) return;
-    try { await rpc('revoice.qa', { id, lineIds: ids }); renderActions(); } catch (e) { fail(e); }
+    const pool = ids.map((x) => index.get(x)).filter((l) => l && l.takes.length && !l.excl);
+    if (!pool.length) { toast('No takes to check yet.', true); return; }
+    const unchecked = pool.filter((l) => { const t = l.takes.find((x) => x.id === l.sel); return !(t && t.qa); }).length;
+    const o = await qaDialog({ total: pool.length, unchecked, ticked: grid.selected.size > 0 });
+    if (!o) return;
+    try { await rpc('revoice.qa', { id, lineIds: ids, ...o }); renderActions(); } catch (e) { fail(e); }
   }
   function setReview(on) {
     review = on;
