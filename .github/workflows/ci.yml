@@ -39,7 +39,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # FFmpeg's LGPL Windows build from BtbN/FFmpeg-Builds (redistributable with its license text).
-          $rel = gh api repos/BtbN/FFmpeg-Builds/releases/tags/latest | ConvertFrom-Json
+          # The 'latest' tag is re-created daily; while it is being replaced, fall back to the newest release that has the zip.
+          $rel = $null
+          try { $rel = gh api repos/BtbN/FFmpeg-Builds/releases/tags/latest | ConvertFrom-Json } catch { }
+          if (-not $rel -or -not $rel.assets) {
+            $all = gh api "repos/BtbN/FFmpeg-Builds/releases?per_page=10" | ConvertFrom-Json
+            $rel = $all | Where-Object { $_.assets | Where-Object { $_.name -match 'win64-lgpl' } } | Select-Object -First 1
+          }
           $asset = $rel.assets | Where-Object { $_.name -match '^ffmpeg-n[0-9.]+-latest-win64-lgpl-[0-9.]+\.zip$' } | Sort-Object name -Descending | Select-Object -First 1
           if (-not $asset) { $asset = $rel.assets | Where-Object { $_.name -eq 'ffmpeg-master-latest-win64-lgpl.zip' } | Select-Object -First 1 }
           if (-not $asset) { throw "No LGPL win64 ffmpeg build found" }
