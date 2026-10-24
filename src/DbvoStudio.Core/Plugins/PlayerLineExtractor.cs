@@ -85,12 +85,9 @@ public static class PlayerLineExtractor
                 string sub = snam == null ? "" : Subrecord.Ascii(snam.Data.AsSpan(0, Math.Min(4, snam.Data.Length)));
                 if (sub != "CUST" && sub != "RUMO") continue;
 
-                bool hidden = false;
-                if (rec.Get("TIFC") != null && infosByTopic.TryGetValue(rec.FormId, out var kids) && kids.Count > 0)
-                    hidden = kids.All(k => k.Get("RNAM") != null);
-
                 var full = rec.Get("FULL");
                 string? text = full == null ? string.Empty : plugin.DecodeLString(full.Data);
+                bool hidden = text != null && IsHiddenByPrompts(plugin, rec, text, infosByTopic);
                 if (text == null) { unresolved++; continue; }
                 Add(lines, rec, LineField.TopicText, text, edid, rec.FormId, hidden);
             }
@@ -105,6 +102,30 @@ public static class PlayerLineExtractor
         }
 
         return new ExtractionResult { Plugin = plugin, Lines = lines, UnresolvedStrings = unresolved };
+    }
+
+    /// <summary>
+    /// The topic text never shows in game when every response of the topic shows its own prompt instead.
+    /// Only said when this plugin holds every response (TIFC, the topic's response count, is not more than the
+    /// responses here: a patch that overrides a few responses of a master's topic can't see the rest), every one of
+    /// them has a prompt with text (an empty prompt shows the topic text), and no prompt reads the same as the topic.
+    /// When in doubt the line is kept: voicing an extra line is harmless, a missing one is silent.
+    /// </summary>
+    internal static bool IsHiddenByPrompts(PluginFile plugin, PluginRecord dial, string topicText, Dictionary<uint, List<PluginRecord>> infosByTopic)
+    {
+        var tifc = dial.Get("TIFC");
+        if (tifc == null || tifc.Data.Length < 4) return false;
+        if (!infosByTopic.TryGetValue(dial.FormId, out var kids) || kids.Count == 0) return false;
+        if (BitConverter.ToUInt32(tifc.Data, 0) > kids.Count) return false;
+        foreach (var k in kids)
+        {
+            var rnam = k.Get("RNAM");
+            if (rnam == null) return false;
+            var prompt = plugin.DecodeLString(rnam.Data);
+            if (string.IsNullOrWhiteSpace(prompt)) return false;
+            if (string.Equals(prompt.Trim(), topicText.Trim(), StringComparison.Ordinal)) return false;
+        }
+        return true;
     }
 
     private static void Add(List<ExtractedLine> lines, PluginRecord rec, LineField field, string text, string? edid, uint topic, bool hidden)

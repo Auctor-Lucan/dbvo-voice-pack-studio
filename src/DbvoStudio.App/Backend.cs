@@ -174,7 +174,13 @@ public sealed partial class Backend
                     _lib.Save(mod);
                     return ModDto(mod);
                 });
-            case "mod.get": return ModDto(LoadMod(S(p, "id")));
+            case "mod.get":
+                return await Locked(() =>
+                {
+                    var m = LoadMod(S(p, "id"));
+                    if (new Phase1Service(_lib, Runtime()).RecheckHidden(m)) _lib.Save(m);
+                    return ModDto(m);
+                });
             // Iterations: lines this row adds to the topic file (an alias written out every way it shows in game). The line itself is not changed.
             case "line1.setIterations":
                 return await Locked(() =>

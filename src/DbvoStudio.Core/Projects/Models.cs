@@ -341,6 +341,8 @@ public sealed class ModPlugin
     public List<Phase1Line> Lines { get; set; } = new();
     public DateTime ImportedUtc { get; set; } = DateTime.UtcNow;
     public List<string> Notices { get; set; } = new();
+    /// <summary>Version of the "hidden by prompts" rule the lines were checked with (2 = since 7.9).</summary>
+    public int HiddenRule { get; set; }
 
     [JsonIgnore] public string FixFileName => FixPluginWriter.FixFileName(FileName, FixPrefix);
     [JsonIgnore] public bool NeedsFixPlugin => !IsTopicFile && Lines.Any(l => l.NeedsOverride);

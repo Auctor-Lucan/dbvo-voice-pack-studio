@@ -161,4 +161,26 @@ public class PluginTests : IDisposable
         var subs = Subrecord.Parse(b.AsSpan(24, (int)size));
         return subs.First(s => s.Type == "HEDR").Data;
     }
+
+    [Fact]
+    public void Topic_text_is_only_hidden_when_every_response_has_its_own_prompt()
+    {
+        var b = new TestPluginBuilder();
+        b.AddTopic(0x01000900, "AllPrompted", "Hidden text", (0x01000901, "Prompt one."), (0x01000902, "Prompt two."));
+        // A patch overriding one response of a master's topic: the master's other responses aren't in this plugin.
+        var over = b.AddTopic(0x00012345, "OverriddenTopic", "Reporting for duty.", (0x00012346, "Ready."));
+        over.ResponseCount = 4;
+        // An empty prompt shows the topic text.
+        b.AddTopic(0x01000910, "EmptyPrompt", "Who is the Night Mother?", (0x01000911, ""));
+        // The prompt reads the same as the topic.
+        b.AddTopic(0x01000920, "SamePrompt", "Skyrim is my home.", (0x01000921, "Skyrim is my home."));
+        b.AddTopic(0x01000930, "OneWithout", "So you're a healer?", (0x01000931, "A prompt."), (0x01000932, null));
+        var r = PlayerLineExtractor.Extract(PluginFile.Read(Save(b, "Hidden.esp")));
+        bool Hidden(uint id) => r.Lines.Single(l => l.FormId == id && l.Field == LineField.TopicText).HiddenByPrompts;
+        Assert.True(Hidden(0x01000900));
+        Assert.False(Hidden(0x00012345));
+        Assert.False(Hidden(0x01000910));
+        Assert.False(Hidden(0x01000920));
+        Assert.False(Hidden(0x01000930));
+    }
 }

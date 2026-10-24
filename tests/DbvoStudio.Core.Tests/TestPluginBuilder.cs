@@ -23,6 +23,8 @@ public sealed class TestPluginBuilder
         public string? Text;       // FULL
         public string Subtype = "CUST";
         public List<Info> Infos = new();
+        /// <summary>TIFC as written (default: the responses in this plugin).</summary>
+        public uint? ResponseCount;
     }
 
     public List<string> Masters { get; } = new() { "Skyrim.esm" };
@@ -56,7 +58,7 @@ public sealed class TestPluginBuilder
                 subs.Add(new Subrecord("QNAM", BitConverter.GetBytes(0x00012345u)));
                 subs.Add(new Subrecord("DATA", new byte[4]));
                 subs.Add(new Subrecord("SNAM", Encoding.ASCII.GetBytes(t.Subtype)));
-                subs.Add(new Subrecord("TIFC", BitConverter.GetBytes((uint)t.Infos.Count)));
+                subs.Add(new Subrecord("TIFC", BitConverter.GetBytes(t.ResponseCount ?? (uint)t.Infos.Count)));
                 Record(top, "DIAL", t.FormId, subs, false);
                 if (t.Infos.Count > 0)
                 {

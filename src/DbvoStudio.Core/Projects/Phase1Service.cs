@@ -96,6 +96,7 @@ public sealed class Phase1Service
         mp.Localized = plugin.IsLocalized;
         mp.ImportedUtc = DateTime.UtcNow;
         mp.Notices.Clear();
+        mp.HiddenRule = 2;
 
         var report = new ImportReport { Plugin = mp, UnresolvedStrings = unresolved };
         report.MissingMasters.AddRange(FindMissingMasters(mod, plugin));
@@ -222,6 +223,32 @@ public sealed class Phase1Service
     /// game shows, and changing one changes its filename. No DBVO Fix plugin can be made from a topic file.
     /// Re-importing a file with the same name updates it (lines are matched by their text).
     /// </summary>
+    /// <summary>
+    /// Re-checks which topic texts are hidden by prompts with the current rule, from the stored plugin copies (once per
+    /// plugin). Only that flag changes; every decision on the lines stays. Returns true when anything changed.
+    /// </summary>
+    public bool RecheckHidden(Mod mod)
+    {
+        bool changed = false;
+        foreach (var mp in mod.Plugins.Where(p => !p.IsTopicFile && p.HiddenRule < 2))
+        {
+            mp.HiddenRule = 2;
+            changed = true;
+            if (string.IsNullOrEmpty(mp.StoredFile) || !File.Exists(mp.StoredFile)) continue;
+            try
+            {
+                var plugin = PluginFile.Read(mp.StoredFile);
+                if (plugin.IsLocalized) plugin.AttachStrings(ResolveStringsFolder(mod, mp.StoredFile), _settings.StringsLanguage);
+                var now = PlayerLineExtractor.Extract(plugin).Lines.Where(x => x.Field == LineField.TopicText)
+                    .GroupBy(x => x.FormId).ToDictionary(g => g.Key, g => g.First().HiddenByPrompts);
+                foreach (var l in mp.Lines.Where(l => l.Field == LineField.TopicText))
+                    if (now.TryGetValue(l.FormId, out var h)) l.HiddenByPrompts = h;
+            }
+            catch { /* keep the old flags */ }
+        }
+        return changed;
+    }
+
     public ImportReport ImportTopicFile(Mod mod, string txtPath)
     {
         var raw = TopicFile.Read(txtPath);
