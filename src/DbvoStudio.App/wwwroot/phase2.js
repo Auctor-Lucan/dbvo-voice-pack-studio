@@ -283,8 +283,8 @@ export async function patchView(id) {
 
   const selTake = (l) => l.takes.find((t) => t.id === l.selectedTakeId);
   const qaText = (q) => q ? [q.score != null ? `Words match ${(q.score * 100).toFixed(0)}%` : null, q.heard ? `Heard: "${q.heard}"` : null,
-    q.lufs != null ? `Loudness ${q.lufs.toFixed(1)} LUFS` : null, q.truePeak != null ? `Peak ${q.truePeak.toFixed(1)} dBTP` : null].filter(Boolean).join('\n') : '';
-  const QA_WHY = { words: 'words differ', quiet: 'too quiet', clipping: 'clipping', error: 'not checked' };
+    q.lufs != null ? `Loudness ${q.lufs.toFixed(1)} LUFS` : null, q.truePeak != null ? `Peak ${q.truePeak.toFixed(1)} dBTP` : null, q.onsetMs != null ? `Start: a ${Math.round(q.onsetMs)} ms burst, then ${Math.round(q.onsetGapMs)} ms of silence before the line` : null].filter(Boolean).join('\n') : '';
+  const QA_WHY = { words: 'words differ', quiet: 'too quiet', clipping: 'clipping', onset: 'burst at the start', error: 'not checked' };
   // A line is flagged when its take in use, or a kept ★ variant, was flagged by Check takes.
   const flaggedTake = (l) => { const s = selTake(l); return [s, ...l.takes.filter((t) => t.kept && t !== s)].find((t) => t && t.qa && t.qa.flags.length); };
   const qaFlagged = (l) => !!flaggedTake(l);

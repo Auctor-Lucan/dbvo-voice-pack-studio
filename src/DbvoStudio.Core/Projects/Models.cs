@@ -414,7 +414,10 @@ public sealed class TakeQa
     /// <summary>Integrated loudness (LUFS) and true peak (dBTP).</summary>
     public double? Lufs { get; set; }
     public double? TruePeak { get; set; }
-    /// <summary>Short reasons the take was flagged: "words", "quiet", "clipping". Empty: passed.</summary>
+    /// <summary>Start of take: length of the stray burst before the line and the silence after it (ms), when one was found.</summary>
+    public double? OnsetMs { get; set; }
+    public double? OnsetGapMs { get; set; }
+    /// <summary>Short reasons the take was flagged: "words", "quiet", "clipping", "onset". Empty: passed.</summary>
     public List<string> Flags { get; set; } = new();
 }
 

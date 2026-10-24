@@ -51,4 +51,36 @@ public class AdoptTests : IDisposable
         Assert.Equal(0, new Phase2Service(lib, settings).Sync(patch, voice, new[] { mod }).Adopted);
         Assert.Single(follow.Takes);
     }
+
+    [Fact]
+    public void Another_wav_lip_folder_is_read_in_as_new_takes()
+    {
+        var lib = new Library(Path.Combine(_dir, "lib2"));
+        var settings = lib.LoadSettings();
+        var mod = new Mod { Name = "M" };
+        mod.Plugins.Add(new ModPlugin { FileName = "M.esp", Lines = { new Phase1Line { FormId = 1, Original = "Follow me.", Final = "Follow me.", Kind = Rules.LineKind.Valid } } });
+        lib.Save(mod);
+        var voice = new VoicePack { Name = "V", PackId = "v" };
+        string Folder(string name, int len)
+        {
+            var d = Path.Combine(_dir, name); Directory.CreateDirectory(d);
+            new WavFile { SampleRate = 44100, Channels = 1, Samples = new short[len] }.Write(Path.Combine(d, LineNaming.Stem("Follow me.", NamingMode.Legacy) + ".wav"));
+            File.WriteAllBytes(Path.Combine(d, LineNaming.Stem("Follow me.", NamingMode.Legacy) + ".lip"), new byte[] { 1 });
+            return d;
+        }
+        var first = Folder("first", 44100);
+        var second = Folder("second", 22050);
+        var patch = new DbvoPatch { Name = "M", VoicePackId = voice.Id, ModIds = { mod.Id }, WavLipFolder = first };
+        var svc = new Phase2Service(lib, settings);
+        svc.Sync(patch, voice, new[] { mod });
+        var line = patch.Lines.Single();
+        Assert.Single(line.Takes);
+
+        patch.WavLipFolder = second;
+        Assert.Equal((0, 1), svc.ReloadWavLipFolder(patch, voice));
+        Assert.Equal(2, line.Takes.Count);
+        Assert.Equal(0.5, line.SelectedTake!.DurationSeconds, 2);
+        // the same folder again adds nothing
+        Assert.Equal((0, 0), svc.ReloadWavLipFolder(patch, voice));
+    }
 }

@@ -703,8 +703,8 @@ export async function revoiceView(id) {
 
   // ---- Review, Check takes and recording (as in Phase 2)
   function qaText(q) { return q ? [q.score != null ? `Words match ${(q.score * 100).toFixed(0)}%` : null, q.heard ? `Heard: "${q.heard}"` : null,
-    q.lufs != null ? `Loudness ${q.lufs.toFixed(1)} LUFS` : null, q.truePeak != null ? `Peak ${q.truePeak.toFixed(1)} dBTP` : null].filter(Boolean).join('\n') : ''; }
-  var QA_WHY = { words: 'words differ', quiet: 'too quiet', clipping: 'clipping', error: 'not checked' };
+    q.lufs != null ? `Loudness ${q.lufs.toFixed(1)} LUFS` : null, q.truePeak != null ? `Peak ${q.truePeak.toFixed(1)} dBTP` : null, q.onsetMs != null ? `Start: a ${Math.round(q.onsetMs)} ms burst, then ${Math.round(q.onsetGapMs)} ms of silence before the line` : null].filter(Boolean).join('\n') : ''; }
+  var QA_WHY = { words: 'words differ', quiet: 'too quiet', clipping: 'clipping', onset: 'burst at the start', error: 'not checked' };
   function qaFlagged(l) { const t = l.takes.find((x) => x.id === l.sel); return !!(t && t.qa && t.qa.flags.length); }
   async function record(l) {
     if (app.job) { toast('Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.', true); return; }

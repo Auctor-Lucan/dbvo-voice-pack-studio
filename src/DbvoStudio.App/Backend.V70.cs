@@ -1,3 +1,4 @@
+using DbvoStudio.Core.Audio;
 using DbvoStudio.Core.Revoice;
 using DbvoStudio.Core.Text;
 using System.Globalization;
@@ -136,7 +137,7 @@ public sealed partial class Backend
     }
 
     /// <summary>Check takes options, chosen in the dialog before the run.</summary>
-    private sealed record QaOptions(bool Words, bool Levels, bool OnlyUnchecked, string Model, string Language, bool Quick);
+    private sealed record QaOptions(bool Words, bool Levels, bool OnlyUnchecked, string Model, string Language, bool Quick, bool Onset, string OnsetSensitivity);
 
     private QaOptions QaOptionsFrom(JsonElement p) => new(
         Words: !p.TryGetProperty("words", out var w) || w.ValueKind != JsonValueKind.False,
@@ -144,7 +145,9 @@ public sealed partial class Backend
         OnlyUnchecked: B(p, "onlyUnchecked"),
         Model: S(p, "model", "large-v3-turbo"),
         Language: S(p, "language", "en"),
-        Quick: !p.TryGetProperty("quick", out var q) || q.ValueKind != JsonValueKind.False);
+        Quick: !p.TryGetProperty("quick", out var q) || q.ValueKind != JsonValueKind.False,
+        Onset: !p.TryGetProperty("onset", out var on) || on.ValueKind != JsonValueKind.False,
+        OnsetSensitivity: S(p, "onsetSensitivity", "normal"));
 
     /// <summary>
     /// Check takes for a DBVO Patch (revoice = false) or an NPC Revoice project. Whisper transcribes the take in use of each
@@ -158,7 +161,7 @@ public sealed partial class Backend
         var id = S(p, "id");
         var lineIds = p.TryGetProperty("lineIds", out var li) && li.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds").ToHashSet() : null;
         var o = QaOptionsFrom(p);
-        if (!o.Words && !o.Levels) throw new InvalidOperationException("Pick at least one check: the words, or loudness and clipping.");
+        if (!o.Words && !o.Levels && !o.Onset) throw new InvalidOperationException("Pick at least one check: the words, loudness and clipping, or the start of each take.");
         _jobCts = new CancellationTokenSource();
         var ct = _jobCts.Token;
         string kind = revoice ? "revoice-qa" : "qa";
@@ -214,9 +217,9 @@ public sealed partial class Backend
 
                 // Prepare ahead (ffmpeg: loudness + the 16 kHz copy) on a few CPU threads while Whisper works on the GPU.
                 int ahead = Math.Clamp(Environment.ProcessorCount / 2, 2, 6);
-                var prep = new Task<(string? Wav16, double? Lufs, double? Peak, string? Error)>[todo.Count];
+                var prep = new Task<(string? Wav16, double? Lufs, double? Peak, string? Error, OnsetResult? Onset)>[todo.Count];
                 var cpu = new SemaphoreSlim(ahead);
-                Task<(string?, double?, double?, string?)> Prepare(int i) => Task.Run(async () =>
+                Task<(string?, double?, double?, string?, OnsetResult?)> Prepare(int i) => Task.Run(async () =>
                 {
                     await cpu.WaitAsync(ct);
                     try
@@ -224,12 +227,13 @@ public sealed partial class Backend
                         var wav = Path.Combine(root, todo[i].Take.WavPath);
                         string? w16 = o.Words && prepared16k ? Path.Combine(tmpDir, Guid.NewGuid().ToString("N")[..10] + ".wav") : null;
                         if (w16 != null) lock (temp) temp.Add(w16);
-                        if (!o.Levels && w16 == null) return ((string?)null, (double?)null, (double?)null, (string?)null);
+                        OnsetResult? onset = o.Onset ? OnsetCheck.Analyze(WavFile.Read(wav), o.OnsetSensitivity) : null;
+                        if (!o.Levels && w16 == null) return ((string?)null, (double?)null, (double?)null, (string?)null, onset);
                         var (lufs, peak) = await tools.PrepareForCheckAsync(wav, w16, ct);
-                        return (w16, lufs, peak, (string?)null);
+                        return (w16, lufs, peak, (string?)null, onset);
                     }
                     catch (OperationCanceledException) { throw; }
-                    catch (Exception ex) { return ((string?)null, (double?)null, (double?)null, FriendlyError.From(ex)); }
+                    catch (Exception ex) { return ((string?)null, (double?)null, (double?)null, FriendlyError.From(ex), (OnsetResult?)null); }
                     finally { cpu.Release(); }
                 }, ct);
                 for (int i = 0; i < Math.Min(todo.Count, ahead * 2); i++) prep[i] = Prepare(i);
@@ -245,8 +249,14 @@ public sealed partial class Backend
                     var qa = new TakeQa();
                     try
                     {
-                        var (w16, lufs, peak, error) = await prep[i];
+                        var (w16, lufs, peak, error, onset) = await prep[i];
                         if (error != null) throw new InvalidOperationException(error);
+                        if (onset is { Flagged: true })
+                        {
+                            qa.OnsetMs = onset.BlipMs; qa.OnsetGapMs = onset.GapMs;
+                            // A take you approved in Review keeps its approval: the numbers are recorded, the flag is not raised.
+                            if (!(line.Approved && take == line.SelectedTake)) qa.Flags.Add("onset");
+                        }
                         if (o.Levels)
                         {
                             (qa.Lufs, qa.TruePeak) = (lufs, peak);
@@ -270,7 +280,7 @@ public sealed partial class Backend
                     done++;
                     var perSec = done / Math.Max(0.001, rate.Elapsed.TotalSeconds);
                     Emit("progress", new { kind, done, total = todo.Count, failed, current = line.FinalLine,
-                        message = $"{(o.Words ? $"Whisper {o.Model} on {device()}" : "Loudness and clipping only")} · {perSec:0.0} takes/s" });
+                        message = $"{(o.Words ? $"Whisper {o.Model} on {device()}" : "No Whisper (levels and start only)")} · {perSec:0.0} takes/s" });
                     if (sinceSave.Elapsed.TotalSeconds >= 30)
                     {
                         await _gate.WaitAsync(CancellationToken.None);

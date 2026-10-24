@@ -221,6 +221,47 @@ public sealed partial class Phase2Service
         return n;
     }
 
+    /// <summary>
+    /// After the WAV + LIP folder changed: every line with a WAV + LIP pair in the new folder gets it. A line without takes
+    /// adopts it as take #1; a line with takes gets it as a new take, in use, unless one of its takes already has the same
+    /// audio. Earlier takes are kept. Returns (adopted, added).
+    /// </summary>
+    public (int Adopted, int Added) ReloadWavLipFolder(DbvoPatch patch, VoicePack voice)
+    {
+        if (string.IsNullOrWhiteSpace(patch.WavLipFolder) || !Directory.Exists(patch.WavLipFolder)) return (0, 0);
+        var wavs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in Directory.EnumerateFiles(patch.WavLipFolder, "*.wav", SearchOption.AllDirectories)) wavs.TryAdd(Path.GetFileNameWithoutExtension(f), f);
+        if (wavs.Count == 0) return (0, 0);
+        var root = _lib.PatchFolder(patch.Id);
+        int adopted = 0, added = 0;
+        foreach (var line in patch.Lines)
+        {
+            string? wav = null;
+            foreach (var stem in Stems(line, voice)) if (wavs.TryGetValue(stem, out wav)) break;
+            if (wav == null) continue;
+            var lip = Path.ChangeExtension(wav, ".lip");
+            if (!File.Exists(lip)) continue;
+            if (line.Takes.Count > 0 && line.Takes.Any(t => SameAudio(Path.Combine(root, t.WavPath), wav))) continue;
+            bool had = line.Takes.Count > 0;
+            AddExistingTake(patch, voice, line, wav, lip, "existing", label: "imported WAV + LIP (" + Path.GetFileName(patch.WavLipFolder.TrimEnd('\\', '/')) + ")");
+            line.NoAdopt = false;
+            line.RefreshStale();
+            if (had) added++; else adopted++;
+        }
+        return (adopted, added);
+    }
+
+    private static bool SameAudio(string a, string b)
+    {
+        try
+        {
+            var fa = new FileInfo(a); var fb = new FileInfo(b);
+            if (!fa.Exists || !fb.Exists || fa.Length != fb.Length) return false;
+            return File.ReadAllBytes(a).AsSpan().SequenceEqual(File.ReadAllBytes(b));
+        }
+        catch { return false; }
+    }
+
     private Take AddExistingTake(DbvoPatch patch, VoicePack voice, Phase2Line line, string wav, string lip, string source, string? originalFuz = null, string? label = null, string? root = null, string? stemOverride = null)
     {
         var stem = stemOverride ?? LineNaming.Stem(line.FinalLine, voice.Naming);

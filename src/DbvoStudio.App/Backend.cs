@@ -353,7 +353,9 @@ public sealed partial class Backend
                     patch.Name = S(p, "name", patch.Name);
                     if (p.TryGetProperty("modIds", out _)) patch.ModIds = Strings(p, "modIds");
                     if (p.TryGetProperty("referenceIds", out _)) patch.ReferenceIds = Strings(p, "referenceIds");
+                    var oldWavLip = patch.WavLipFolder;
                     patch.WavLipFolder = S(p, "wavLipFolder", patch.WavLipFolder);
+                    bool wavLipChanged = !string.Equals((oldWavLip ?? "").TrimEnd('\\', '/'), (patch.WavLipFolder ?? "").TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
                     patch.FinalRoot = S(p, "finalRoot", patch.FinalRoot);
                     patch.FuzTemplate = S(p, "fuzTemplate", patch.FuzTemplate);
                     patch.FuzTemplate = Phase2Service.NormalizeFuzTemplate(patch.FuzTemplate, patch.FinalRoot, LoadVoice(patch.VoicePackId).Destinations.FinalRoot);
@@ -366,7 +368,10 @@ public sealed partial class Backend
                     if (p.TryGetProperty("overwriteFix", out var ox) && ox.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteFix = ox.GetBoolean();
                     if (p.TryGetProperty("exportApprovedOnly", out var ea) && ea.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.ExportApprovedOnly = ea.GetBoolean();
                     _lib.Save(patch);
-                    new Phase2Service(_lib, Runtime()).Sync(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods());
+                    var svc2 = new Phase2Service(_lib, Runtime());
+                    svc2.Sync(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods());
+                    // Another WAV + LIP folder: its files are read in (new takes where they differ from what a line has).
+                    if (wavLipChanged) { svc2.ReloadWavLipFolder(patch, LoadVoice(patch.VoicePackId)); _lib.Save(patch); }
                     return PatchDto(patch);
                 });
             case "patch.delete":
