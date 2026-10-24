@@ -398,7 +398,8 @@ public sealed partial class Backend
                     var svc = new Phase2Service(_lib, Runtime());
                     int removed = B(p, "removeStale") ? svc.RemoveStaleExports(patch, voice, _lib.LoadMods()) : 0;
                     var rep = svc.ExportWavLip(patch, voice);
-                    var files = WriteFixAndTopics(patch, B(p, "keepFix"));
+                    // "WAV + LIP only": the DBVO Fix plugins and topic file in those folders are left as they are.
+                    var files = B(p, "audioOnly") ? new List<string>() : WriteFixAndTopics(patch, B(p, "keepFix"));
                     return new { rep.Written, rep.Skipped, rep.Failed, rep.Errors, files, removed };
                 });
             case "patch.buildFuz": return StartFuz(p);
@@ -806,7 +807,7 @@ public sealed partial class Backend
                 line.Status = Phase1Status.Active;
                 break;
             case "acceptChange": line.Status = Phase1Status.Active; line.Reviewed = true; break;
-            case "voice": line.VoiceApproved = NB(p, "value"); line.Reviewed = true; break;
+            case "voice": line.VoiceApproved = NB(p, "value"); line.Reviewed = true; if (line.VoiceApproved == true) line.IncludeAnyway = true; break;
             case "fix": line.FixApproved = NB(p, "value"); line.Reviewed = true; break;
             case "approve":
                 // Confirm both outputs as they stand now (a stage direction needs "value": voice it or not).
@@ -835,7 +836,7 @@ public sealed partial class Backend
                 case "review": line.Reviewed = true; break;
                 case "exclude": line.Excluded = true; line.Reviewed = true; break;
                 case "include": line.Excluded = false; break;
-                case "voiceOn": line.VoiceApproved = true; line.Reviewed = true; break;
+                case "voiceOn": line.VoiceApproved = true; line.Reviewed = true; line.IncludeAnyway = true; break;
                 case "voiceOff": line.VoiceApproved = false; line.Reviewed = true; break;
                 case "fixOn": line.FixApproved = true; line.Reviewed = true; break;
                 case "fixOff": line.FixApproved = false; line.Reviewed = true; break;

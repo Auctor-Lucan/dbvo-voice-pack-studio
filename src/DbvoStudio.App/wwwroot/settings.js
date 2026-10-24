@@ -453,7 +453,7 @@ async function voices(selectedId, rerender, onSelect) {
         srow('DBVO voice pack ID', 'The folder name under Sound\\DBVO\\ and the voice_pack_id in the DBVO JSON.', txt(v, 'packId', { placeholder: 'e.g. vampira', after: renderPreview })),
         srow('Author', null, txt(v, 'author')),
         srow('File naming', 'Legacy names are readable, so you can see which line each file is. DBVO 2.0 names are hashes of the line, identical to DBVO Voice Pack Maker 2.7.0.',
-          segmented([['Legacy', 'Legacy (DBVO 1.0)'], ['Dbvo2Hash', 'DBVO 2.0 hash']], v.naming, (x) => { v.naming = x; persistSoon(); renderEditor(); })),
+          segmented([['Legacy', 'Legacy (DBVO 1.0.1)'], ['Dbvo2Hash', 'DBVO 2.0 hash']], v.naming, (x) => { v.naming = x; persistSoon(); renderEditor(); })),
         srow('Engine', 'ElevenLabs, or a local VoxCPM / OmniVoice server (Global Settings → General & tools). Voice, model and the engine\'s settings are picked in the Phase 2 toolbar and remembered here.',
           h('div.col', segmented([['elevenlabs', 'ElevenLabs'], ['voxcpm', 'VoxCPM'], ['omnivoice', 'OmniVoice']], v.engine || 'elevenlabs', (x) => { v.engine = x; persistSoon(); renderEditor(); }),
             h('span.dim', v.engine === 'voxcpm' ? `VoxCPM · ${v.voxCpm.voice || 'no reference voice yet'}` : v.engine === 'omnivoice' ? `OmniVoice · ${v.omniVoice.voice || 'no reference voice yet'}` : `${v.eleven.voiceName || '— no voice picked yet —'} · ${v.eleven.modelId}`)))),

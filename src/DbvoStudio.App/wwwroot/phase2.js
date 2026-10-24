@@ -804,7 +804,8 @@ export async function patchView(id) {
     const verb = vc ? 'Convert' : 'Generate';
     const exp = h('button.btn', { disabled: busy, title: 'Write WAV + LIP files and build .fuz files' }, 'Export ▾');
     exp.addEventListener('click', () => popupMenu(exp, [
-      { label: 'WAV + LIP to the WAV + LIP folder', sub: 'Also writes the DBVO Fix plugins and topic file to their folders', onclick: exportWavLip },
+      { label: 'WAV + LIP, DBVO Fix plugins and topic file', sub: 'WAV + LIP to the WAV + LIP folder; the DBVO Fix plugins and topic file to their folders (replacing the ones there)', onclick: () => exportWavLip(false) },
+      { label: 'WAV + LIP only', sub: 'Leaves the DBVO Fix plugins and topic file in those folders as they are: for when you will fix lines in Phase 1 first, even with Overwrite on for those files', onclick: () => exportWavLip(true) },
       { label: 'Build .fuz into the final folder', sub: 'Also writes the DBVO Fix plugins and topic file', onclick: () => buildFuz(false) },
       { label: 'Build .fuz to another folder…', sub: 'Only the .fuz files', onclick: () => buildFuz(true) },
       { label: 'Only DBVO Fix plugins + topic file', sub: 'No audio: just the plugin with the edited lines and the topic file', onclick: writeFix },
@@ -1129,12 +1130,12 @@ export async function patchView(id) {
     return v == null ? null : { removeStale: v === 'delete' };
   }
 
-  async function exportWavLip() {
+  async function exportWavLip(audioOnly) {
     try {
-      const fc = await fixChoice(); if (!fc) return;
+      const fc = audioOnly ? {} : await fixChoice(); if (!fc) return;
       const sc = await staleChoice(); if (!sc) return;
-      const r = await rpc('patch.exportWavLip', { id, ...fc, ...sc });
-      await filesModal('WAV + LIP exported', h('div.kv',
+      const r = await rpc('patch.exportWavLip', { id, audioOnly, ...fc, ...sc });
+      await filesModal(audioOnly ? 'WAV + LIP exported (DBVO Fix plugins and topic file left as they were)' : 'WAV + LIP exported', h('div.kv',
         h('div', 'Written'), h('div', r.written), r.removed ? [h('div', 'Removed (no longer exported)'), h('div', r.removed)] : null, h('div', 'Skipped (up to date, or not ours and Overwrite is off)'), h('div', r.skipped), h('div', 'Failed'), h('div', r.failed),
         r.errors && r.errors.length ? [h('div', 'Errors'), h('div.mono', r.errors.slice(0, 10).join('\n'))] : null), r.files);
     } catch (e) { fail(e); }
@@ -1205,7 +1206,7 @@ export async function patchView(id) {
       creditsSlot,
       voiceSel,
       h('button.icon-btn', { title: 'Edit this voice pack (Global Settings)', onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, '✎'),
-      h('span.badge.b-skip', { title: voice.naming === 'Legacy' ? 'File names: Legacy (DBVO 1.0), from the line text. Set per voice pack.' : 'File names: DBVO 2.0 hashes. Set per voice pack.' }, voice.naming === 'Legacy' ? 'Legacy names' : 'DBVO 2.0 names'),
+      h('span.badge.b-skip', { title: voice.naming === 'Legacy' ? 'File names: Legacy (DBVO 1.0.1), from the line text. Set per voice pack.' : 'File names: DBVO 2.0 hashes. Set per voice pack.' }, voice.naming === 'Legacy' ? 'Legacy names' : 'DBVO 2.0 names'),
       foldersMenu(),
       h('button.btn.sm.ghost', { title: 'Re-read Phase 1 now (also happens every time you open this patch)', onclick: sync }, '⟳ Refresh'),
       h('button.btn.sm.ghost.danger', { title: 'Delete this patch and its takes', onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes the patch and every take it made (their WAV and LIP files in the Library). Stays: the Phase 1 mods, the voice pack, and every WAV + LIP, .fuz and DBVO Fix file already exported to your folders; a new patch with the same WAV + LIP folder picks those WAV + LIP files up again as takes. A backup of the project files is made first (backups hold no audio).', 'Delete', true)) { await rpc('patch.delete', { id }); go('patches'); } } }, 'Delete'));

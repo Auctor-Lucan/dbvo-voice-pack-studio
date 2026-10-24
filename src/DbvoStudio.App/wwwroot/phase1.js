@@ -16,6 +16,7 @@ export function kindBadge(l) {
   if (l.needsDecision) return h('span.badge.b-toolong', { title: 'A stage direction: decide whether it is voiced (e.g. a laugh) or stays silent.' }, 'VOICE OR SILENT?');
   if (l.resolved && l.stage) return h('span.badge.b-fixed', { title: `Was ${(KIND_LABEL[l.kind] || [l.kind])[0]}; now a stage direction you ${l.voiced ? 'voice' : 'keep silent'}.` }, l.voiced ? 'Fixed · voiced' : 'Fixed · silent');
   if (l.resolved) return h('span.badge.b-fixed', { title: `Was ${(KIND_LABEL[l.kind] || [l.kind])[0]}; the final text now passes the script.` }, 'Fixed ✓');
+  if ((l.variants || []).length && !l.isPlayerName && (l.kind === 'Broken' || l.kind === 'TooLong')) return h('span.badge.b-fixed', { title: `Was ${(KIND_LABEL[l.kind] || [l.kind])[0]}; the line stays as the mod wrote it and its ${l.variants.length} iteration(s) go into the topic file.` }, 'ITERATIONS ADDED');
   if (l.isPlayerName && l.kind !== 'TooLong') return h('span.badge.b-player', 'PLAYER NAME');
   const [t, c] = KIND_LABEL[l.kind] || [l.kind, 'b-skip'];
   return h('span.badge.' + c, t);
@@ -658,7 +659,7 @@ export async function modView(id) {
         c.unreviewed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.unreviewed} flagged not reviewed`) : null),
       helpButton('fix-voice-and-exclude'),
       (() => {
-        const pool = (sel.length ? sel.map((k) => plugin.lines.find((x) => x.key === k)).filter(Boolean) : grid.rows).filter((l) => l.hasOtherAlias && !l.isPlayerName && l.status !== 'Removed');
+        const pool = (sel.length ? sel.map((k) => plugin.lines.find((x) => x.key === k)).filter(Boolean) : visibleLines()).filter((l) => l.hasOtherAlias && !l.isPlayerName && l.status !== 'Removed');
         return pool.length ? h('button.btn.sm', { title: `Write the alias lines ${sel.length ? 'you ticked' : 'shown'} out as every name or place they can show in game (one topic line each). The lines themselves are not changed.`, onclick: () => iterationsDialog(pool) }, `Iterations for ${pool.length} alias line(s)…`) : null;
       })(),
       h('div.spacer'),

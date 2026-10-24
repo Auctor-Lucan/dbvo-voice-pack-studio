@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using DbvoStudio.Core.Plugins;
 using DbvoStudio.Core.Rules;
 using DbvoStudio.Core.Topics;
@@ -96,14 +97,17 @@ public sealed class Phase1Service
         mp.Localized = plugin.IsLocalized;
         mp.ImportedUtc = DateTime.UtcNow;
         mp.Notices.Clear();
-        mp.HiddenRule = 2;
+        mp.HiddenRule = 3;
 
         var report = new ImportReport { Plugin = mp, UnresolvedStrings = unresolved };
         report.MissingMasters.AddRange(FindMissingMasters(mod, plugin));
         if (unresolved != 0)
             mp.Notices.Add($"This plugin is localized and {(unresolved < 0 ? "its strings files were not found" : unresolved + " strings could not be read")}. Add its .STRINGS files.");
 
-        var lines = extraction.Lines.Select(x => NewLine(x.FormId, x.Field, x.EditorId, x.Original, x.Kind, x.Suggested, x.HiddenByPrompts, x.Order)).ToList();
+        // Topic texts that are only an EditorID (DA03VileGreetingBranchTopic) never show in game: left out. Every other line is
+        // listed and voiced by default; the plugin can't tell which topic texts the game hides, so none are hidden (7.9.1).
+        var lines = extraction.Lines.Where(x => !IsIdentifierText(x.Field, x.Kind, x.Original))
+            .Select(x => NewLine(x.FormId, x.Field, x.EditorId, x.Original, x.Kind, x.Suggested, false, x.Order)).ToList();
         Merge(mod, mp, existing, lines, report, oldMasters);
         return report;
     }
@@ -223,28 +227,29 @@ public sealed class Phase1Service
     /// game shows, and changing one changes its filename. No DBVO Fix plugin can be made from a topic file.
     /// Re-importing a file with the same name updates it (lines are matched by their text).
     /// </summary>
+    /// <summary>A topic text that is only an identifier: the EditorID itself, or one word in CamelCase/with digits and no spaces.</summary>
+    public static bool IsIdentifierText(LineField field, LineKind kind, string text)
+    {
+        if (kind == LineKind.SkippedEditorId) return true;
+        if (field != LineField.TopicText) return false;
+        var t = text.Trim();
+        if (t.Length < 8 || !Regex.IsMatch(t, "^[A-Za-z][A-Za-z0-9_]*$")) return false;
+        return Regex.IsMatch(t, "[a-z][A-Z]|[A-Za-z][0-9]|_");
+    }
+
     /// <summary>
-    /// Re-checks which topic texts are hidden by prompts with the current rule, from the stored plugin copies (once per
-    /// plugin). Only that flag changes; every decision on the lines stays. Returns true when anything changed.
+    /// Brings mods imported before 7.9.1 up to date, once per plugin: no line stays hidden by prompts, and topic texts that
+    /// are only an EditorID are removed from the list. Every other decision on the lines stays. True when anything changed.
     /// </summary>
     public bool RecheckHidden(Mod mod)
     {
         bool changed = false;
-        foreach (var mp in mod.Plugins.Where(p => !p.IsTopicFile && p.HiddenRule < 2))
+        foreach (var mp in mod.Plugins.Where(p => p.HiddenRule < 3))
         {
-            mp.HiddenRule = 2;
+            mp.HiddenRule = 3;
             changed = true;
-            if (string.IsNullOrEmpty(mp.StoredFile) || !File.Exists(mp.StoredFile)) continue;
-            try
-            {
-                var plugin = PluginFile.Read(mp.StoredFile);
-                if (plugin.IsLocalized) plugin.AttachStrings(ResolveStringsFolder(mod, mp.StoredFile), _settings.StringsLanguage);
-                var now = PlayerLineExtractor.Extract(plugin).Lines.Where(x => x.Field == LineField.TopicText)
-                    .GroupBy(x => x.FormId).ToDictionary(g => g.Key, g => g.First().HiddenByPrompts);
-                foreach (var l in mp.Lines.Where(l => l.Field == LineField.TopicText))
-                    if (now.TryGetValue(l.FormId, out var h)) l.HiddenByPrompts = h;
-            }
-            catch { /* keep the old flags */ }
+            foreach (var l in mp.Lines) l.HiddenByPrompts = false;
+            if (!mp.IsTopicFile) mp.Lines.RemoveAll(l => IsIdentifierText(l.Field, l.Kind, l.Original));
         }
         return changed;
     }

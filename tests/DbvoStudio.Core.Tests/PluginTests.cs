@@ -183,4 +183,17 @@ public class PluginTests : IDisposable
         Assert.False(Hidden(0x01000920));
         Assert.False(Hidden(0x01000930));
     }
+
+    [Theory]
+    [InlineData("DA03VileGreetingBranchTopic", true)]
+    [InlineData("DB11AmaundPlayerResponse4", true)]
+    [InlineData("WhiterunInnkeeperRumoursBranchTopic", true)]
+    [InlineData("Reporting for duty.", false)]
+    [InlineData("Dragonsreach", false)]
+    [InlineData("Okay", false)]
+    public void Identifier_topic_texts_are_left_out(string text, bool left)
+    {
+        Assert.Equal(left, DbvoStudio.Core.Projects.Phase1Service.IsIdentifierText(LineField.TopicText, LineKind.Valid, text));
+        Assert.False(DbvoStudio.Core.Projects.Phase1Service.IsIdentifierText(LineField.Prompt, LineKind.Valid, text));
+    }
 }
