@@ -28,7 +28,7 @@ public sealed class Library
     {
         Root = Path.GetFullPath(root);
         Directory.CreateDirectory(Root);
-        foreach (var d in new[] { "voicepacks", "references", "mods", "patches", "fomods", "revoice", "books", "backups" })
+        foreach (var d in new[] { "voicepacks", "references", "mods", "patches", "fomods", "revoice", "books", "grunts", "backups" })
             Directory.CreateDirectory(Path.Combine(Root, d));
     }
 
@@ -116,6 +116,23 @@ public sealed class Library
         p.UpdatedUtc = DateTime.UtcNow;
         SaveJson(Path.Combine(BooksFolder(p.Id), "project.json"), p);
     }
+
+    // ---------- Player Grunts projects (Other Tools) ----------
+    public string GruntsFolder(string id) => Path.Combine(Root, "grunts", id);
+    /// <summary>The user's custom Player Grunts event definitions (shared by all projects).</summary>
+    public string GruntCustomEventsPath => Path.Combine(Root, "grunts", "custom-events.json");
+    public List<Grunts.GruntProject> LoadGruntProjects() =>
+        Directory.EnumerateDirectories(Path.Combine(Root, "grunts"))
+            .Select(d => Load<Grunts.GruntProject>(Path.Combine(d, "project.json"))).Where(p => p != null).Select(p => p!)
+            .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    public Grunts.GruntProject? LoadGruntProject(string id) => Load<Grunts.GruntProject>(Path.Combine(GruntsFolder(id), "project.json"));
+    public void Save(Grunts.GruntProject p)
+    {
+        p.UpdatedUtc = DateTime.UtcNow;
+        SaveJson(Path.Combine(GruntsFolder(p.Id), "project.json"), p);
+    }
+    public Grunts.GruntCustomEvents LoadGruntCustomEvents() => Load<Grunts.GruntCustomEvents>(GruntCustomEventsPath) ?? new Grunts.GruntCustomEvents();
+    public void Save(Grunts.GruntCustomEvents c) => SaveJson(GruntCustomEventsPath, c);
 
     // ---------- references ----------
     public ReferenceSet AddReference(AppSettings settings, string name, string topicFile)

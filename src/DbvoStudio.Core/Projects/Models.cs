@@ -23,6 +23,10 @@ public sealed class AppSettings
     /// <summary>Folder holding localized strings (e.g. Data\Strings).</summary>
     public string StringsFolder { get; set; } = "";
     public string StringsLanguage { get; set; } = "English";
+    /// <summary>Player Grunts Tool: the installed PC Head Tracking folder (holds PC Head Tracking - MCM.esp; with MPCHT, its version of it).</summary>
+    public string PchtFolder { get; set; } = "";
+    /// <summary>Player Grunts Tool: the installed Smart Player Voice System folder (holds SmartPlayerVoiceSystem.esp and SKSE\Plugins\AudioUtil).</summary>
+    public string SpvsFolder { get; set; } = "";
     public List<ReferenceSet> References { get; set; } = new();
     public AiProviderSettings AiProvider { get; set; } = new();
     public LocalEngineSettings LocalEngines { get; set; } = new();

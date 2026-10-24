@@ -32,7 +32,7 @@ public sealed class PluginRecord
         }
     }
 
-    internal static string ZString(byte[] d)
+    public static string ZString(byte[] d)
     {
         int n = Array.IndexOf(d, (byte)0);
         if (n < 0) n = d.Length;
