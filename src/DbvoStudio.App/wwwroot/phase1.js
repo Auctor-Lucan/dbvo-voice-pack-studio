@@ -312,7 +312,7 @@ export async function modView(id) {
       { id: 'sel', title: '', width: 32, resizable: false, render: (l) => grid.checkbox(l) },
       { id: 'type', title: 'Status', width: 170, align: 'center', render: (l) => h('div.row', { style: { justifyContent: 'safe center' } }, kindBadge(l),
         l.status === 'ChangedInMod' ? h('span.badge.b-changed', 'changed in mod') : null,
-        l.hiddenByPrompts ? h('span.badge.b-hidden', { title: 'Every response has its own prompt, so the game never shows this topic text.' }, l.includeAnyway ? 'hidden · incl.' : 'hidden') : null) },
+        l.hiddenByPrompts && !l.includeAnyway ? h('span.badge.b-hidden', { title: 'Looks like an EditorID rather than a line the player says, so it starts out hidden and unvoiced. Click ♪ to voice it anyway.' }, 'hidden') : null) },
       { id: 'formid', title: plugin && plugin.isTopicFile ? '' : 'FormID', width: 90, cls: 'mono dim', render: (l) => l.formId },
       { id: 'orig', title: 'Original', flex: 1, width: 260, render: (l) => h('span.dim', { title: l.original }, l.original) },
       { id: 'final', title: 'Final in-game line', flex: 1.3, width: 320, render: (l) => finalCell(l) },
@@ -492,7 +492,7 @@ export async function modView(id) {
       edited: L.filter((l) => l.userEdited).length,
       alias: L.filter((l) => l.hasOtherAlias && !l.isPlayerName && live(l)).length,
       iter: L.filter((l) => (l.variants || []).length).length,
-      hidden: L.filter((l) => l.hiddenByPrompts).length,
+      hidden: L.filter((l) => l.hiddenByPrompts && !l.includeAnyway).length,
       excluded: L.filter((l) => l.excluded).length,
       removed: L.filter((l) => l.status === 'Removed').length,
     };
@@ -510,7 +510,7 @@ export async function modView(id) {
         case 'unreviewed': if (!(l.flagged && !l.reviewed && live(l))) return false; break;
         case 'player': if (!(l.isPlayerName && live(l))) return false; break;
         case 'changed': if (l.status !== 'ChangedInMod') return false; break;
-        case 'hidden': if (!l.hiddenByPrompts) return false; break;
+        case 'hidden': if (!(l.hiddenByPrompts && !l.includeAnyway)) return false; break;
         case 'excluded': if (!l.excluded) return false; break;
         case 'removed': if (l.status !== 'Removed') return false; break;
         case 'edited': if (!l.userEdited) return false; break;
@@ -632,7 +632,7 @@ export async function modView(id) {
       h('span.legend-item', h('span.demo-ex', icon('ban', { size: 14 })), '= Not voiced (excluded)'));
     filters.append(h('div.filter-chips', opt('all', 'All', 'Every player line of this plugin'), opt('fixes', 'In DBVO Fix', 'Lines whose in-game text goes into the DBVO Fix plugin'), opt('notvoiced', 'Not voiced', 'Lines that won\'t be voiced in Phase 2'), opt('flagged', 'Flagged', 'BROKEN or TOO LONG WILL CTD lines to review'), opt('unreviewed', 'Not reviewed', 'Lines you haven\'t looked at yet'),
       opt('stage', 'Stage directions', 'Lines that are only an action, such as (Intimidate)'), opt('player', 'Player names', 'Lines with the player\'s name, voiced in a player-name patch'),
-      opt('changed', 'Changed in mod', 'Lines a newer version of the mod changed'), opt('edited', 'Edited by you', 'Lines whose in-game text you edited'), opt('alias', 'Alias lines', 'Lines with an <Alias=…> that shows as a name or place in game: add iterations for each way it can read'), opt('iter', 'With iterations', 'Lines that add written-out iterations to the topic file'), opt('hidden', 'Hidden by prompts', 'Topic texts the player never sees, because each of their responses shows its own prompt instead'), opt('excluded', 'Excluded', 'Lines left out of voicing'), opt('removed', 'Removed', 'Lines a newer version of the mod removed'), h('div.spacer'), legend),
+      opt('changed', 'Changed in mod', 'Lines a newer version of the mod changed'), opt('edited', 'Edited by you', 'Lines whose in-game text you edited'), opt('alias', 'Alias lines', 'Lines with an <Alias=…> that shows as a name or place in game: add iterations for each way it can read'), opt('iter', 'With iterations', 'Lines that add written-out iterations to the topic file'), opt('hidden', 'Hidden', 'Lines that look like an EditorID rather than something the player says: hidden and unvoiced until you click ♪'), opt('excluded', 'Excluded', 'Lines left out of voicing'), opt('removed', 'Removed', 'Lines a newer version of the mod removed'), h('div.spacer'), legend),
       h('div.filter-tools',
         h('span.legend-note', 'Review ', h('b', 'BROKEN'), ' and ', h('b', 'TOO LONG WILL CTD'), ' lines before Phase 2.'),
         h('div.spacer'), helpButton('review-the-lines'),
@@ -775,7 +775,7 @@ export async function modView(id) {
         l.playerNameExported ? h('span.badge.b-valid', 'exported') : null) : null,
       l.status !== 'Removed' && !l.isPlayerName ? variantsEditor(l) : null,
       l.hiddenByPrompts ? h('label.row', h('input', { type: 'checkbox', checked: l.includeAnyway, onchange: (e) => act(l, 'includeHidden', e.target.checked) }),
-        'Include anyway (every response in this plugin has its own prompt, so the game normally never shows this text)') : null,
+        'Voice it anyway (it looks like an EditorID rather than a line the player says, so it started out hidden)') : null,
       l.status === 'ChangedInMod' ? h('div.help.warn', h('p', h('b', 'The mod changed this line.')),
         h('p', h('span.dim', 'Was: '), l.previousOriginal || '—'), h('p', h('span.dim', 'Your earlier final: '), l.previousFinal || '—'),
         h('div.row', h('button.btn.sm', { title: 'The mod update changed this line; keep your edit', onclick: () => act(l, 'keepPrevious') }, 'Keep my earlier edit'), h('button.btn.sm', { title: 'Drop your edit and use the updated text', onclick: () => act(l, 'acceptChange') }, 'Use the new text'))) : null,

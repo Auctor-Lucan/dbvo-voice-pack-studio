@@ -25,6 +25,35 @@ public class Phase1ExtrasTests : IDisposable
     }
 
     [Fact]
+    public void EditorID_like_topic_texts_are_listed_hidden_and_come_back_after_7_9_1()
+    {
+        var b = new TestPluginBuilder();
+        b.AddTopic(0x01000800, "T1", "DA03VileGreetingBranchTopic", (0x01000801, "A prompt."));
+        b.AddTopic(0x01000802, "T2", "Reporting for duty.", (0x01000803, "Ready."));
+        var path = Path.Combine(_dir, "H.esp");
+        File.WriteAllBytes(path, b.Build());
+        var mod = new Mod { Name = "H" };
+        var svc = new Phase1Service(_lib, _settings);
+        svc.Import(mod, path);
+        var p = mod.Plugins.Single();
+        var id = p.Lines.Single(l => l.FormId == 0x01000800 && l.Field == LineField.TopicText);
+        Assert.True(id.HiddenByPrompts);
+        Assert.False(id.Voiced);
+        var real = p.Lines.Single(l => l.FormId == 0x01000802 && l.Field == LineField.TopicText);
+        Assert.False(real.HiddenByPrompts);
+        Assert.True(real.Voiced);
+        id.IncludeAnyway = true;
+        Assert.True(id.Voiced);
+
+        // A mod opened with 7.9.1 lost the line: it is read back from the stored plugin copy, hidden.
+        p.Lines.RemoveAll(l => l.FormId == 0x01000800 && l.Field == LineField.TopicText);
+        p.HiddenRule = 3;
+        Assert.True(svc.RecheckHidden(mod));
+        Assert.True(p.Lines.Single(l => l.FormId == 0x01000800 && l.Field == LineField.TopicText).HiddenByPrompts);
+        Assert.False(svc.RecheckHidden(mod));
+    }
+
+    [Fact]
     public void Player_name_lines_are_their_own_kind()
     {
         Assert.True(ScriptRules.HasPlayerAlias("My name is <alias=player>. Hi."));
@@ -232,4 +261,5 @@ public class ApprovalTests
         Assert.Single(l.TopicLines());
         Assert.False(l.NeedsOverride);
     }
+
 }

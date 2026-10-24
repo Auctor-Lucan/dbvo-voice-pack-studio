@@ -97,17 +97,17 @@ public sealed class Phase1Service
         mp.Localized = plugin.IsLocalized;
         mp.ImportedUtc = DateTime.UtcNow;
         mp.Notices.Clear();
-        mp.HiddenRule = 3;
+        mp.HiddenRule = 4;
 
         var report = new ImportReport { Plugin = mp, UnresolvedStrings = unresolved };
         report.MissingMasters.AddRange(FindMissingMasters(mod, plugin));
         if (unresolved != 0)
             mp.Notices.Add($"This plugin is localized and {(unresolved < 0 ? "its strings files were not found" : unresolved + " strings could not be read")}. Add its .STRINGS files.");
 
-        // Topic texts that are only an EditorID (DA03VileGreetingBranchTopic) never show in game: left out. Every other line is
-        // listed and voiced by default; the plugin can't tell which topic texts the game hides, so none are hidden (7.9.1).
-        var lines = extraction.Lines.Where(x => !IsIdentifierText(x.Field, x.Kind, x.Original))
-            .Select(x => NewLine(x.FormId, x.Field, x.EditorId, x.Original, x.Kind, x.Suggested, false, x.Order)).ToList();
+        // Every line is listed. Topic texts that look like an EditorID (DA03VileGreetingBranchTopic) start out hidden and
+        // unvoiced; ♪ voices them anyway. Prompts no longer hide anything: the plugin can't tell what the game shows.
+        var lines = extraction.Lines
+            .Select(x => NewLine(x.FormId, x.Field, x.EditorId, x.Original, x.Kind, x.Suggested, IsIdentifierText(x.Field, x.Kind, x.Original), x.Order)).ToList();
         Merge(mod, mp, existing, lines, report, oldMasters);
         return report;
     }
@@ -238,18 +238,30 @@ public sealed class Phase1Service
     }
 
     /// <summary>
-    /// Brings mods imported before 7.9.1 up to date, once per plugin: no line stays hidden by prompts, and topic texts that
-    /// are only an EditorID are removed from the list. Every other decision on the lines stays. True when anything changed.
+    /// Brings mods imported before 7.9.2 up to date, once per plugin: only EditorID-like topic texts are hidden (unless you
+    /// voiced them), and the ones 7.9.1 took out of the list are read back from the stored plugin copy. Decisions stay.
     /// </summary>
     public bool RecheckHidden(Mod mod)
     {
         bool changed = false;
-        foreach (var mp in mod.Plugins.Where(p => p.HiddenRule < 3))
+        foreach (var mp in mod.Plugins.Where(p => p.HiddenRule < 4))
         {
-            mp.HiddenRule = 3;
+            bool restore = mp.HiddenRule == 3 && !mp.IsTopicFile;
+            mp.HiddenRule = 4;
             changed = true;
-            foreach (var l in mp.Lines) l.HiddenByPrompts = false;
-            if (!mp.IsTopicFile) mp.Lines.RemoveAll(l => IsIdentifierText(l.Field, l.Kind, l.Original));
+            foreach (var l in mp.Lines) l.HiddenByPrompts = IsIdentifierText(l.Field, l.Kind, l.Original);
+            if (!restore || string.IsNullOrEmpty(mp.StoredFile) || !File.Exists(mp.StoredFile)) continue;
+            try
+            {
+                var plugin = PluginFile.Read(mp.StoredFile);
+                if (plugin.IsLocalized) plugin.AttachStrings(ResolveStringsFolder(mod, mp.StoredFile), _settings.StringsLanguage);
+                var have = mp.Lines.Select(l => (l.FormId, l.Field)).ToHashSet();
+                foreach (var x in PlayerLineExtractor.Extract(plugin).Lines)
+                    if (IsIdentifierText(x.Field, x.Kind, x.Original) && !have.Contains((x.FormId, x.Field)))
+                        mp.Lines.Add(NewLine(x.FormId, x.Field, x.EditorId, x.Original, x.Kind, x.Suggested, true, x.Order));
+                mp.Lines = mp.Lines.OrderBy(l => l.Order).ToList();
+            }
+            catch { /* the lines stay as they are */ }
         }
         return changed;
     }
