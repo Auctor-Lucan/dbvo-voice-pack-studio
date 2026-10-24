@@ -285,7 +285,7 @@ public sealed class Phase1Line
 
     /// <summary>Still needs the user's decision.</summary>
     [JsonIgnore]
-    public bool IsFlagged => (WasFlagged && !IsResolved) || NeedsVoiceDecision;
+    public bool IsFlagged => (WasFlagged && !IsResolved && !Variants.Any(v => !string.IsNullOrWhiteSpace(v))) || NeedsVoiceDecision;
 
     private bool Active => Status != Phase1Status.Removed && !Excluded && !(HiddenByPrompts && !IncludeAnyway);
 
@@ -356,6 +356,8 @@ public sealed class Mod
     /// <summary>Category for sorting DBVO Patches (e.g. Followers). Not used in folder paths.</summary>
     public string Category { get; set; } = "Misc";
     public List<ModPlugin> Plugins { get; set; } = new();
+    /// <summary>What each &lt;Alias=…&gt; can turn into in game (Phase 1 → Iterations), remembered for every line of the mod.</summary>
+    public Dictionary<string, List<string>> AliasValues { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
 }

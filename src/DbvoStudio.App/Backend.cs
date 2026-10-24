@@ -175,6 +175,29 @@ public sealed partial class Backend
                     return ModDto(mod);
                 });
             case "mod.get": return ModDto(LoadMod(S(p, "id")));
+            // Iterations: lines this row adds to the topic file (an alias written out every way it shows in game). The line itself is not changed.
+            case "line1.setIterations":
+                return await Locked(() =>
+                {
+                    var mod = LoadMod(S(p, "modId"));
+                    var plugin = mod.Plugins.First(x => x.FileName == S(p, "plugin"));
+                    bool add = S(p, "mode", "add") == "add";
+                    if (p.TryGetProperty("items", out var arr))
+                        foreach (var it in arr.EnumerateArray())
+                        {
+                            var line = plugin.Lines.FirstOrDefault(l => l.Key == it.GetProperty("k").GetString());
+                            if (line == null) continue;
+                            var vals = it.GetProperty("v").EnumerateArray().Select(x => (x.GetString() ?? "").Trim()).Where(x => x.Length > 0);
+                            var list = add ? line.Variants.Concat(vals) : vals;
+                            line.Variants = list.Distinct(StringComparer.Ordinal).ToList();
+                            line.Reviewed = true;
+                        }
+                    if (p.TryGetProperty("aliasValues", out var av) && av.ValueKind == JsonValueKind.Object)
+                        foreach (var kv in av.EnumerateObject())
+                            mod.AliasValues[kv.Name] = kv.Value.EnumerateArray().Select(x => (x.GetString() ?? "").Trim()).Where(x => x.Length > 0).Distinct().ToList();
+                    _lib.Save(mod);
+                    return ModDto(mod);
+                });
             case "mod.saveMeta":
                 return await Locked(() =>
                 {
@@ -663,7 +686,7 @@ public sealed partial class Backend
         var mastersDir = Path.Combine(_lib.ModFolder(m.Id), "masters");
         return new
         {
-            m.Id, m.Name, m.Version, m.NexusUrl, m.UpdatedUtc, m.Category,
+            m.Id, m.Name, m.Version, m.NexusUrl, m.UpdatedUtc, m.Category, aliasValues = m.AliasValues,
             uploadedMasters = Directory.Exists(mastersDir) ? Directory.GetFiles(mastersDir).Select(Path.GetFileName).ToList() : new List<string?>(),
             plugins = m.Plugins.Select(p => PluginDto(svc, m, p, true)).ToList(),
         };

@@ -779,3 +779,6 @@ mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: in
 .theme-picks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; width: 100%; }
 .theme-pick { width: auto; min-width: 0; }
 .theme-pick .tp-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.iter-chip { flex: none; font-size: 11px; padding: 1px 6px; border-radius: 10px; border: 1px dashed var(--line); background: none; color: var(--dim); cursor: pointer; white-space: nowrap; }
+.iter-chip:hover { color: var(--text); border-color: var(--accent); }
+.iter-chip.on { border-style: solid; border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }

@@ -1,6 +1,6 @@
 // Phase 1: Mods list and the per-plugin workspace.
 import { findReplaceDialog } from './tagtools.js';
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton, segmented } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const KIND_LABEL = {
@@ -355,7 +355,8 @@ export async function modView(id) {
 
   function finalInput(l) {
     if (l.status === 'Removed') return h('span.faint', l.final || '');
-    const inp = h('input', { type: 'text', value: l.final ?? '', placeholder: l.flagged ? 'Fix this line, or leave empty' : '' });
+    const aliasLine = l.hasOtherAlias && !l.isPlayerName;
+    const inp = h('input', { type: 'text', value: l.final ?? '', placeholder: aliasLine ? ((l.variants || []).length ? 'Line left as is: its iterations are voiced' : 'Fix this line, or add iterations →') : l.flagged ? 'Fix this line, or leave empty' : '' });
     if (l.needsOverride) inp.style.color = 'var(--link)';
     inp.addEventListener('change', () => act(l, 'setFinal', inp.value));
     inp.addEventListener('focus', () => { if (focusedKey !== l.key) { focusedKey = l.key; renderInspector(); } });
@@ -367,7 +368,92 @@ export async function modView(id) {
     const inp = finalInput(l);
     const acc = l.suggested && l.final !== l.suggested ? h('button.icon-btn', { title: 'Use the script\'s suggestion: ' + l.suggested, onclick: () => act(l, 'accept') }, '✓') : null;
     const rev = l.final != null && l.final !== l.original && l.status !== 'Removed' ? h('button.icon-btn', { title: 'Undo: back to the original text', onclick: () => act(l, 'revert') }, '↶') : null;
-    return acc || rev ? h('span.spoken-wrap', inp, acc, rev) : inp;
+    const n = (l.variants || []).length;
+    const it = l.status !== 'Removed' && !l.isPlayerName && (n || l.hasOtherAlias)
+      ? h('button.iter-chip' + (n ? '.on' : ''), { title: n ? `${n} iteration(s) go into the topic file:\n${l.variants.slice(0, 12).join('\n')}${n > 12 ? '\n…' : ''}\nClick to change them.` : 'Add iterations: the line written out every way it shows in game (each name or place the alias can be). The line itself stays as it is.', onclick: (e) => { e.stopPropagation(); iterationsDialog([l]); } }, n ? `${n} iter.` : '+ Iter.')
+      : null;
+    return acc || rev || it ? h('span.spoken-wrap', inp, acc, rev, it) : inp;
+  }
+
+  // ---- Iterations: write an <Alias=…> line out as every name or place it can show in game. Each becomes its own topic line.
+  const ALIAS_RX = /<Alias(?:\.(\w+))?\s*=\s*([^>]+?)\s*>/gi;
+  const aliasesOf = (t) => [...(t || '').matchAll(ALIAS_RX)].map((m) => m[2]).filter((a) => a.toLowerCase() !== 'player');
+  const baseText = (l) => (l.final && aliasesOf(l.final).length ? l.final : l.original);
+  function expand(text, values) {
+    const names = [...new Set(aliasesOf(text).map((a) => a.toLowerCase()))];
+    let out = [''];
+    let combos = [{}];
+    for (const n of names) {
+      const vals = values[n] || [];
+      if (!vals.length) return [];
+      const next = [];
+      for (const c of combos) for (const v of vals) { next.push({ ...c, [n]: v }); if (next.length > 500) break; }
+      combos = next;
+    }
+    out = combos.map((c) => text.replace(ALIAS_RX, (m, mod, name) => {
+      if (name.toLowerCase() === 'player') return m;
+      const v = c[name.toLowerCase()] || m;
+      return /^cap/i.test(mod || '') ? v.charAt(0).toUpperCase() + v.slice(1) : v;
+    }).replace(/\s{2,}/g, ' ').trim());
+    return [...new Set(out)];
+  }
+  async function iterationsDialog(lines) {
+    lines = lines.filter((l) => l.status !== 'Removed' && !l.isPlayerName);
+    if (!lines.length) { toast('No lines to add iterations to.', true); return; }
+    const saved = mod.aliasValues || {};
+    const names = [];
+    for (const l of lines) for (const a of aliasesOf(baseText(l))) if (!names.some((x) => x.toLowerCase() === a.toLowerCase())) names.push(a);
+    const inputs = {};
+    const aliasRows = names.map((n) => {
+      const key = Object.keys(saved).find((k) => k.toLowerCase() === n.toLowerCase());
+      const inp = h('input', { type: 'text', value: key ? saved[key].join(', ') : '', placeholder: 'e.g. Whiterun, Markarth, Riften (comma between them)', style: { width: '100%' } });
+      inp.addEventListener('input', update);
+      inputs[n.toLowerCase()] = inp;
+      return h('div.col', { style: { gap: '3px' } }, h('div.field-label.mono', { style: { textTransform: 'none', letterSpacing: 0 } }, `<Alias=${n}>`), inp);
+    });
+    const manual = h('textarea', { rows: lines.length === 1 ? 4 : 2, placeholder: lines.length === 1 ? 'Your own iterations, one per line (written exactly as the subtitle reads in game)' : 'Not available for several lines at once', disabled: lines.length !== 1, spellcheck: false },
+      lines.length === 1 ? (lines[0].variants || []).join('\n') : '');
+    manual.addEventListener('input', update);
+    let replace = lines.length === 1;
+    const modeSel = segmented([['add', 'Add to existing'], ['replace', 'Replace existing']], replace ? 'replace' : 'add', (v) => { replace = v === 'replace'; update(); });
+    const sum = h('div.fr-sum'), prev = h('div.fr-preview');
+    let result = [];
+    function values() { const o = {}; for (const [k, inp] of Object.entries(inputs)) o[k] = inp.value.split(/[,\n]/).map((x) => x.trim()).filter(Boolean); return o; }
+    function update() {
+      const vals = values();
+      result = lines.map((l) => {
+        const gen = expand(baseText(l), vals);
+        const own = lines.length === 1 ? manual.value.split('\n').map((x) => x.trim()).filter(Boolean) : [];
+        const base = lines.length === 1 ? [] : (replace ? [] : (l.variants || []));
+        return { l, v: [...new Set([...base, ...own, ...gen])] };
+      });
+      const total = result.reduce((a, r) => a + r.v.length, 0);
+      const long = result.flatMap((r) => r.v).filter((x) => x.length > 150).length;
+      const missing = names.filter((n) => !vals[n.toLowerCase()].length);
+      sum.textContent = `${total.toLocaleString()} iteration(s) for ${lines.length.toLocaleString()} line(s)` + (missing.length && names.length ? ` · fill in ${missing.length} alias(es) to write the rest out` : '');
+      clear(prev);
+      for (const r of result.slice(0, 4)) for (const v of r.v.slice(0, 4)) prev.append(h('div.fr-item', { style: v.length > 150 ? { borderColor: 'var(--bad)' } : null }, v, v.length > 150 ? h('span', { style: { color: 'var(--bad)' } }, `  · ${v.length} characters: over 150 crashes DBVO`) : null));
+      if (long) prev.prepend(h('div.banner.bad', { style: { margin: 0 } }, `${long} iteration(s) are over 150 characters and would crash DBVO. Shorten those names, or fix the line itself.`));
+    }
+    const body = [
+      h('div.help', h('p', 'The line stays as the mod wrote it. Each iteration goes into the topic file as its own line, so Phase 2 voices every way the subtitle can read in game. You can still edit the line itself as well.'),
+        names.length ? h('p', 'Type what each alias can be. The values are remembered for this mod, so the next line with the same alias is filled in for you.') : null),
+      lines.length > 1 ? h('div.faint', `${lines.length} lines: ${lines.slice(0, 3).map((l) => '"' + baseText(l) + '"').join(', ')}${lines.length > 3 ? '…' : ''}`) : h('div.box', baseText(lines[0])),
+      ...aliasRows,
+      lines.length === 1 ? h('div.col', { style: { gap: '3px' } }, h('div.field-label', 'Your own iterations'), manual) : h('div.row', h('span.faint', 'Existing iterations:'), modeSel),
+      sum, prev,
+    ];
+    const p = modal(lines.length === 1 ? 'Iterations of this line' : 'Iterations of the alias lines', body, [{ label: 'Cancel', value: false }, { label: 'Save iterations', primary: true, value: true }], { help: 'fix-voice-and-exclude' });
+    update();
+    if (!(await p)) return;
+    const av = {}; for (const n of names) av[n] = values()[n.toLowerCase()];
+    try {
+      mod = await rpc('line1.setIterations', { modId: mod.id, plugin: plugin.fileName, mode: lines.length === 1 || replace ? 'replace' : 'add', items: result.map((r) => ({ k: r.l.key, v: r.v })), aliasValues: av });
+      plugin = mod.plugins.find((x) => x.fileName === plugin.fileName);
+      renderAll();
+      const total = result.reduce((a, r) => a + r.v.length, 0);
+      toast(`${total.toLocaleString()} iteration(s) saved for ${result.length} line(s). They go into the topic file for Phase 2.`);
+    } catch (e) { fail(e); }
   }
 
   async function act(l, action, value) {
@@ -401,6 +487,8 @@ export async function modView(id) {
       player: L.filter((l) => l.isPlayerName && live(l)).length,
       changed: L.filter((l) => l.status === 'ChangedInMod').length,
       edited: L.filter((l) => l.userEdited).length,
+      alias: L.filter((l) => l.hasOtherAlias && !l.isPlayerName && live(l)).length,
+      iter: L.filter((l) => (l.variants || []).length).length,
       hidden: L.filter((l) => l.hiddenByPrompts).length,
       excluded: L.filter((l) => l.excluded).length,
       removed: L.filter((l) => l.status === 'Removed').length,
@@ -423,6 +511,8 @@ export async function modView(id) {
         case 'excluded': if (!l.excluded) return false; break;
         case 'removed': if (l.status !== 'Removed') return false; break;
         case 'edited': if (!l.userEdited) return false; break;
+        case 'alias': if (!(l.hasOtherAlias && !l.isPlayerName && live(l))) return false; break;
+        case 'iter': if (!(l.variants || []).length) return false; break;
       }
       return !q || (l.original || '').toLowerCase().includes(q) || (l.final || '').toLowerCase().includes(q) || l.formId.toLowerCase().includes(q) || (l.editorId || '').toLowerCase().includes(q);
     });
@@ -539,7 +629,7 @@ export async function modView(id) {
       h('span.legend-item', h('span.demo-ex', icon('ban', { size: 14 })), '= Not voiced (excluded)'));
     filters.append(h('div.filter-chips', opt('all', 'All', 'Every player line of this plugin'), opt('fixes', 'In DBVO Fix', 'Lines whose in-game text goes into the DBVO Fix plugin'), opt('notvoiced', 'Not voiced', 'Lines that won\'t be voiced in Phase 2'), opt('flagged', 'Flagged', 'BROKEN or TOO LONG WILL CTD lines to review'), opt('unreviewed', 'Not reviewed', 'Lines you haven\'t looked at yet'),
       opt('stage', 'Stage directions', 'Lines that are only an action, such as (Intimidate)'), opt('player', 'Player names', 'Lines with the player\'s name, voiced in a player-name patch'),
-      opt('changed', 'Changed in mod', 'Lines a newer version of the mod changed'), opt('edited', 'Edited by you', 'Lines whose in-game text you edited'), opt('hidden', 'Hidden by prompts', 'Topic texts the player never sees, because each of their responses shows its own prompt instead'), opt('excluded', 'Excluded', 'Lines left out of voicing'), opt('removed', 'Removed', 'Lines a newer version of the mod removed'), h('div.spacer'), legend),
+      opt('changed', 'Changed in mod', 'Lines a newer version of the mod changed'), opt('edited', 'Edited by you', 'Lines whose in-game text you edited'), opt('alias', 'Alias lines', 'Lines with an <Alias=…> that shows as a name or place in game: add iterations for each way it can read'), opt('iter', 'With iterations', 'Lines that add written-out iterations to the topic file'), opt('hidden', 'Hidden by prompts', 'Topic texts the player never sees, because each of their responses shows its own prompt instead'), opt('excluded', 'Excluded', 'Lines left out of voicing'), opt('removed', 'Removed', 'Lines a newer version of the mod removed'), h('div.spacer'), legend),
       h('div.filter-tools',
         h('span.legend-note', 'Review ', h('b', 'BROKEN'), ' and ', h('b', 'TOO LONG WILL CTD'), ' lines before Phase 2.'),
         h('div.spacer'), helpButton('review-the-lines'),
@@ -565,6 +655,10 @@ export async function modView(id) {
             : h('span', { style: { color: 'var(--ok)' } }, 'no DBVO Fix plugin needed'),
         c.unreviewed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.unreviewed} flagged not reviewed`) : null),
       helpButton('fix-voice-and-exclude'),
+      (() => {
+        const pool = (sel.length ? sel.map((k) => plugin.lines.find((x) => x.key === k)).filter(Boolean) : grid.rows).filter((l) => l.hasOtherAlias && !l.isPlayerName && l.status !== 'Removed');
+        return pool.length ? h('button.btn.sm', { title: `Write the alias lines ${sel.length ? 'you ticked' : 'shown'} out as every name or place they can show in game (one topic line each). The lines themselves are not changed.`, onclick: () => iterationsDialog(pool) }, `Iterations for ${pool.length} alias line(s)…`) : null;
+      })(),
       h('div.spacer'),
       sel.length ? h('span.dim', `${sel.length} selected`) : null,
       sel.length ? h('button.btn.sm', { title: 'Use the script\'s suggestion for the ticked lines', onclick: () => bulk('accept') }, 'Use suggestions') : null,
@@ -613,7 +707,7 @@ export async function modView(id) {
         h('p', h('b', 'BROKEN LINE. '), 'The script can\'t make this line voice-ready on its own: usually an alias placeholder like <Alias=…>, asterisks such as *laughs*, or a < or parenthesis in the wrong place.'),
         h('ul',
           h('li', 'Reword it in the box below so the subtitle reads cleanly. Stage directions can go in a trailing (parenthesis): DBVO keeps that out of the voice and the filename. For example "No, thank you. *laughs*" can become "No, thank you. (laughs)".'),
-          l.hasOtherAlias ? h('li', 'For an alias, either reword it so no placeholder remains, or add written-out versions as variants below (one file each).') : null,
+          l.hasOtherAlias ? h('li', 'For an alias, either reword the line so no placeholder remains, or keep it and add iterations (+ Iter. in the list, or Iterations below): the line written out with each name or place it can show in game, one voice file each.') : null,
           h('li', 'Your text goes into the DBVO Fix plugin and the topic file automatically. No need to copy it anywhere by hand.'),
           h('li', 'Left as is, the plugin keeps its original line and this line stays unvoiced.')));
     }
@@ -676,7 +770,7 @@ export async function modView(id) {
       approvalPanel(l),
       l.isPlayerName ? h('div.row', h('button.btn.primary.sm', { title: 'Write this player-name line to your Downloads folder, to voice it in a player-name patch', onclick: () => exportPlayerNames([l.key]) }, 'Export this line to Downloads'),
         l.playerNameExported ? h('span.badge.b-valid', 'exported') : null) : null,
-      l.hasOtherAlias && !l.isPlayerName ? variantsEditor(l) : null,
+      l.status !== 'Removed' && !l.isPlayerName ? variantsEditor(l) : null,
       l.hiddenByPrompts ? h('label.row', h('input', { type: 'checkbox', checked: l.includeAnyway, onchange: (e) => act(l, 'includeHidden', e.target.checked) }),
         'Include anyway (every response in this plugin has its own prompt, so the game normally never shows this text)') : null,
       l.status === 'ChangedInMod' ? h('div.help.warn', h('p', h('b', 'The mod changed this line.')),
@@ -687,10 +781,10 @@ export async function modView(id) {
   }
 
   function variantsEditor(l) {
-    const ta = h('textarea', { rows: 4, placeholder: 'One line per variant, e.g.\nAlvor sent me. Riverwood is in danger.\nGerdur sent me. Riverwood is in danger.' }, (l.variants || []).join('\n'));
-    return h('div', h('div.field-label', 'Written-out variants (each becomes its own topic line and file)'), ta,
-      h('div.row', { style: { marginTop: '6px' } }, h('span.faint.grow', 'Write each exactly as the subtitle will read in game. The plugin is not changed.'),
-        h('button.btn.sm', { title: 'Extra spellings of this line that also go into the topic file', onclick: () => act(l, 'variants', ta.value.split('\n')) }, 'Save variants')));
+    const n = (l.variants || []).length;
+    return h('div', h('div.row', h('div.field-label.grow', `Iterations (${n})`),
+        h('button.btn.sm' + (l.hasOtherAlias ? '.primary' : ''), { title: 'Write the line out every way it shows in game: one topic line (and voice file) each. The line itself is not changed.', onclick: () => iterationsDialog([l]) }, n ? 'Edit iterations…' : '+ Add iterations…')),
+      n ? h('div.box', { style: { maxHeight: '160px', overflow: 'auto', fontSize: '12.5px' } }, l.variants.map((v) => h('div', v))) : h('div.faint', { style: { fontSize: '12.5px' } }, l.hasOtherAlias ? 'This line has an <Alias=…>: add an iteration for each name or place it can show as in game. The line stays as it is.' : 'Extra versions of this line that also go into the topic file.'));
   }
 
   async function bulk(action) {
