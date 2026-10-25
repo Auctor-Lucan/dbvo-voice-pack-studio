@@ -178,7 +178,10 @@ public sealed partial class Backend
                 return await Locked(() =>
                 {
                     var m = LoadMod(S(p, "id"));
-                    if (new Phase1Service(_lib, Runtime()).RecheckHidden(m)) _lib.Save(m);
+                    var p1 = new Phase1Service(_lib, Runtime());
+                    bool save = p1.RecheckHidden(m);
+                    if (p1.RecheckStrings(m) >= 0) save = true;
+                    if (save) _lib.Save(m);
                     return ModDto(m);
                 });
             // Iterations: lines this row adds to the topic file (an alias written out every way it shows in game). The line itself is not changed.

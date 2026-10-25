@@ -75,10 +75,13 @@ public sealed class Phase1Service
     public ImportReport Import(Mod mod, string pluginPath, string? stringsFolder = null)
     {
         var plugin = PluginFile.Read(pluginPath);
-        stringsFolder ??= ResolveStringsFolder(mod, pluginPath);
         int unresolved = 0;
-        if (plugin.IsLocalized && !plugin.AttachStrings(stringsFolder, _settings.StringsLanguage))
-            unresolved = -1;
+        if (plugin.IsLocalized)
+        {
+            var table = stringsFolder != null && StringsTable.Exists(stringsFolder, plugin.BaseName, _settings.StringsLanguage)
+                ? StringsTable.Load(stringsFolder, plugin.BaseName, _settings.StringsLanguage) : LoadStrings(mod, pluginPath).Table;
+            if (table != null) plugin.AttachStrings(table); else unresolved = -1;
+        }
 
         var extraction = PlayerLineExtractor.Extract(plugin);
         unresolved = unresolved < 0 ? Math.Max(1, extraction.UnresolvedStrings) : extraction.UnresolvedStrings;
@@ -98,6 +101,7 @@ public sealed class Phase1Service
         mp.ImportedUtc = DateTime.UtcNow;
         mp.Notices.Clear();
         mp.HiddenRule = 4;
+        mp.StringsRule = 1;
 
         var report = new ImportReport { Plugin = mp, UnresolvedStrings = unresolved };
         report.MissingMasters.AddRange(FindMissingMasters(mod, plugin));
@@ -254,7 +258,7 @@ public sealed class Phase1Service
             try
             {
                 var plugin = PluginFile.Read(mp.StoredFile);
-                if (plugin.IsLocalized) plugin.AttachStrings(ResolveStringsFolder(mod, mp.StoredFile), _settings.StringsLanguage);
+                if (plugin.IsLocalized && LoadStrings(mod, mp.StoredFile).Table is { } st) plugin.AttachStrings(st);
                 var have = mp.Lines.Select(l => (l.FormId, l.Field)).ToHashSet();
                 foreach (var x in PlayerLineExtractor.Extract(plugin).Lines)
                     if (IsIdentifierText(x.Field, x.Kind, x.Original) && !have.Contains((x.FormId, x.Field)))
@@ -400,6 +404,78 @@ public sealed class Phase1Service
         p.Lines.Where(l => l.Status != Phase1Status.Removed && l.IsPlayerName)
             .Select(l => (l.Final ?? l.Original).Trim()).Distinct().ToList();
 
+    /// <summary>
+    /// The strings the game itself shows for a plugin. A plugin the game's Data folder has (Skyrim.esm, the DLCs, Creation Club)
+    /// reads them where the game does: loose Data\Strings first, then the game's archives ("Skyrim - Interface.bsa", the plugin's
+    /// own .bsa). Strings files kept with the mod or next to the plugin come only after that, so a text overhaul's or an old
+    /// version's strings can't replace the game's wording (the DBVO file names must match what the game shows).
+    /// </summary>
+    public (StringsTable? Table, string Source) LoadStrings(Mod mod, string pluginPath)
+    {
+        var name = Path.GetFileNameWithoutExtension(pluginPath);
+        var lang = _settings.StringsLanguage;
+        var data = Revoice.RevoiceService.DataFolder(_settings.BaseGameFolder);
+        if (data != null && File.Exists(Path.Combine(data, Path.GetFileName(pluginPath))))
+        {
+            var loose = Path.Combine(data, "Strings");
+            if (StringsTable.Exists(loose, name, lang)) return (StringsTable.Load(loose, name, lang), loose);
+            foreach (var bsa in new[] { name + ".bsa", name + " - Main.bsa", "Skyrim - Interface.bsa" })
+            {
+                var path = Path.Combine(data, bsa);
+                if (!File.Exists(path)) continue;
+                try { using var a = Archives.BsaArchive.Open(path); if (StringsTable.FromArchive(a, name, lang) is { } t) return (t, path); } catch { }
+            }
+        }
+        var folder = ResolveStringsFolder(mod, pluginPath);
+        return folder == null ? (null, "") : (StringsTable.Load(folder, name, lang), folder);
+    }
+
+    /// <summary>
+    /// Once per plugin (mods imported before 8.1.3): reads the texts again from the strings the game shows. Lines whose words
+    /// differ (a text overhaul's strings were used) take the game's words; lines you edited keep your edit for reference and
+    /// show as changed in the mod. Returns how many lines changed, or -1 when nothing was checked.
+    /// </summary>
+    public int RecheckStrings(Mod mod)
+    {
+        int changed = -1;
+        foreach (var mp in mod.Plugins.Where(p => p.StringsRule < 1 && p.Localized && !p.IsTopicFile))
+        {
+            if (string.IsNullOrEmpty(mp.StoredFile) || !File.Exists(mp.StoredFile)) continue;
+            try
+            {
+                var (table, source) = LoadStrings(mod, mp.StoredFile);
+                if (table == null) continue;
+                mp.StringsRule = 1;
+                changed = Math.Max(changed, 0);
+                var plugin = PluginFile.Read(mp.StoredFile);
+                plugin.AttachStrings(table);
+                var fresh = PlayerLineExtractor.Extract(plugin).Lines.GroupBy(x => (x.FormId, x.Field)).ToDictionary(g => g.Key, g => g.First());
+                int n = 0;
+                foreach (var l in mp.Lines.Where(l => l.Status != Phase1Status.Removed))
+                {
+                    if (!fresh.TryGetValue((l.FormId, l.Field), out var x) || x.Original == l.Original) continue;
+                    var nl = NewLine(x.FormId, x.Field, x.EditorId, x.Original, x.Kind, x.Suggested, l.HiddenByPrompts, l.Order);
+                    if (l.UserEdited)
+                    {
+                        l.PreviousOriginal = l.Original;
+                        l.PreviousFinal = l.Final;
+                        l.Status = Phase1Status.ChangedInMod;
+                        l.UserEdited = false;
+                    }
+                    l.Original = nl.Original;
+                    l.Suggested = nl.Suggested;
+                    l.Final = nl.Final;
+                    l.Kind = nl.Kind;
+                    n++;
+                }
+                if (n > 0) mp.Notices.Add($"{n} line(s) now use the game's own wording ({Path.GetFileName(source)}); the strings files used before had other words.");
+                changed += n;
+            }
+            catch { /* the lines stay as they are */ }
+        }
+        return changed;
+    }
+
     private string? ResolveStringsFolder(Mod mod, string pluginPath)
     {
         var candidates = new[]
@@ -491,8 +567,7 @@ public sealed class Phase1Service
         var plugin = PluginFile.Read(p.StoredFile);
         if (plugin.IsLocalized)
         {
-            var sf = ResolveStringsFolder(mod, p.StoredFile);
-            plugin.AttachStrings(sf, _settings.StringsLanguage);
+            if (LoadStrings(mod, p.StoredFile).Table is { } st) plugin.AttachStrings(st);
         }
         var bytes = FixPluginWriter.Build(plugin, edits);
         foreach (var folder in fixFolders.Where(f => !string.IsNullOrWhiteSpace(f)).Distinct(StringComparer.OrdinalIgnoreCase))

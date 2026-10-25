@@ -276,3 +276,17 @@ public class GruntTests : IDisposable
         Assert.Equal(Path.Combine(moved, "x.wav"), p.Events[ev.Id].Lines[0].Source);
     }
 }
+
+public class SoundsSameTests
+{
+    [Xunit.Theory]
+    [Xunit.InlineData("I'm not so easily molded.", "I'm not so easily moulded.", true)]
+    [Xunit.InlineData("I'm not apologizing.", "I'm not apologising.", true)]
+    [Xunit.InlineData("Traveling alone is dangerous...", "Travelling alone is dangerous...", true)]
+    [Xunit.InlineData("Tell me about the Sepulcher.", "Tell me about the Sepulchre.", true)]
+    [Xunit.InlineData("So you handle the defense?", "So you handle the defence?", true)]
+    [Xunit.InlineData("Um... The one", "Um... the one", true)]
+    [Xunit.InlineData("Can I use your forge?", "May I use your forge?", false)]
+    [Xunit.InlineData("I found Freydis's sword.", "I found Freydis' sword.", false)]
+    public void Spelling_only(string a, string b, bool same) => Xunit.Assert.Equal(same, DbvoStudio.Core.Projects.Phase2Service.SoundsSame(a, b));
+}

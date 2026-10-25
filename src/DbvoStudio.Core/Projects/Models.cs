@@ -349,6 +349,8 @@ public sealed class ModPlugin
     public List<string> Notices { get; set; } = new();
     /// <summary>Version of the "hidden by prompts" rule the lines were checked with (2 = since 7.9).</summary>
     public int HiddenRule { get; set; }
+    /// <summary>1 = the texts were read from the strings the game shows (since 8.1.3).</summary>
+    public int StringsRule { get; set; }
 
     [JsonIgnore] public string FixFileName => FixPluginWriter.FixFileName(FileName, FixPrefix);
     [JsonIgnore] public bool NeedsFixPlugin => !IsTopicFile && Lines.Any(l => l.NeedsOverride);

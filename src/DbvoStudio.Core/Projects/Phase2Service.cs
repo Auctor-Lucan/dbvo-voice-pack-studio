@@ -17,6 +17,8 @@ public sealed class SyncReport
     public int Removed { get; set; }
     /// <summary>Removed lines whose takes are kept (hidden) in case the line comes back.</summary>
     public int Parked { get; set; }
+    /// <summary>Lines whose in-game text changed and kept their takes.</summary>
+    public int Carried { get; set; }
     public int Omitted { get; set; }
     public int Stale { get; set; }
     /// <summary>Lines that got a take from WAV + LIP files already in the patch's WAV + LIP folder.</summary>
@@ -162,6 +164,9 @@ public sealed partial class Phase2Service
             }
         }
 
+        report.Carried = CarryTakes(old, result);
+        if (report.Carried > 0) report.Added -= report.Carried;
+
         foreach (var line in result.Values)
         {
             line.OmittedBy = refKeys.TryGetValue(line.Key, out var name) ? name : null;
@@ -187,6 +192,65 @@ public sealed partial class Phase2Service
         report.FuzOnly = FindFuzOnly(patch, voice, mods).Count;
         _lib.Save(patch);
         return report;
+    }
+
+    /// <summary>
+    /// A record whose in-game text changed (a mod update, or texts read again from the game's own strings) keeps its takes:
+    /// the line with the new text takes over the old line (takes, spoken text with its tags, review state) when they come from
+    /// the same record and nothing else uses the old text. When only the spelling or capitals changed ("moulded" → "molded")
+    /// the take in use still counts as current; other changes show as Edited since take.
+    /// </summary>
+    private static int CarryTakes(Dictionary<string, Phase2Line> old, Dictionary<string, Phase2Line> result)
+    {
+        var bySource = new Dictionary<(string, string, uint, LineField), List<Phase2Line>>();
+        foreach (var o in old.Values.Where(o => o.Takes.Count > 0 && !result.ContainsKey(o.Key)))
+            foreach (var src in o.Sources)
+            {
+                var k = (src.ModId, src.Plugin.ToLowerInvariant(), src.FormId, src.Field);
+                if (!bySource.TryGetValue(k, out var list)) bySource[k] = list = new();
+                if (!list.Contains(o)) list.Add(o);
+            }
+        if (bySource.Count == 0) return 0;
+        var claimed = new HashSet<string>();
+        int n = 0;
+        foreach (var key in result.Keys.ToList())
+        {
+            var line = result[key];
+            if (old.ContainsKey(key) || line.Takes.Count > 0) continue;
+            Phase2Line? from = null;
+            foreach (var src in line.Sources)
+                if (bySource.TryGetValue((src.ModId, src.Plugin.ToLowerInvariant(), src.FormId, src.Field), out var c) && c.Count == 1 && claimed.Add(c[0].Key)) { from = c[0]; break; }
+            if (from == null) continue;
+            var oldFinal = from.FinalLine;
+            var oldSpoken = from.Spoken;
+            from.Key = key;
+            from.FinalLine = line.FinalLine;
+            from.OriginalLine = line.OriginalLine;
+            from.Sources = line.Sources;
+            from.Spoken = oldSpoken == SpokenText.DefaultFor(oldFinal) ? line.Spoken
+                : oldSpoken.Contains(oldFinal, StringComparison.Ordinal) ? oldSpoken.Replace(oldFinal, line.FinalLine, StringComparison.Ordinal)
+                : SpokenText.DefaultFor(oldFinal) is { Length: > 0 } d && oldSpoken.Contains(d, StringComparison.Ordinal) ? oldSpoken.Replace(d, SpokenText.DefaultFor(line.FinalLine), StringComparison.Ordinal)
+                : oldSpoken;
+            if (from.SelectedTake is { } t && t.SpokenText == oldSpoken && SoundsSame(oldFinal, line.FinalLine)) t.SpokenText = from.Spoken;
+            from.RefreshStale();
+            result[key] = from;
+            n++;
+        }
+        return n;
+    }
+
+    /// <summary>The same words read aloud: case, punctuation and British/American spelling ignored (honour/honor, travelling/traveling, apologise/apologize, centre/center, moulded/molded).</summary>
+    public static bool SoundsSame(string a, string b)
+    {
+        static string[] Words(string s) => System.Text.RegularExpressions.Regex.Matches(SpokenText.StripTags(s).ToLowerInvariant(), "[a-z0-9]+").Select(m => Canon(m.Value)).ToArray();
+        static string Canon(string w)
+        {
+            w = w switch { "ok" => "okay", "artefact" => "artifact", "artefacts" => "artifacts", "grey" => "gray", "jewellery" => "jewelry", _ => w };
+            w = w.Replace("ould", "old").Replace("our", "or").Replace("is", "iz").Replace("ys", "yz").Replace("ll", "l").Replace("ogue", "og");
+            w = System.Text.RegularExpressions.Regex.Replace(w, "([^aeiou])re$", "$1er");
+            return System.Text.RegularExpressions.Regex.Replace(w, "nce$", "nse");
+        }
+        return Words(a).SequenceEqual(Words(b));
     }
 
     /// <summary>Stems a line's files may have: the voice pack's naming first, then the other one.</summary>
