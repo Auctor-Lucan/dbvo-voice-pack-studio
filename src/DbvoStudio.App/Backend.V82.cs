@@ -249,7 +249,14 @@ public sealed partial class Backend
         try
         {
             List<Phase2Line> lines; string root; Action save;
-            if (kind == "revoice")
+            if (kind == "books")
+            {
+                var proj = LoadBk(id);
+                lines = proj.Lines.Where(l => ids.Contains(l.LineId)).Cast<Phase2Line>().ToList();
+                root = _lib.BooksFolder(proj.Id);
+                save = () => _lib.Save(proj);
+            }
+            else if (kind == "revoice")
             {
                 var proj = LoadRv(id);
                 lines = proj.Lines.Where(l => ids.Contains(l.LineId)).Cast<Phase2Line>().ToList();
@@ -273,6 +280,7 @@ public sealed partial class Backend
                 finally { sem.Release(); }
             }));
             save();
+            if (kind == "books") return new { takes, problems };
             if (kind == "revoice")
             {
                 var proj = LoadRv(id);

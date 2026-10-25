@@ -24,7 +24,21 @@ public static partial class GruntService
     public static string ReverbOriginal(string projectFolder, string sourcePath) =>
         Path.Combine(projectFolder, "reverb-originals", Hash(Path.GetFullPath(sourcePath).ToLowerInvariant()) + ".wav");
 
-    public static List<EffectPreset> EffectsOf(GruntProject p) => p.Effects.Count > 0 ? p.Effects : Effects.BuiltIn();
+    /// <summary>The project's effects: its own list (without the retired ones, with the three custom slots), or the built-in ones.</summary>
+    public static List<EffectPreset> EffectsOf(GruntProject p)
+    {
+        if (p.Effects.Count == 0) return Effects.BuiltIn();
+        var list = p.Effects.Where(x => !Effects.Retired.Contains(x.Id)).ToList();
+        foreach (var slot in Effects.BuiltIn().Where(x => x.Id.StartsWith("custom")))
+            if (!list.Any(x => x.Id == slot.Id))
+            {
+                // after the last filter, so the slots sit with them
+                int at = list.FindLastIndex(x => x.Group == "Filter");
+                list.Insert(at < 0 ? list.Count : at + 1, slot);
+            }
+        if (Effects.Retired.Contains(p.DefaultEffect)) p.DefaultEffect = "inner";
+        return list;
+    }
 
     /// <summary>
     /// Puts an effect (reverb, filter, voice) on the line's WAV (the file itself changes, so it sounds that way wherever it is

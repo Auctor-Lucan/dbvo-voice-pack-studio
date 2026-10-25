@@ -78,9 +78,9 @@ public sealed class Phase1Service
         int unresolved = 0;
         if (plugin.IsLocalized)
         {
-            var table = stringsFolder != null && StringsTable.Exists(stringsFolder, plugin.BaseName, _settings.StringsLanguage)
-                ? StringsTable.Load(stringsFolder, plugin.BaseName, _settings.StringsLanguage) : LoadStrings(mod, pluginPath).Table;
-            if (table != null) plugin.AttachStrings(table); else unresolved = -1;
+            if (stringsFolder != null && StringsTable.Exists(stringsFolder, plugin.BaseName, _settings.StringsLanguage))
+                plugin.AttachStrings(StringsTable.Load(stringsFolder, plugin.BaseName, _settings.StringsLanguage));
+            else if (AttachBestStrings(mod, pluginPath, plugin).Unresolved < 0) unresolved = -1;
         }
 
         var extraction = PlayerLineExtractor.Extract(plugin);
@@ -101,7 +101,7 @@ public sealed class Phase1Service
         mp.ImportedUtc = DateTime.UtcNow;
         mp.Notices.Clear();
         mp.HiddenRule = 4;
-        mp.StringsRule = 1;
+        mp.StringsRule = 2;
 
         var report = new ImportReport { Plugin = mp, UnresolvedStrings = unresolved };
         report.MissingMasters.AddRange(FindMissingMasters(mod, plugin));
@@ -412,22 +412,56 @@ public sealed class Phase1Service
     /// </summary>
     public (StringsTable? Table, string Source) LoadStrings(Mod mod, string pluginPath)
     {
+        foreach (var (load, src) in StringsCandidates(mod, pluginPath))
+            if (load() is { } t) return (t, src);
+        return (null, "");
+    }
+
+    /// <summary>
+    /// Every strings source for a plugin, in the order the game would use them: for a plugin the game's Data folder has,
+    /// loose Data\Strings (loaded last, so it wins), then the game's archives; then the strings next to the plugin, kept with
+    /// the mod, and the Global Settings strings folder.
+    /// </summary>
+    private IEnumerable<(Func<StringsTable?> Load, string Source)> StringsCandidates(Mod mod, string pluginPath)
+    {
         var name = Path.GetFileNameWithoutExtension(pluginPath);
         var lang = _settings.StringsLanguage;
         var data = Revoice.RevoiceService.DataFolder(_settings.BaseGameFolder);
         if (data != null && File.Exists(Path.Combine(data, Path.GetFileName(pluginPath))))
         {
             var loose = Path.Combine(data, "Strings");
-            if (StringsTable.Exists(loose, name, lang)) return (StringsTable.Load(loose, name, lang), loose);
+            if (StringsTable.Exists(loose, name, lang)) yield return (() => StringsTable.Load(loose, name, lang), loose);
             foreach (var bsa in new[] { name + ".bsa", name + " - Main.bsa", "Skyrim - Interface.bsa" })
             {
                 var path = Path.Combine(data, bsa);
                 if (!File.Exists(path)) continue;
-                try { using var a = Archives.BsaArchive.Open(path); if (StringsTable.FromArchive(a, name, lang) is { } t) return (t, path); } catch { }
+                yield return (() => { try { using var a = Archives.BsaArchive.Open(path); return StringsTable.FromArchive(a, name, lang); } catch { return null; } }, path);
             }
         }
-        var folder = ResolveStringsFolder(mod, pluginPath);
-        return folder == null ? (null, "") : (StringsTable.Load(folder, name, lang), folder);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in new[] { Path.Combine(Path.GetDirectoryName(Path.GetFullPath(pluginPath))!, "Strings"), Path.Combine(_lib.ModFolder(mod.Id), "strings"), _settings.StringsFolder })
+            if (!string.IsNullOrEmpty(c) && seen.Add(Path.GetFullPath(c)) && StringsTable.Exists(c, name, lang))
+                yield return (() => StringsTable.Load(c, name, lang), c);
+    }
+
+    /// <summary>
+    /// Attaches the strings the game shows. A strings file that doesn't fit the plugin (an old or mismatched copy: some of the
+    /// plugin's texts aren't in it) is passed over for the next source that has them all, or the one missing the fewest.
+    /// </summary>
+    public (string Source, int Unresolved) AttachBestStrings(Mod mod, string pluginPath, PluginFile plugin)
+    {
+        (StringsTable T, string S, int U)? best = null;
+        foreach (var (load, src) in StringsCandidates(mod, pluginPath))
+        {
+            var t = load();
+            if (t == null) continue;
+            plugin.AttachStrings(t);
+            int u = PlayerLineExtractor.Extract(plugin).UnresolvedStrings;
+            if (u == 0) return (src, 0);
+            if (best == null || u < best.Value.U) best = (t, src, u);
+        }
+        if (best is { } b) { plugin.AttachStrings(b.T); return (b.S, b.U); }
+        return ("", -1);
     }
 
     /// <summary>
@@ -438,17 +472,17 @@ public sealed class Phase1Service
     public int RecheckStrings(Mod mod)
     {
         int changed = -1;
-        foreach (var mp in mod.Plugins.Where(p => p.StringsRule < 1 && p.Localized && !p.IsTopicFile))
+        foreach (var mp in mod.Plugins.Where(p => p.StringsRule < 2 && p.Localized && !p.IsTopicFile))
         {
             if (string.IsNullOrEmpty(mp.StoredFile) || !File.Exists(mp.StoredFile)) continue;
             try
             {
-                var (table, source) = LoadStrings(mod, mp.StoredFile);
-                if (table == null) continue;
-                mp.StringsRule = 1;
-                changed = Math.Max(changed, 0);
+                if (!StringsCandidates(mod, mp.StoredFile).Any()) continue;
                 var plugin = PluginFile.Read(mp.StoredFile);
-                plugin.AttachStrings(table);
+                var (source, _) = AttachBestStrings(mod, mp.StoredFile, plugin);
+                if (source.Length == 0) continue;
+                mp.StringsRule = 2;
+                changed = Math.Max(changed, 0);
                 var fresh = PlayerLineExtractor.Extract(plugin).Lines.GroupBy(x => (x.FormId, x.Field)).ToDictionary(g => g.Key, g => g.First());
                 int n = 0;
                 foreach (var l in mp.Lines.Where(l => l.Status != Phase1Status.Removed))

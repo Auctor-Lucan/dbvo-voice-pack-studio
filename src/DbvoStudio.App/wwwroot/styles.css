@@ -911,3 +911,21 @@ mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: in
 .cmp-list { max-height: 52vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); }
 .cmp-row { display: flex; gap: 10px; align-items: flex-start; padding: 7px 10px; border-bottom: 1px solid var(--line-soft); cursor: pointer; font-size: 13px; }
 .cmp-row:last-child { border-bottom: 0; }
+
+/* Effect picker (Player Grunts): three columns of selectable tiles */
+.fx-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.fx-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fx-col-head { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); padding: 0 2px 2px; border-bottom: 1px solid var(--line-soft); margin-bottom: 2px; }
+.fx-tile { text-align: left; display: flex; flex-direction: column; gap: 3px; padding: 8px 11px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; transition: border-color .12s, background .12s; }
+.fx-tile:hover:not(:disabled) { border-color: var(--accent); }
+.fx-tile.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.fx-tile.empty { border-style: dashed; background: transparent; cursor: default; opacity: .7; }
+.fx-name { font-weight: 650; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+.fx-desc { font-size: 12px; color: var(--dim); line-height: 1.35; }
+.fx-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border-radius: 8px; background: var(--accent); color: var(--on-accent); }
+.fx-badge.dim { background: var(--line); color: var(--dim); }
+.fx-note { font-size: 12px; color: var(--faint); margin-top: 4px; }
+
+/* The E on a line whose takes have an effect (click to take it off) */
+.fx-e { flex: none; width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--text); font-size: 10.5px; font-weight: 800; line-height: 1; padding: 0; cursor: pointer; }
+.fx-e:hover { background: var(--bad); border-color: var(--bad); color: #fff; }

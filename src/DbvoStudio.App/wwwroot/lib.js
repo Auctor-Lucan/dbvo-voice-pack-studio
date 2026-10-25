@@ -394,6 +394,8 @@ export class VGrid {
     row.style.top = i * this.rowHeight + 'px';
     if (this.selected.has(key)) row.classList.add('sel');
     if (this.focusKey === key) row.classList.add('focus');
+    // A row that just finished keeps its flash when it is drawn again meanwhile.
+    { const f = this._flash && this._flash.get(String(key)); if (f && f.until > Date.now()) row.classList.add(f.cls); }
     const extra = this.rowClass && this.rowClass(r);
     if (extra) row.classList.add(...extra.split(' ').filter(Boolean));
     for (const c of this.shown()) {
@@ -611,6 +613,7 @@ const ICON_PATHS = {
   wave: '<path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2"/>',
   mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/>',
   box: '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7M12 11v10"/>',
+  swords: '<path d="M14.5 17.5 3 6V3h3l11.5 11.5"/><path d="m13 19 6-6"/><path d="m16 16 4 4"/><path d="m19 21 2-2"/><path d="M14.5 6.5 18 3h3v3l-3.5 3.5"/><path d="m5 14 4 4"/><path d="m7 17-3 3"/><path d="m3 19 2 2"/>',
   lips: '<path d="M2 12c3-4 6-5 10-2 4-3 7-2 10 2-3 4-6 6-10 6s-7-2-10-6z"/><path d="M2 12h20"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
@@ -814,10 +817,12 @@ export const TOOL_TIPS = {
 
 /** A short glow on a row whose new take just arrived (red when it failed). */
 export function flashRow(grid, key, bad = false) {
+  const cls = bad ? 'flash-bad' : 'flash-done';
+  grid._flash = grid._flash || new Map();
+  grid._flash.set(String(key), { cls, until: Date.now() + 2600 });
+  setTimeout(() => { const f = grid._flash.get(String(key)); if (f && f.until <= Date.now()) grid._flash.delete(String(key)); const e2 = grid.rowEl(key); if (e2) e2.classList.remove('flash-done', 'flash-bad'); }, 2650);
   const el = grid.rowEl(key);
-  if (!el) return;
-  el.classList.add(bad ? 'flash-bad' : 'flash-done');
-  setTimeout(() => el.classList.remove('flash-done', 'flash-bad'), 2600);
+  if (el) el.classList.add(cls);
 }
 
 /** ElevenLabs output formats offered in the toolbars. A format saved by an older version stays listed, so the select shows what is really used. */

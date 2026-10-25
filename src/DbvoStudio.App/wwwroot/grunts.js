@@ -553,12 +553,23 @@ export async function gruntProjectView(id) {
     let pick = l.reverb ? l.effectId : P().defaultEffect;
     const groups = {};
     for (const fx of fxList()) (groups[fx.group] = groups[fx.group] || []).push(fx);
-    const radios = h('div.gr-fx-pick', Object.entries(groups).map(([g, list]) => h('div', h('div.field-label', g), list.map((fx) => {
-      const r = h('input', { type: 'radio', name: 'gr-fx', checked: fx.id === pick });
-      r.addEventListener('change', () => { pick = fx.id; });
-      return h('label.gr-fx-opt', { title: fx.description }, r, h('b', fx.name), h('span.faint', ' ' + fx.description));
-    }))));
-    const v = await modal(`Effect · ${l.file}`, [radios, h('div.faint', 'Changes the WAV file itself (so it sounds that way in the game and anywhere you open it). The original is kept in the project: choosing another effect starts again from it, and Remove puts it back. Edit the effects in Setup & export → Effects.')],
+    const tiles = [];
+    const paint = () => tiles.forEach(([t, fx]) => t.classList.toggle('on', fx.id === pick));
+    const cols = h('div.fx-cols', Object.entries(groups).map(([g, list]) => h('div.fx-col',
+      h('div.fx-col-head', g),
+      list.map((fx) => {
+        const empty = fx.isEmpty;
+        const t = h('button.fx-tile' + (empty ? '.empty' : '') + (l.reverb && fx.id === l.effectId ? '.current' : ''), {
+          title: empty ? 'An empty slot: give it a filter or a reverb in Setup & export → Effects' : fx.description, disabled: empty,
+          onclick: () => { pick = fx.id; paint(); }, ondblclick: () => { pick = fx.id; document.querySelector('#modal .btn.primary')?.click(); },
+        }, h('div.fx-name', fx.name, l.reverb && fx.id === l.effectId ? h('span.fx-badge', 'on') : fx.id === P().defaultEffect ? h('span.fx-badge.dim', 'toggle') : null),
+        h('div.fx-desc', empty ? 'Empty · set it up in Setup & export → Effects' : fx.description));
+        tiles.push([t, fx]);
+        return t;
+      }))));
+    paint();
+    const v = await modal(`Effect · ${l.file}`, [cols,
+      h('div.fx-note', 'The WAV file itself changes, so it sounds that way in the game. The original is kept in the project: another effect starts again from it, and Remove puts it back. Double-click an effect to apply it.')],
       [{ label: 'Cancel', value: false }, l.reverb ? { label: 'Remove the effect', value: 'off' } : null, { label: 'Apply', primary: true, value: 'on' }].filter(Boolean), { wide: true, help: 'grunt-events' });
     if (v === 'off') effectLines([l], '');
     else if (v === 'on') effectLines([l], pick);
@@ -933,7 +944,9 @@ export async function gruntProjectView(id) {
           h('div.row', { style: { gap: '8px' } }, h('span.faint', 'ffmpeg filter'), (() => { const t = h('input.mono', { type: 'text', value: fx.filter, placeholder: '(none)', style: { flex: '1', fontSize: '12px' }, title: 'An ffmpeg -af chain applied before the reverb; {rate} is the file\'s sample rate' }); t.addEventListener('change', () => { fx.filter = t.value.trim(); saveFx(); }); return t; })(),
             num(fx, 'gainDb', { label: 'Gain dB', min: -20, max: 20, step: 0.5 })),
           h('div.row', { style: { gap: '6px' } },
-            isDefault ? h('span.faint', 'The line toggle and "all lines" use this one.') : h('button.btn.sm', { title: 'The line toggle and "all lines of this event" use this effect', onclick: () => saveProject({ effects: list, defaultEffect: fx.id }) }, 'Use for the toggle'),
+            fx.reverb ? h('button.btn.sm.ghost', { title: 'Only the filter, no reverb', onclick: () => { fx.reverb = null; saveProject({ effects: list }); } }, 'No reverb')
+              : h('button.btn.sm.ghost', { title: 'Add a reverb after the filter (starts as Inner thoughts)', onclick: () => { fx.reverb = JSON.parse(JSON.stringify((builtIns.find((b) => b.id === 'inner') || {}).reverb || {})); saveProject({ effects: list }); } }, 'Add a reverb'),
+            isDefault ? h('span.faint', 'The line toggle and "all lines" use this one.') : h('button.btn.sm', { title: 'The line toggle and "all lines of this event" use this effect', disabled: !!fx.isEmpty, onclick: () => saveProject({ effects: list, defaultEffect: fx.id }) }, 'Use for the toggle'),
             h('button.btn.sm.ghost', { title: 'A copy to change without losing this one', onclick: () => { const c = JSON.parse(JSON.stringify(fx)); c.id = fx.id + '-' + Math.random().toString(36).slice(2, 6); c.name = fx.name + ' (copy)'; list.push(c); saveProject({ effects: list }); } }, 'Duplicate'),
             builtIn ? h('button.btn.sm.ghost', { title: 'Back to the built-in settings of this effect', onclick: () => { Object.assign(fx, JSON.parse(JSON.stringify(builtIn))); saveProject({ effects: list }); } }, 'Reset') : h('button.btn.sm.ghost.danger', { title: 'Delete this effect (lines that have it keep it until you take it off)', disabled: isDefault, onclick: () => { saveProject({ effects: list.filter((x) => x !== fx) }); } }, 'Delete'))));
       return det;

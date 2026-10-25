@@ -5,6 +5,7 @@ import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, co
 import { app, go, refreshState } from './app.js';
 import { insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { creditsButton, LANGS } from './phase2.js';
+import { effectRow } from './fx.js';
 
 const CERT = { Confirmed: 'CONFIRMED', Unverified: 'UNVERIFIED', Inferred: 'INFERRED', None: '' };
 const CERT_TIP = {
@@ -873,6 +874,13 @@ export async function bookProjectView(id) {
             return h('button.btn.sm.primary', { title: need.length ? 'Generate the parts that have no take yet or whose text changed since their take, in this voice' : 'Every part has a current take: make a new take of each, in this voice (earlier takes stay)', disabled: !v || !v.hasVoice || !lines.length,
               onclick: () => { ids.forEach((x) => inFlight.add(x)); if (ids.length === 1) edAutoPlay.add(ids[0]); renderEd(false); generate('lines', null, { lineIds: ids, single: ids.length === 1 }); } }, label);
           })(),
+          lines.length ? effectRow(lines.every((l) => l.effect === lines[0].effect) ? lines[0].effect || '' : '', 1, async (fx) => {
+            try {
+              const r = await withBusy(rpc('takes.effect', { kind: 'books', id, lineIds: lines.map((l) => l.id), effect: fx }), fx ? 'Adding the effect' : 'Taking the effect off', `${lines.length} part(s)…`);
+              d = await rpc('books.bookGet', { id, stem }); renderEd(false); replaceBook(d.book);
+              toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed. The whole book is joined again with it.`, !!r.problems.length);
+            } catch (e) { fail(e); }
+          }, 'Every part of this book in this voice, and new takes: reverb, radio, telepathy… (the project\'s reverb comes on top when the book is joined)') : null,
           h('div.spacer'),
           h('button.btn.sm', { title: 'Join the parts (with reverb, pauses and loudness) and play the whole book', disabled: !lines.length || lines.some((l) => !l.sel), onclick: async () => { try { const r = await rpc('books.join', { id, stem, voice, variant }); edAudio.src = r.url; edAudio.play().catch(fail); toast(`${fmtTime(r.seconds)} · ${r.lufs.toFixed(1)} LUFS · peak ${r.peakDb.toFixed(1)} dB`); } catch (e) { fail(e); } } }, '▶ Whole book'),
           h('button.btn.sm.ghost', { title: 'Stop playback', onclick: () => edAudio.pause() }, '■')));

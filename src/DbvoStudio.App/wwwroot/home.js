@@ -7,8 +7,8 @@ const CHOICES = [
   { icon: 'mic', color: '#d2a8ff', title: 'I want to revoice an NPC or a whole mod.', sub: 'Give characters in any mod, or the base game, a new voice.', go: () => go('revoices') },
   { icon: 'box', color: '#3fb950', title: 'I want to build a FOMOD installer.', sub: 'Gather your patches into an installer with the DBVO JSON.', go: () => go('fomods') },
   { icon: 'book', color: '#e3b341', title: 'I want to narrate Skyrim\'s books.', sub: 'Patch the base game or mods for Voiced Books of Skyrim.', go: () => go('books') },
+  { icon: 'swords', color: '#f778ba', title: 'I want my own character to have a voice.', sub: 'Grunts, breathing, shouts and comments for PC Head Tracking and Smart Player Voice System.', go: () => go('grunts') },
   { icon: 'lips', color: '#f0883e', title: 'I want lip sync for WAV files I already have.', sub: 'Whisper listens, FaceFXWrapper writes the .lip files.', go: () => go('wavlip') },
-  { icon: 'gear', color: '#8b949e', title: 'I want to set up the studio.', sub: 'Library, tools, ElevenLabs key and voice packs.', go: () => go('settings', { tab: 'general' }) },
 ];
 
 // The welcome: the first one on the very first launch, then the next one each time DBVO Studio opens, looping.

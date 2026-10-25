@@ -31,6 +31,9 @@ public sealed class EffectPreset
         },
     };
 
+    /// <summary>A custom slot with nothing in it yet (no filter, no reverb): shown, but it can't be applied.</summary>
+    public bool IsEmpty => Filter.Trim().Length == 0 && Reverb == null && Math.Abs(GainDb) < 0.01;
+
     /// <summary>A short label for buttons: the name without anything in brackets.</summary>
     public string Short => Name.Split(" (")[0];
 }
@@ -67,18 +70,19 @@ public static class Effects
         new() { Id = "telephone", Name = "Telephone", Group = "Filter", Description = "Thin and boxy.", Filter = "highpass=f=400,lowpass=f=3000,acompressor=threshold=-18dB:ratio=4" , GainDb = 2 },
         new() { Id = "muffled", Name = "Muffled", Group = "Filter", Description = "Through a wall, a door or a closed helmet.", Filter = "lowpass=f=900,lowpass=f=1400", GainDb = 1 },
         new() { Id = "underwater", Name = "Underwater", Group = "Filter", Description = "Dull and wobbly.", Filter = "lowpass=f=500,vibrato=f=3:d=0.2,chorus=0.5:0.9:40|55:0.4|0.3:0.25|0.4:2|1.3", GainDb = 2 },
+        new() { Id = "custom1", Name = "Custom slot 1", Group = "Filter", Description = "" },
+        new() { Id = "custom2", Name = "Custom slot 2", Group = "Filter", Description = "" },
+        new() { Id = "custom3", Name = "Custom slot 3", Group = "Filter", Description = "" },
 
         new() { Id = "telepathy", Name = "Telepathy", Group = "Character", Description = "Doubled, shimmering voice inside the head.", Filter = "chorus=0.6:0.9:50|60:0.4|0.32:0.25|0.4:2|1.3", Reverb = new ReverbSettings { RoomSize = 70, Reverberance = 40, PreDelayMs = 60, WetGainDb = -4, ToneLow = 30, ToneHigh = 50, TailSeconds = 1 } },
         new() { Id = "whisper", Name = "Ghostly whisper", Group = "Character", Description = "Turns the voice into a breathy whisper.", Filter = Whisperize, Reverb = new ReverbSettings { RoomSize = 60, Reverberance = 35, PreDelayMs = 30, WetGainDb = -6, TailSeconds = 0.8 }, GainDb = 4 },
         new() { Id = "ghost", Name = "Ghost", Group = "Character", Description = "Hollow, wavering and far away.", Filter = Pitch(1) + ",flanger=delay=3:depth=4:regen=40:speed=0.4,tremolo=f=5:d=0.25,highpass=f=200", Reverb = new ReverbSettings { RoomSize = 95, Reverberance = 60, PreDelayMs = 40, WetGainDb = -2, TailSeconds = 1.5 } },
-        new() { Id = "robot", Name = "Robotic", Group = "Character", Description = "Flat, buzzing machine voice.", Filter = Robot, GainDb = 1 },
         new() { Id = "automaton", Name = "Dwemer automaton", Group = "Character", Description = "Metallic robot voice with a short tinny ring.", Filter = Robot + ",flanger=delay=2:depth=3:regen=60:speed=0.3,highpass=f=150", Reverb = new ReverbSettings { RoomSize = 20, Reverberance = 30, PreDelayMs = 5, WetGainDb = -6, ToneHigh = 80, TailSeconds = 0.4 } },
-        new() { Id = "demon", Name = "Demon", Group = "Character", Description = "The voice with an octave-down growl under it, slightly overdriven.", Filter = Layered(-12, 0.9) + ",equalizer=f=120:t=q:w=1:g=3,volume=3dB,asoftclip=type=tanh", Reverb = new ReverbSettings { RoomSize = 40, Reverberance = 30, PreDelayMs = 10, WetGainDb = -8, ToneHigh = 30, TailSeconds = 0.6 } },
         new() { Id = "daedra", Name = "Daedric Prince", Group = "Character", Description = "Huge, layered and echoing: a voice from Oblivion.", Filter = Layered(-7, 0.7) + ",chorus=0.5:0.9:40|60:0.3|0.25:0.25|0.4:2|1.3", Reverb = new ReverbSettings { RoomSize = 100, Reverberance = 65, PreDelayMs = 50, WetGainDb = -3, TailSeconds = 2 } },
-        new() { Id = "dragon", Name = "Dragon / Thu'um", Group = "Character", Description = "Deeper voice with echoes.", Filter = Pitch(-3) + ",apad=pad_dur=0.8,aecho=0.8:0.6:220|440:0.35|0.2" },
-        new() { Id = "deep", Name = "Deep (giant)", Group = "Character", Description = "Pitched down four semitones, same speed.", Filter = Pitch(-4) },
-        new() { Id = "high", Name = "High (small creature)", Group = "Character", Description = "Pitched up five semitones, same speed.", Filter = Pitch(5) },
     };
+
+    /// <summary>Effects 8.3.0 had that were taken out (lines that have one keep it until it is taken off).</summary>
+    public static readonly HashSet<string> Retired = new() { "robot", "demon", "dragon", "deep", "high" };
 
     public static EffectPreset? Find(IEnumerable<EffectPreset>? list, string id) =>
         (list ?? Enumerable.Empty<EffectPreset>()).FirstOrDefault(p => p.Id == id) ?? BuiltIn().FirstOrDefault(p => p.Id == id);
@@ -89,6 +93,7 @@ public static class Effects
     /// </summary>
     public static async Task ApplyAsync(string src, string dest, EffectPreset fx, ExternalTools? tools, CancellationToken ct = default)
     {
+        if (fx.IsEmpty) throw new InvalidOperationException($"{fx.Name} is empty: give it a filter or a reverb first (Setup & export → Effects).");
         var tmp = dest + ".fx-" + Guid.NewGuid().ToString("N")[..6] + ".wav";
         try
         {

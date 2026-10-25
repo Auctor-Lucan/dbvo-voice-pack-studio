@@ -5,7 +5,7 @@ import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
-import { effectRow } from './fx.js';
+import { effectRow, effectsButton, effectIcon } from './fx.js';
 import { qaDialog } from './qa.js';
 
 const CERT = { Exact: 'Speaker known', Probable: 'Probable speakers', Unknown: 'Speaker unknown' };
@@ -493,8 +493,9 @@ export async function revoiceView(id) {
       { id: 'emo', title: 'Emotion', width: 90, render: (l) => l.emo === 'Neutral' ? h('span.faint', '—') : h('span.faint', { title: `${l.emo} ${l.emoV}` }, `${l.emo} ${l.emoV}`) },
       { id: 'qa', title: 'QA', tip: 'Check takes: ⚠ flagged, ✓ passed, empty = not checked. Click to sort the flagged ones to the top.', width: 44, resizable: false, align: 'center',
         sort: (l) => { const t = l.takes.find((x) => x.id === l.sel); return !t || !t.qa ? 2 : t.qa.flags.length ? 0 : 1; }, render: (l) => qaBadgeRv(l) },
-      { id: 'take', title: 'Take', width: 64, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
-        h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s). Click to play, switch or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } }, l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—')) },
+      { id: 'take', title: 'Take', width: 84, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
+        h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s). Click to play, switch or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } }, l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—'),
+        effectIcon(l.effect, () => applyFx([l.id], ''))) },
       { id: 'act', title: '', width: 146, resizable: false, render: (l) => h('span.row.icon-bar', { style: { gap: '2px' } },
         h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: inFlight.has(l.id) ? 'Making a new take…' : genBlock(l) || 'Regenerate (a new take; older takes stay)', disabled: !!genBlock(l), onmousedown: keepEditing, onclick: (e) => { e.stopPropagation(); regen(l); } }, icon('regen')),
         h('button.act-btn', { title: l.takes.length ? 'Open this line\'s takes folder' : 'No takes yet', disabled: !l.takes.length, onclick: (e) => { e.stopPropagation(); rpc('revoice.openTakeFolder', { id, lineId: l.id }).catch(fail); } }, icon('folder')),
@@ -526,7 +527,7 @@ export async function revoiceView(id) {
     }
     const inp = h('input', { type: 'text', value: l.spoken, disabled: l.excl });
     if (l.spokenEdited) { inp.style.color = 'var(--link)'; inp.title = 'Blue: differs from the subtitle. The arrow on the left restores it.'; }
-    inp.addEventListener('change', () => { if (inp.value !== l.spoken) upd(l, 'spoken', inp.value); });
+    inp.addEventListener('change', () => { if (inp.value !== (index.get(l.id) || l).spoken) upd(l, 'spoken', inp.value); });
     inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.value = l.spoken; inp.blur(); } });
     inp.addEventListener('focus', () => { lastEdit = { el: inp, line: l }; if (focusedId !== l.id) { focusedId = l.id; grid.focus(l.id); renderInspector(); } });
     if (l.spokenEdited) return h('span.spoken-wrap', h('button.act-btn', { title: 'Restore the subtitle: ' + l.text, onclick: (e) => { e.stopPropagation(); upd(l, 'resetSpoken'); } }, icon('restore', { size: 14 })), inp);
@@ -596,7 +597,7 @@ export async function revoiceView(id) {
     const grow = () => { spoken.style.height = 'auto'; spoken.style.height = Math.min(220, spoken.scrollHeight + 2) + 'px'; };
     spoken.addEventListener('input', grow);
     requestAnimationFrame(grow);
-    spoken.addEventListener('change', () => upd(l, 'spoken', spoken.value));
+    spoken.addEventListener('change', () => { if (spoken.value !== (index.get(l.id) || l).spoken) upd(l, 'spoken', spoken.value); });
     spoken.addEventListener('focus', () => { lastEdit = { el: spoken, line: l }; });
     const path = `Sound\\Voice\\${l.pf}\\${l.vt}\\${l.stem}.fuz`;
     const kv = [];
@@ -635,14 +636,7 @@ export async function revoiceView(id) {
       h('div', h('div.field-label', 'Subtitle (in game)'), h('div.box.ellipsis', { title: l.text }, l.text)),
       (() => {
         const ids = grid.selected.has(l.id) && grid.selected.size > 1 ? [...grid.selected] : [l.id];
-        return effectRow(l.effect || '', ids.length, async (fx) => {
-          try {
-            const r = await withBusy(rpc('takes.effect', { kind: 'revoice', id, lineIds: ids, effect: fx }), fx ? 'Adding the effect' : 'Taking the effect off', `${ids.length} line(s)…`);
-            for (const nl of r.lines) replaceLine(nl, false);
-            grid.setRows(visible()); renderInspector();
-            toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
-          } catch (e) { fail(e); renderInspector(); }
-        });
+        return effectRow(l.effect || '', ids.length, (fx) => applyFx(ids, fx));
       })(),
       h('div', h('div.field-label', 'Spoken text (tags allowed)'), spoken,
         h('div.row', { style: { marginTop: '6px', gap: '6px' } },
@@ -709,6 +703,7 @@ export async function revoiceView(id) {
       h('span.stat', h('b', String(c.done)), ` / ${c.all} generated`, c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', ` · ${c.silent} silent now`, who ? h('span.faint', ` · ${who} only`) : ''),
       h('div.spacer'),
       sel.length ? bulkBtn : null,
+      effectsButton(sel.length, (fx) => applyFx([...sel], fx)),
       h('button.btn' + (review ? '.review-on' : ''), { title: review ? 'End Review (Esc)' : 'Listen through the lines with the keyboard: Space plays, A approves and moves on, R makes a new take, F flags', onclick: () => setReview(!review) }, review ? '■ End review' : '▶ Review'),
       h('button.btn', { title: `Check takes${sel.length ? ` of the ${sel.length} ticked line(s)` : ' of every line shown'}: Whisper compares what is said with the line, plus loudness and clipping. Flags only, deletes nothing.`, onclick: () => qaRun(sel.length ? sel : grid.rows.filter((l) => l.takes.length && !l.excl).map((l) => l.id)) }, 'Check takes'),
       genBtn);
@@ -818,7 +813,7 @@ export async function revoiceView(id) {
     const kids = [grp('Speaker', spSel), voiceGrp];
     // Format, seed and concurrency are set once and rarely touched: they live behind one button.
     const outputGroup = (fields, o) => {
-      const btn = h('button.btn.sm', { title: `Output: ${o.outputFormat ? o.outputFormat + ' · ' : ''}${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once. Click to change.` }, `${({ mp3_44100_128: 'MP3 128', mp3_44100_192: 'MP3 192', pcm_44100: 'PCM 44.1k' })[o.outputFormat] || 'Seed, concurrent'} ▾`);
+      const btn = h('button.btn.sm', { title: `Output: ${o.languageCode ? 'language ' + o.languageCode + ' · ' : ''}${o.textNormalization && o.textNormalization !== 'auto' ? 'read numbers ' + o.textNormalization + ' · ' : ''}${o.outputFormat ? o.outputFormat + ' · ' : ''}${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once. Click to change.` }, `${({ mp3_44100_128: 'MP3 128', mp3_44100_192: 'MP3 192', pcm_44100: 'PCM 44.1k' })[o.outputFormat] || 'Seed, concurrent'} ▾`);
       btn.onclick = () => popover(btn, fields);
       return grp('Output', btn);
     };
@@ -851,8 +846,8 @@ export async function revoiceView(id) {
           style ? slider(e, 'style', 0, 1, 0.01, 'Style') : null,
           boost ? grp('Speaker boost', switchEl(e.speakerBoost, (x) => set(e, 'speakerBoost', x), '', { title: 'Closer to the voice; can clip or sound harsh' })) : null,
           slider(e, 'speed', 0.7, 1.2, 0.01, 'Speed'),
-          grp('Language', lang), grp('Read numbers ⓘ', norm),
-          outputGroup(() => [grp('Format', fmt),
+          // Language and Read numbers sit behind Output too, so the toolbar stays on one row.
+          outputGroup(() => [grp('Language', lang), grp('Read numbers ⓘ', norm), grp('Format', fmt),
             num(e, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px', title: 'Same seed + same text + same settings ≈ same take. Empty = random.' }),
             num(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit.' })], e));
       } else if (eng === 'voxcpm') {
@@ -975,8 +970,17 @@ export async function revoiceView(id) {
       toast(`${r.changed} line(s) changed.`);
     } catch (e) { fail(e); }
   }
-  function replaceLine(nl, refresh = true) {
-    const wasInFlight = inFlight.delete(nl.id);
+  // done: the line came back from generation (only then does its ↻ stop and the row flash).
+  async function applyFx(ids, fx) {
+    try {
+      const r = await withBusy(rpc('takes.effect', { kind: 'revoice', id, lineIds: ids, effect: fx }), fx ? 'Adding the effect' : 'Taking the effect off', `${ids.length} line(s)…`);
+      for (const nl of r.lines) replaceLine(nl, false);
+      grid.setRows(visible()); renderInspector(); renderActions();
+      toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
+    } catch (e) { fail(e); renderInspector(); }
+  }
+  function replaceLine(nl, refresh = true, done = false) {
+    const wasInFlight = done && (inFlight.delete(nl.id) | finishing.delete(nl.id));
     const i = proj.lines.findIndex((x) => x.id === nl.id);
     if (i >= 0) proj.lines[i] = nl;
     index.set(nl.id, nl);
@@ -1024,6 +1028,7 @@ export async function revoiceView(id) {
 
   let autoPlay = null; // single-line generation plays the new take; batches never do
   const inFlight = new Set(); // lines a take is being made for: their ↻ spins until the take arrives
+  const finishing = new Set(); // in flight when the job ended; their take may still be on its way
   function markInFlight(ids) {
     const before = [...inFlight];
     inFlight.clear();
@@ -1187,7 +1192,7 @@ export async function revoiceView(id) {
 
   on('revoiceLine', (d) => {
     if (d.projectId !== id || !document.body.contains(view)) return;
-    replaceLine(d.line);
+    replaceLine(d.line, true, true);
     if (autoPlay && d.line.id === autoPlay.lineId && d.line.takes.length > autoPlay.takes && d.line.sel) { autoPlay = null; play(d.line); }
   });
   let jobSeen = false;
@@ -1195,7 +1200,7 @@ export async function revoiceView(id) {
   document.addEventListener('job-done', async (e) => {
     jobSeen = false;
     if (!document.body.contains(view)) return;
-    if (inFlight.size) markInFlight(null);
+    if (inFlight.size) { for (const x of inFlight) finishing.add(x); setTimeout(() => finishing.clear(), 5000); markInFlight(null); }
     const d = e.detail || {};
     if (d.kind === 'revoice-orphans' && d.id === id) { if (d.message) toast(d.message, !d.ok); if (d.ok) orphansModal(); }
     if ((d.kind === 'revoice-scan' && d.id === id) || (d.kind === 'generate' && d.revoiceId === id) || (d.kind === 'revoice-export' && d.id === id) || (d.kind === 'revoice-qa' && d.projectId === id)) {

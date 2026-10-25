@@ -301,7 +301,7 @@ public sealed partial class Backend
     private static object BkLineDto(BookLine l) => new
     {
         id = l.LineId, part = l.Part, voice = l.Voice, variant = l.Variant, spoken = l.Spoken, start = l.Start, end = l.End, para = l.ParagraphEnd,
-        status = l.Status.ToString(), err = l.LastError, sel = l.SelectedTakeId, marked = l.Marked,
+        status = l.Status.ToString(), err = l.LastError, sel = l.SelectedTakeId, marked = l.Marked, effect = l.Effect,
         takes = l.Takes.Select(t => new { t.Id, t.Slot, t.CreatedUtc, t.SpokenText, engine = t.Settings.Engine, model = t.Settings.ModelId, wav = t.WavPath.Replace('\\', '/'), t.DurationSeconds }),
     };
 

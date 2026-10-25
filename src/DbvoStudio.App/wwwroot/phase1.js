@@ -1,6 +1,6 @@
 // Phase 1: Mods list and the per-plugin workspace.
 import { findReplaceDialog } from './tagtools.js';
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton, segmented, withBusy, diffAdded } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton, segmented } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const KIND_LABEL = {
@@ -602,50 +602,11 @@ export async function modView(id) {
       if (plugin.importedFixPlugin) tabs.append(h('button.appr.on.demo.fix.fix-remove', { title: `DBVO Fix plugin imported: ${plugin.importedFixPlugin}\nClick to remove it: the lines it changed get their earlier text back`, onclick: removeFix }, 'Fix'));
       tabs.append(h('button.btn.sm', { onclick: importFix, title: 'Take the texts of a DBVO Fix plugin you made earlier (for example with xEdit) into this plugin\'s lines' },
         plugin.importedFixPlugin ? `Imported: ${plugin.importedFixPlugin} · import again…` : 'Import existing DBVO Fix plugin…'));
-      if (plugin.localized) tabs.append(h('button.btn.sm', { onclick: compareStrings, title: 'Compare the texts the game shows with other strings files kept with this mod (a text overhaul, an older copy), and keep the other wording for chosen lines' }, 'Compare strings…'));
     }
     if (plugin && plugin.playerNames) {
       tabs.append(h('button.btn.sm', { onclick: () => exportPlayerNames([]), title: 'Save the <Alias=Player> lines as a topic .txt in Downloads, for your player-name patches' }, `Export ${plugin.playerNames} player-name line(s)`));
     }
     if (plugin) tabs.append(h('button.btn.sm.ghost.danger', { onclick: deletePlugin, title: 'Remove this plugin (or topic file) and its Phase 1 work from the mod' }, 'Remove plugin…'));
-  }
-
-  // The game's own strings against the strings kept with the mod: pick lines whose other wording should stay (e.g. a text
-  // overhaul you play with). Those become your edits (the DBVO Fix plugin then makes the game show that wording too).
-  async function compareStrings() {
-    let r;
-    try { r = await withBusy(rpc('mod.stringsDiff', { id, plugin: plugin.fileName }), 'Comparing strings', 'Reading the plugin with both strings files…'); } catch (e) { fail(e); return; }
-    if (!r.diffs.length) { toast(r.other ? 'The other strings have the same wording for every player line.' : 'There are no other strings files for this plugin (only the game\'s own).'); return; }
-    const ticked = new Set();
-    const q = h('input', { type: 'text', placeholder: 'Filter…', style: { width: '220px' } });
-    const list = h('div.cmp-list');
-    const count = h('span.faint');
-    const paint = () => {
-      clear(list);
-      const f = q.value.trim().toLowerCase();
-      const rows = r.diffs.filter((x) => !f || (x.game + ' ' + x.other).toLowerCase().includes(f));
-      for (const x of rows) {
-        const cb = h('input', { type: 'checkbox', checked: ticked.has(x.key) });
-        cb.addEventListener('change', () => { if (cb.checked) ticked.add(x.key); else ticked.delete(x.key); count.textContent = `${ticked.size} ticked`; });
-        list.append(h('label.cmp-row', cb, h('span.mono.faint', x.formId.toString(16).toUpperCase().padStart(8, '0')),
-          h('div.grow', h('div', h('span.faint', 'Game: '), x.game), h('div', h('span.faint', 'Other: '), diffAdded(x.game, x.other)), x.edited ? h('div.faint', `Your edit: ${x.final}`) : null)));
-      }
-      count.textContent = `${ticked.size} ticked`;
-    };
-    q.addEventListener('input', paint);
-    paint();
-    const v = await modal(`Compare strings · ${plugin.fileName}`, [
-      h('div.dim', `${r.diffs.length} player line(s) read differently. Game: ${r.game || 'the game\'s strings'}. Other: ${r.other}.`),
-      h('div.faint', 'Phase 1 uses the game\'s wording, because DBVO finds a voice file by the text the game shows. Tick the lines whose other wording you want instead (for example when you play with that text overhaul): they become your edits, and the DBVO Fix plugin makes the game show that wording.'),
-      h('div.row', q, h('button.btn.sm.ghost', { onclick: () => { r.diffs.forEach((x) => ticked.add(x.key)); paint(); } }, 'Tick all'), h('button.btn.sm.ghost', { onclick: () => { ticked.clear(); paint(); } }, 'Untick all'), h('div.spacer'), count),
-      list,
-    ], [{ label: 'Close', value: false }, { label: 'Use the other wording for the ticked lines', primary: true, value: true }], { wide: true });
-    if (!v || !ticked.size) return;
-    try {
-      const res = await rpc('mod.useOtherWording', { id, plugin: plugin.fileName, items: r.diffs.filter((x) => ticked.has(x.key)).map((x) => ({ k: x.key, v: x.other })) });
-      toast(`${res.changed} line(s) now use the other wording.`);
-      reload();
-    } catch (e) { fail(e); }
   }
 
   async function deletePlugin() {

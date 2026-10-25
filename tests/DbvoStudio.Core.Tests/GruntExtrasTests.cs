@@ -109,7 +109,7 @@ public class EffectsTests
         var src = Path.Combine(dir, "a.wav");
         var s = new short[22050]; for (int i = 0; i < s.Length; i++) s[i] = (short)(Math.Sin(2 * Math.PI * 200 * i / 44100) * 9000);
         new WavFile { SampleRate = 44100, Channels = 1, Samples = s }.Write(src);
-        foreach (var fx in Effects.BuiltIn())
+        foreach (var fx in Effects.BuiltIn().Where(x => !x.IsEmpty))
         {
             var o = Path.Combine(dir, fx.Id + ".wav");
             await Effects.ApplyAsync(src, o, fx, Tools());
@@ -134,7 +134,7 @@ public class EffectsTests
         Assert.Equal(1, await DbvoStudio.Core.Projects.TakeEffects.SetAsync(root, line, "radio", null, Tools()));
         Assert.Equal("radio", t.Effect); Assert.Null(t.OriginalFuz);
         Assert.NotEqual(orig, File.ReadAllBytes(Path.Combine(root, "takes", "t.wav")));
-        await DbvoStudio.Core.Projects.TakeEffects.SetAsync(root, line, "robot", null, Tools()); // switch: from the dry one
+        await DbvoStudio.Core.Projects.TakeEffects.SetAsync(root, line, "automaton", null, Tools()); // switch: from the dry one
         await DbvoStudio.Core.Projects.TakeEffects.SetAsync(root, line, null, null, Tools());
         Assert.Equal("", t.Effect); Assert.Equal("old.fuz", t.OriginalFuz);
         Assert.Equal(orig, File.ReadAllBytes(Path.Combine(root, "takes", "t.wav")));

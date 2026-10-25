@@ -3,7 +3,7 @@ import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, co
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
-import { effectRow } from './fx.js';
+import { effectRow, effectsButton, effectIcon } from './fx.js';
 import { qaDialog } from './qa.js';
 
 const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Edited since take' };
@@ -250,6 +250,7 @@ export async function patchView(id) {
   let voices = [], models = [], localVoices = [];
   let creditsEl = null; // one credits button per page, updated in place
   const inFlight = new Set(); // lines a take is being made for: their ↻ spins until the take arrives
+  const finishing = new Set(); // in flight when the job ended; their take may still be on its way
   const creditsSlot = h('span.credits-slot');
   { const c = engineCache.get(vc ? 'sts' : voice.engine || 'elevenlabs'); if (c) ({ voices, models, localVoices } = c); }
   let showInsp = store.get('insp2', true);
@@ -313,9 +314,10 @@ export async function patchView(id) {
       { id: 'spoken', title: vc ? 'Text for the LIP (and TTS without a source)' : 'Spoken text (tags anywhere)', flex: 1.3, width: 320, render: (l) => spokenCell(l) },
       { id: 'qa', title: 'QA', tip: 'Check takes: ⚠ flagged, ✓ passed, empty = not checked. Click to sort the flagged ones to the top.', width: 44, resizable: false, align: 'center',
         sort: (l) => { const t = flaggedTake(l) || selTake(l); return !t || !t.qa ? 2 : t.qa.flags.length ? 0 : 1; }, render: (l) => qaBadge(l) },
-      { id: 'take', title: 'Take', width: 64, resizable: false, render: (l) => h('span.row', { style: { gap: '5px' } }, statusDot(l),
+      { id: 'take', title: 'Take', width: 84, resizable: false, render: (l) => h('span.row', { style: { gap: '5px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s); #${(l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot} is used. Click to play, switch, keep or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } },
-          l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—')) },
+          l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—'),
+        effectIcon(l.effect, () => applyFx([l.lineId], ''))) },
       { id: 'act', title: '', width: 176, resizable: false, render: (l) => rowIcons(l) },
     ].filter(Boolean),
   });
@@ -353,7 +355,7 @@ export async function patchView(id) {
     }
     const inp = h('input', { type: 'text', value: l.spoken, disabled: l.omitted });
     if (l.differs) { inp.style.color = 'var(--link)'; inp.title = 'Blue: the spoken text differs from the in-game line (your edit). The arrow on the left restores it.'; }
-    inp.addEventListener('change', () => { if (inp.value !== l.spoken) upd(l, 'spoken', inp.value); });
+    inp.addEventListener('change', () => { if (inp.value !== (index.get(l.lineId) || l).spoken) upd(l, 'spoken', inp.value); });
     inp.addEventListener('focus', () => { editing = { lineId: l.lineId, el: inp }; if (focusedId !== l.lineId) { focusedId = l.lineId; grid.focus(l.lineId); renderInspector(); } });
     inp.addEventListener('keydown', (e) => {
       e.stopPropagation();
@@ -428,15 +430,16 @@ export async function patchView(id) {
     generate('selected', [l.lineId], { autoplay: true });
   }
   // Effect on the takes of the focused line, or of every ticked line when it is one of them.
+  async function applyFx(ids, fx) {
+    try {
+      const r = await withBusy(rpc('takes.effect', { kind: 'patch', id, lineIds: ids, effect: fx }), fx ? 'Adding the effect' : 'Taking the effect off', `${ids.length} line(s)…`);
+      patch = r.patch; reindex(); grid.setRows(visible()); renderInspector(); renderActions();
+      toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
+    } catch (e) { fail(e); renderInspector(); }
+  }
   function fxRow(l) {
     const ids = grid.selected.has(l.lineId) && grid.selected.size > 1 ? [...grid.selected] : [l.lineId];
-    return effectRow(l.effect || '', ids.length, async (fx) => {
-      try {
-        const r = await withBusy(rpc('takes.effect', { kind: 'patch', id, lineIds: ids, effect: fx }), fx ? 'Adding the effect' : 'Taking the effect off', `${ids.length} line(s)…`);
-        patch = r.patch; reindex(); grid.setRows(visible()); renderInspector();
-        toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
-      } catch (e) { fail(e); renderInspector(); }
-    });
+    return effectRow(l.effect || '', ids.length, (fx) => applyFx(ids, fx));
   }
   async function upd(l, action, value) {
     try {
@@ -444,8 +447,9 @@ export async function patchView(id) {
     } catch (e) { fail(e); }
   }
 
-  function replaceLine(nl) {
-    const wasInFlight = inFlight.delete(nl.lineId);
+  // done: the line came back from generation (only then does its ↻ stop and the row flash).
+  function replaceLine(nl, done = false) {
+    const wasInFlight = done && (inFlight.delete(nl.lineId) | finishing.delete(nl.lineId));
     const i = patch.lines.findIndex((x) => x.lineId === nl.lineId);
     if (i >= 0) patch.lines[i] = nl;
     index.set(nl.lineId, nl);
@@ -783,7 +787,7 @@ export async function patchView(id) {
     const grow = () => { spoken.style.height = 'auto'; spoken.style.height = Math.min(220, spoken.scrollHeight + 2) + 'px'; };
     spoken.addEventListener('input', grow);
     requestAnimationFrame(grow);
-    spoken.addEventListener('change', () => { if (spoken.value !== l.spoken) upd(l, 'spoken', spoken.value); });
+    spoken.addEventListener('change', () => { if (spoken.value !== (index.get(l.lineId) || l).spoken) upd(l, 'spoken', spoken.value); });
     spoken.addEventListener('focus', () => { editing = { lineId: l.lineId, el: spoken }; });
     trackCaret(spoken, l);
     insp.append(
@@ -881,6 +885,7 @@ export async function patchView(id) {
       h('span.stat', h('b', c.generated), ` / ${c.active} ${vc ? 'converted' : 'generated'}`, c.approved ? ` · ${c.approved} approved` : '', patch.exportApprovedOnly ? h('span', { title: 'Folders & options → Export: only approved lines are exported' }, ' · exporting approved only') : '', c.omitted ? ` · ${c.omitted} omitted` : '', c.excluded ? ` · ${c.excluded} excluded` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} edited since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
       h('div.spacer'),
       sel.length || c.marked ? tickedMenu(sel, c) : null,
+      effectsButton(sel.length, (fx) => applyFx(sel, fx)),
       reviewBtn,
       checkBtn,
       imp,
@@ -1401,7 +1406,7 @@ export async function patchView(id) {
   // live updates from generation
   on('line2', (d) => {
     if (d.patchId !== id || !document.body.contains(view)) return;
-    replaceLine(d.line);
+    replaceLine(d.line, true);
     if (autoPlay && d.line.lineId === autoPlay.lineId && d.line.takes.length > autoPlay.takes && d.line.selectedTakeId) { autoPlay = null; play(d.line); }
   });
   let jobSeen = false;
@@ -1409,7 +1414,8 @@ export async function patchView(id) {
   document.addEventListener('job-done', async (e) => {
     jobSeen = false;
     if (!document.body.contains(view)) return;
-    if (inFlight.size) markInFlight(null);
+    // The last take's line can arrive just after the job ends: it still flashes.
+    if (inFlight.size) { for (const x of inFlight) finishing.add(x); setTimeout(() => finishing.clear(), 5000); markInFlight(null); }
     if (e.detail && (e.detail.kind === 'import' || e.detail.kind === 'qa') && e.detail.patchId === id) {
       patch = await rpc('patch.get', { id });
       reindex();
