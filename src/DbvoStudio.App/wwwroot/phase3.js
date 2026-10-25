@@ -57,7 +57,12 @@ async function newFomod() {
   const voice = h('select', s.voicePacks.map((v) => h('option', { value: v.id, selected: v.id === s.settings.lastVoicePackId }, v.name)));
   const name = h('input', { type: 'text', placeholder: 'e.g. DBVO MyVoice' });
   const root = h('input', { type: 'text', placeholder: 'the final folder of your patches, e.g. D:\\DBVO MyVoice FOMOD' });
-  const pickVoice = () => { const v = s.voicePacks.find((x) => x.id === voice.value); if (v && !root.value) root.value = (v.destinations.finalRoot || '').replace(/\\?[^\\]*\{mod\}.*$/, ''); };
+  // The root follows the voice pack until you type your own: switching voice packs updates a root it filled in.
+  let autoRoot = '';
+  const pickVoice = () => {
+    const v = s.voicePacks.find((x) => x.id === voice.value);
+    if (v && (!root.value || root.value === autoRoot)) root.value = autoRoot = (v.destinations.finalRoot || '').replace(/\\?[^\\]*\{mod\}.*$/, '');
+  };
   voice.addEventListener('change', pickVoice);
   pickVoice();
   const ok = await modal('New FOMOD', [
