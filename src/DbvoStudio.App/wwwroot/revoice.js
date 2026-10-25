@@ -812,17 +812,21 @@ export async function revoiceView(id) {
       } }, 'Set in Speakers'));
     const kids = [grp('Speaker', spSel), voiceGrp];
     // Format, seed and concurrency are set once and rarely touched: they live behind one button.
-    const outputGroup = (fields, o) => {
-      const btn = h('button.btn.sm', { title: `Output: ${o.languageCode ? 'language ' + o.languageCode + ' · ' : ''}${o.textNormalization && o.textNormalization !== 'auto' ? 'read numbers ' + o.textNormalization + ' · ' : ''}${o.outputFormat ? o.outputFormat + ' · ' : ''}${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once. Click to change.` }, `${({ mp3_44100_128: 'MP3 128', mp3_44100_192: 'MP3 192', pcm_44100: 'PCM 44.1k' })[o.outputFormat] || 'Seed, concurrent'} ▾`);
+    const outputGroup = (fields, o, label = 'Language · output') => {
+      // What is set, readable at a glance, on a button that looks like it opens something.
+      const fmt = ({ mp3_44100_128: 'MP3 128', mp3_44100_192: 'MP3 192', pcm_44100: 'PCM 44.1k', pcm_48000: 'PCM 48k', pcm_22050: 'PCM 22k' })[o.outputFormat] || (o.outputFormat ? o.outputFormat : '');
+      const parts = [o.languageCode !== undefined ? (o.languageCode ? o.languageCode.toUpperCase() : 'Auto') : null, fmt || null, `${o.concurrency || 1}×`].filter(Boolean);
+      const btn = h('button.btn.sm.out-btn', { title: `Language: ${o.languageCode || 'Auto'} · Read numbers: ${o.textNormalization || 'auto'} · Format: ${o.outputFormat || '—'} · Seed: ${o.seed == null || o.seed === '' ? 'random' : o.seed} · ${o.concurrency || 1} at once. Click to open and change.` },
+        icon('gear', { size: 13 }), h('span', parts.join(' · ')), h('span.out-open', 'Open ▾'));
       btn.onclick = () => popover(btn, fields);
-      return grp('Output', btn);
+      return grp(label, btn);
     };
     if (proj.voiceChanger) {
       const st = v.sts;
       const ms = h('select', { onchange: (e) => set(st, 'modelId', e.target.value) }, (elevenModels && elevenModels.length ? elevenModels : [{ modelId: st.modelId }]).map((m) => h('option', { value: m.modelId, selected: m.modelId === st.modelId }, m.modelId)));
       kids.push(grp('Model', ms), slider(st, 'stability', 0, 1, 0.01, 'Stability'), slider(st, 'similarity', 0, 1, 0.01, 'Similarity'), slider(st, 'style', 0, 1, 0.01, 'Style'),
         grp('Remove background noise', switchEl(st.removeBackgroundNoise, (x) => set(st, 'removeBackgroundNoise', x), '', { title: 'Strip background noise from the original before converting' })),
-        outputGroup(() => [num(st, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px' }), num(st, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'Your plan\'s concurrent request limit' })], st));
+        outputGroup(() => [num(st, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px' }), num(st, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'Your plan\'s concurrent request limit' })], st, 'Output'));
     } else {
       const used = new Set(proj.speakers.filter((x) => x.voiceId && !x.skip).map((x) => x.engine || 'elevenlabs'));
       const eng = sp ? (sp.engine || 'elevenlabs') : (used.size === 1 ? [...used][0] : 'elevenlabs');
