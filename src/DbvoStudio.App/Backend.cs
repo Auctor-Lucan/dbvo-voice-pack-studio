@@ -428,6 +428,8 @@ public sealed partial class Backend
                 if (rv != NotHandled) return rv;
                 var bk = await DispatchBooks(m, p, dropped);
                 if (bk != NotHandled) return bk;
+                var gr = await DispatchGrunts(m, p, dropped);
+                if (gr != NotHandled) return gr;
                 throw new InvalidOperationException("Unknown action: " + m);
         }
     }

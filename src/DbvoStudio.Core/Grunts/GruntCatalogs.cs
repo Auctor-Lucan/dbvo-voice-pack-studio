@@ -52,6 +52,13 @@ public static partial class GruntCatalogs
             }
         }
         else c = BuiltIn(target);
+        if (c.Source == "installed")
+        {
+            // Events the install doesn't show but the built-in list has, e.g. the DLC shouts when PC Head Tracking - Patch.esp
+            // sits in another mod folder than the active MCM plugin (Multi Voice Packs installed over PCHT in MO2).
+            var have = new HashSet<string>(c.Events.Select(e => e.Id), StringComparer.OrdinalIgnoreCase);
+            foreach (var e in BuiltIn(target).Events.Where(e => e.Kind == "slots" && !have.Contains(e.Id))) c.Events.Add(e);
+        }
         var known = new HashSet<string>(c.Events.Select(e => e.Id), StringComparer.OrdinalIgnoreCase);
         var keys = new HashSet<string>(c.Events.Where(e => e.Key.Length > 0).Select(e => e.Key), StringComparer.OrdinalIgnoreCase);
         foreach (var e in custom.Where(e => e.Target == target))
@@ -547,7 +554,12 @@ public static partial class GruntCatalogs
     }
 
     /// <summary>"VampiricDrain" → "Vampiric Drain", "NPCKilled" → "NPC Killed", "Levelup" stays.</summary>
-    public static string Words(string s) => Regex.Replace(s, @"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ");
+    public static string Words(string s) => s switch
+    {
+        "OutofBreath" => "Out of Breath", "Levelup" => "Level Up", "Wakeup" => "Wake Up", "BarelySuccess" => "Barely Success",
+        "NPCKilled" => "NPC Killed", "DragonSoul" => "Dragon Soul", "KillMove" => "Killmove",
+        _ => Regex.Replace(s, @"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " "),
+    };
 
     // ------------------------------------------------------------------ custom events
 

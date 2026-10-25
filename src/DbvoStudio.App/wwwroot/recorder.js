@@ -21,7 +21,7 @@ export async function recordTake({ patchId, line, onSaved, kind = 'patch' }) {
     h('div.row', h('span.faint', 'Start'), startIn, startLbl),
     h('div.row', h('span.faint', 'End'), endIn, endLbl),
     h('div.row', h('button.btn.sm', { title: 'Play from Start to End', onclick: () => playSel() }, '▶ Play selection'), h('button.btn.sm.ghost', { title: 'Back to the whole recording', onclick: () => { startIn.value = 0; endIn.value = endIn.max; syncLbl(); } }, 'Reset trim')));
-  const keepBtn = h('button.btn', { disabled: true, title: 'Keep your own voice as a new take (a .lip is made from the line)' }, 'Keep my recording');
+  const keepBtn = h('button.btn', { disabled: true, title: kind === 'grunts' ? 'Keep your own voice as a new line' : 'Keep your own voice as a new take (a .lip is made from the line)' }, 'Keep my recording');
   const convBtn = h('button.btn.primary', { disabled: true, title: target.ready ? `Convert the recording into ${target.voiceName} with the Voice Changer (ElevenLabs speech-to-speech), then keep it as a new take. Billed by audio length.` : target.why || 'The Voice Changer is not set up.' },
     `Convert to ${target.voiceName || 'the voice pack voice'} and keep`);
   const actions = h('div.row', { style: { flexWrap: 'wrap' } }, keepBtn, convBtn, h('div.spacer'), h('button.btn.ghost', { title: 'Throw this recording away', onclick: () => discard() }, 'Discard'));
@@ -123,14 +123,14 @@ export async function recordTake({ patchId, line, onSaved, kind = 'patch' }) {
   async function keep(convert) {
     if (!blob) return;
     keepBtn.disabled = convBtn.disabled = recBtn.disabled = true;
-    status.textContent = convert ? `Converting to ${target.voiceName} and making the .lip…` : 'Saving and making the .lip…';
+    status.textContent = convert ? `Converting to ${target.voiceName}${kind === 'grunts' ? '' : ' and making the .lip'}…` : kind === 'grunts' ? 'Saving…' : 'Saving and making the .lip…';
     try {
       const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
       const ext = (blob.type || '').includes('ogg') ? '.ogg' : '.webm';
       const r = await rpc(kind + '.record', { id: patchId, lineId, data, ext, start: +startIn.value, end: +endIn.value, convert });
       saved = r.line;
       if (onSaved) onSaved(r.line, r.takeId);
-      toast(convert ? 'Converted and kept as a new take.' : 'Recording kept as a new take.');
+      toast(convert ? 'Converted and kept as a new take.' : kind === 'grunts' ? 'Recording added.' : 'Recording kept as a new take.');
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); // closes the recorder
     } catch (e) {
       fail(e);

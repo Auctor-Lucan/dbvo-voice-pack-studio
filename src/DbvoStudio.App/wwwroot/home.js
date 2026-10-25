@@ -75,7 +75,7 @@ function pickMaiq() {
 
 const WAVE = [18, 30, 52, 40, 70, 88, 60, 94, 72, 46, 80, 100, 64, 38, 58, 84, 50, 28, 44, 22, 36, 16];
 const RECENT_KEY = 'recent';
-const RECENT_VIEWS = ['mod', 'patch', 'fomod', 'revoice', 'book'];
+const RECENT_VIEWS = ['mod', 'patch', 'fomod', 'revoice', 'book', 'grunt'];
 
 /** Remember a project page the user opened, newest first, for "Pick up where you left off". */
 export function noteRecent(route) {
@@ -89,6 +89,7 @@ export async function homeView() {
   const s = await refreshState();
   const revoices = await rpc('revoice.list').catch(() => []);
   const books = await rpc('books.list').catch(() => []);
+  const grunts = await rpc('grunts.list').catch(() => []);
   const view = h('div.view.home.reading');
 
   // ---- left: welcome, counts and the studio check
@@ -130,7 +131,7 @@ export async function homeView() {
   const right = h('section.home-start', h('div.home-lbl', 'Start something'), cards);
 
   // ---- bottom: work to pick up again, most recently opened first
-  const items = recentItems(s, revoices, books);
+  const items = recentItems(s, revoices, books, grunts);
   const bottom = h('section.home-recent', h('div.home-lbl', 'Pick up where you left off'),
     items.length ? h('div.home-rcs', items.map((x) => h('button.home-rc', { style: { '--c': x.color }, title: 'Open ' + x.name, onclick: () => go(x.view, { id: x.id }) },
       h('span.rc-top', h('b.ellipsis', x.name), h('span.home-ct', x.count)),
@@ -142,7 +143,7 @@ export async function homeView() {
   return view;
 }
 
-function recentItems(s, revoices, books = []) {
+function recentItems(s, revoices, books = [], grunts = []) {
   const all = [];
   for (const p of s.patches) {
     const n = p.total - p.omitted - (p.excluded || 0);
@@ -161,6 +162,9 @@ function recentItems(s, revoices, books = []) {
   }
   for (const b of books) {
     all.push({ view: 'book', id: b.id, name: b.name, sub: `Voiced Books · ${b.books} books`, done: b.generated, total: b.lines, count: `${b.generated} / ${b.lines} parts`, color: '#e3b341' });
+  }
+  for (const g of grunts) {
+    all.push({ view: 'grunt', id: g.id, name: g.name, sub: `Player Grunts · ${g.target === 'spvs' ? 'SPVS ' + g.slot : g.multi ? 'MPCHT' : 'PCHT'}`, done: g.events, total: g.total, count: `${g.events} / ${g.total} events`, color: '#f778ba' });
   }
   // Most recently opened first; then the rest in the order above (patches before mods), eight in all (two rows).
   const order = store.get(RECENT_KEY, []);

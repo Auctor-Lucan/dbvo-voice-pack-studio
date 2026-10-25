@@ -458,7 +458,7 @@ public static partial class GruntService
         {
             var mine = new HashSet<string>(p.ExportedFiles, StringComparer.OrdinalIgnoreCase);
             foreach (var f in plan.Files)
-                if (!mine.Contains(f.Rel) && File.Exists(Path.Combine(p.OutputFolder, f.Rel))) plan.WouldOverwrite.Add(f.Rel);
+                if (!mine.Contains(f.Rel) && File.Exists(Path.Combine(p.OutputFolder, Native(f.Rel)))) plan.WouldOverwrite.Add(f.Rel);
             if (plan.WouldOverwrite.Count > 0) Warn($"{plan.WouldOverwrite.Count} file(s) in the output folder weren't written by this project and would be replaced, e.g. {plan.WouldOverwrite[0]}.");
         }
         return plan;
@@ -797,6 +797,8 @@ public static partial class GruntService
         var events = audio.Select(f => f.EventId).Distinct().Count();
         sb.AppendLine($"Events with audio: {events}");
         sb.AppendLine($"Audio files written: {audio.Count} ({audio.Select(f => f.Line!.Id).Distinct().Count()} lines, {r.Converted} converted this time)");
+        var parts = plan.Files.Where(f => f.Kind == "audio" && cat.Events.Any(e => e.Id == f.EventId && e.Kind == "slots")).Select(f => f.Line!.Id).Distinct().Count();
+        if (parts > 0) sb.AppendLine($"Shout parts: {parts}");
         if (p.Target == GruntTargets.Pcht)
         {
             var extra = p.Events.Where(kv => cat.Events.Any(e => e.Id == kv.Key && e.Kind == "pool")).Sum(kv => Math.Max(0, kv.Value.Lines.Count - cat.Events.First(e => e.Id == kv.Key).BaseSlots));

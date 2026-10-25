@@ -1,6 +1,6 @@
-# Parked (2026-10-24): player voice packs and new voice engines
+# Player voice packs (built 2026-10-25) and new voice engines (still parked)
 
-Revisit later at the author's request. Nothing built yet.
+The player voice part is built as the Player Grunts Tool (Other Tools, 8.1): see the user guide. The notes below were the plan; the new engines are still parked.
 
 ## Player Voice Tool (Other Tools)
 One tool exporting from the same takes to:
