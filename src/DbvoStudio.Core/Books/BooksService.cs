@@ -419,6 +419,7 @@ public sealed class BooksService
             s.LoudnessLufs = preset.LoudnessLufs; s.LimiterThresholdDb = preset.LimiterThresholdDb; s.LimiterOutputDb = preset.LimiterOutputDb; s.ExtraGainDb = preset.ExtraGainDb;
         }
         if (book?.ParagraphPauseMs is { } pp) s.ParagraphPauseMs = Math.Clamp(pp, 0, 5000);
+        if (book?.Reverb == false) s.Reverb = false; // loudness and the limiter stay
         return s;
     }
 

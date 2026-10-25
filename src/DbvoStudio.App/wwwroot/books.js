@@ -880,7 +880,8 @@ export async function bookProjectView(id) {
               d = await rpc('books.bookGet', { id, stem }); renderEd(false); replaceBook(d.book);
               toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed. The whole book is joined again with it.`, !!r.problems.length);
             } catch (e) { fail(e); }
-          }, 'Every part of this book in this voice, and new takes: reverb, radio, telepathy… (the project\'s reverb comes on top when the book is joined)') : null,
+          }, 'Every part of this book in this voice, and new takes: reverb, radio, telepathy… Adding one turns the book reverb off (two reverbs sound muddy).') : null,
+          d.projectReverb ? switchEl(d.bookReverb, (on) => act('overrides', null, { reverb: on }), 'Book reverb', { title: 'The project\'s reverb when this book is joined (Audio settings). Off for a book whose parts have an effect; loudness and the limiter always stay.' }) : null,
           h('div.spacer'),
           h('button.btn.sm', { title: 'Join the parts (with reverb, pauses and loudness) and play the whole book', disabled: !lines.length || lines.some((l) => !l.sel), onclick: async () => { try { const r = await rpc('books.join', { id, stem, voice, variant }); edAudio.src = r.url; edAudio.play().catch(fail); toast(`${fmtTime(r.seconds)} · ${r.lufs.toFixed(1)} LUFS · peak ${r.peakDb.toFixed(1)} dB`); } catch (e) { fail(e); } } }, '▶ Whole book'),
           h('button.btn.sm.ghost', { title: 'Stop playback', onclick: () => edAudio.pause() }, '■')));

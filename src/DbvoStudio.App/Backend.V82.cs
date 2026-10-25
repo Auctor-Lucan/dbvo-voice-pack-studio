@@ -211,6 +211,7 @@ public sealed partial class Backend
                 EmitQueue();
                 return true;
             case "effects.list": return Effects.BuiltIn();
+            case "patch.importSpoken": return await Locked(() => ImportSpoken(p));
             case "takes.effect": return await TakesEffect(p);
             case "mod.stringsDiff":
                 return await Locked(() =>
@@ -235,6 +236,51 @@ public sealed partial class Backend
         }
     }
 
+    /// <summary>
+    /// Spoken texts (with their [tags]) from another patch, e.g. the same mod for another voice pack, matched by the in-game
+    /// line. which: edited (only texts edited there) | all. keepMine: lines edited here stay. scope: all | ticked | notake.
+    /// tags: keep | words (the words without [tags]) | add (only when the words are the same: the other one's tags).
+    /// preview: count only.
+    /// </summary>
+    private object ImportSpoken(JsonElement p)
+    {
+        var patch = LoadPatch(S(p, "id"));
+        var from = LoadPatch(S(p, "fromId"));
+        var which = S(p, "which", "edited");
+        bool keepMine = !p.TryGetProperty("keepMine", out var km) || km.ValueKind != JsonValueKind.False;
+        var scope = S(p, "scope", "all");
+        var tags = S(p, "tags", "keep");
+        var ticked = Strings(p, "lineIds").ToHashSet();
+        var src = from.Lines.GroupBy(l => l.FinalLine).ToDictionary(g => g.Key, g => g.First());
+        int matched = 0, changed = 0, mine = 0, same = 0;
+        var samples = new List<object>();
+        foreach (var l in patch.Lines)
+        {
+            if (scope == "ticked" && !ticked.Contains(l.LineId)) continue;
+            if (scope == "notake" && l.Takes.Count > 0) continue;
+            if (!src.TryGetValue(l.FinalLine, out var o)) continue;
+            if (which == "edited" && !o.SpokenEdited) continue;
+            matched++;
+            string text = tags switch
+            {
+                "words" => Core.Naming.SpokenText.StripTags(o.Spoken).Trim(),
+                "add" => Core.Naming.SpokenText.StripTags(o.Spoken).Trim() == Core.Naming.SpokenText.StripTags(l.Spoken).Trim() ? o.Spoken : l.Spoken,
+                _ => o.Spoken,
+            };
+            if (text == l.Spoken) { same++; continue; }
+            if (keepMine && l.SpokenEdited) { mine++; continue; }
+            changed++;
+            if (samples.Count < 8) samples.Add(new { line = l.FinalLine, now = l.Spoken, then = text });
+            if (B(p, "preview")) continue;
+            l.Spoken = text;
+            l.SpokenEdited = text != Core.Naming.SpokenText.DefaultFor(l.FinalLine);
+            l.TagSuggestion = null;
+            l.RefreshStale();
+        }
+        if (!B(p, "preview") && changed > 0) _lib.Save(patch);
+        return new { matched, changed, mine, same, samples, patch = B(p, "preview") ? null : PatchDto(patch) };
+    }
+
     /// <summary>An effect on lines' takes (Phase 2 or NPC Revoice): every take now, and new takes as they are made.</summary>
     private async Task<object?> TakesEffect(JsonElement p)
     {
@@ -255,6 +301,9 @@ public sealed partial class Backend
                 lines = proj.Lines.Where(l => ids.Contains(l.LineId)).Cast<Phase2Line>().ToList();
                 root = _lib.BooksFolder(proj.Id);
                 save = () => _lib.Save(proj);
+                // An effect on a book's parts turns the project's reverb off for that book (two reverbs sound muddy); off again turns it back on.
+                foreach (var stem in proj.Lines.Where(l => ids.Contains(l.LineId)).Select(l => l.Stem).Distinct())
+                    if (proj.Books.FirstOrDefault(b => b.Stem == stem) is { } bk) bk.Reverb = fx.Length > 0 ? false : null;
             }
             else if (kind == "revoice")
             {

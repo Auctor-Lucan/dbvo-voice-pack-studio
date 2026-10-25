@@ -854,6 +854,7 @@ export async function patchView(id) {
     imp.addEventListener('click', () => popupMenu(imp, [
       { label: 'An earlier voice pack…', sub: 'DBVO 1 (Legacy names) or DBVO 2.0 folder: fills lines without takes, .fuz kept as it is', onclick: legacyImport },
       { label: 'Takes from another patch…', sub: 'Its takes for the same lines are added; yours are never replaced', onclick: mergeTakes },
+      { label: 'Spoken text from another patch…', sub: 'Your edited spoken texts and [tags] from another voice pack\'s patch of the same lines', onclick: importSpoken },
       { label: 'Spoken text from a spreadsheet (CSV)…', sub: 'Shows every change first; you pick which to apply', onclick: importCsv },
     ]));
     const checkBtn = h('button.btn', { title: `Check takes${sel.length ? ` of the ${sel.length} ticked line(s)` : ' of every line'}: Whisper compares what is said with the line, plus loudness and clipping. Flags only, deletes nothing.`, onclick: () => qaRun(sel.length ? sel : null) }, 'Check takes');
@@ -1006,6 +1007,46 @@ export async function patchView(id) {
       if (!ok) return;
       await rpc('patch.importLegacy', { id, folder });
       renderActions();
+    } catch (e) { fail(e); }
+  }
+
+  // The spoken texts (and their tags) you wrote for another voice pack, brought over by the in-game line.
+  async function importSpoken() {
+    const all = app.state.patches.filter((p) => p.id !== id);
+    if (!all.length) { toast('There is no other patch to take spoken texts from.', true); return; }
+    const sameMods = (p) => p.modIds && p.modIds.some((m) => patch.modIds.includes(m));
+    all.sort((a, b) => (sameMods(b) ? 1 : 0) - (sameMods(a) ? 1 : 0));
+    const src = h('select', { style: { width: '100%' } }, all.map((p) => h('option', { value: p.id }, `${p.name} · ${p.voicePack}${sameMods(p) ? '' : ' · other mods'}`)));
+    const o = { which: 'edited', keepMine: true, scope: 'all', tags: 'keep' };
+    const ticked = [...grid.selected];
+    const info = h('div.box', { style: { minHeight: '64px' } }, 'Counting…');
+    let ticket = 0;
+    const count = async () => {
+      const t = ++ticket;
+      try {
+        const r = await rpc('patch.importSpoken', { id, fromId: src.value, ...o, lineIds: ticked, preview: true });
+        if (t !== ticket) return;
+        clear(info).append(h('div', h('b', String(r.changed)), ` line(s) get the other patch's spoken text · ${r.matched} matched`, r.mine ? ` · ${r.mine} you edited here are kept` : '', r.same ? ` · ${r.same} already the same` : ''),
+          r.samples.length ? h('div.col', { style: { marginTop: '6px', gap: '4px', fontSize: '12.5px' } }, r.samples.map((x) => h('div', h('span.faint', 'now: '), x.now, h('br'), h('span.faint', 'then: '), diffAdded(x.now, x.then)))) : null);
+      } catch (e) { if (t === ticket) info.textContent = e.message || String(e); }
+    };
+    src.addEventListener('change', count);
+    const seg = (k, opts) => segmented(opts, String(o[k]), (v) => { o[k] = v === 'true' ? true : v === 'false' ? false : v; count(); });
+    const body = [
+      h('div.col', h('div.field-label', 'From'), src, h('div.faint', 'Lines are matched by their in-game text, so any patch of the same mod works, whatever voice pack or naming it has.')),
+      h('div.col', h('div.field-label', 'Which texts'), seg('which', [['edited', 'The ones edited there', 'Only spoken texts you changed in the other patch (tags added, words changed)'], ['all', 'Every line', 'Every matching line\'s spoken text, edited or not']])),
+      h('div.col', h('div.field-label', 'Here'), seg('keepMine', [['true', 'Keep my edits', 'Lines you already edited in this patch stay as they are'], ['false', 'Replace them too', 'Your edits here are replaced (Undo brings them back)']])),
+      h('div.col', h('div.field-label', 'Lines'), seg('scope', [['all', 'All lines'], ...(ticked.length ? [['ticked', `The ${ticked.length} ticked`]] : []), ['notake', 'Lines without a take yet']])),
+      h('div.col', h('div.field-label', 'Tags'), seg('tags', [['keep', 'As written there', 'Words and [tags] as in the other patch'], ['words', 'Words only', 'The other patch\'s words without its [tags] (for a voice that reads tags differently)'], ['add', 'Its tags on my words', 'Only where the words are the same: take the other patch\'s [tags]']])),
+      info,
+    ];
+    count();
+    const ok = await modal('Spoken text from another patch', body, [{ label: 'Cancel', value: false }, { label: 'Bring them over', primary: true, value: true }], { wide: true });
+    if (!ok) return;
+    try {
+      const r = await rpc('patch.importSpoken', { id, fromId: src.value, ...o, lineIds: ticked });
+      if (r.patch) { patch = r.patch; reindex(); renderAll(); }
+      toast(`${r.changed} spoken text(s) brought over.${r.changed ? ' Lines with a take show as Edited since take. Undo (↶) takes it back.' : ''}`);
     } catch (e) { fail(e); }
   }
 

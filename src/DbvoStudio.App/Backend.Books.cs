@@ -282,6 +282,7 @@ public sealed partial class Backend
             records = b.Records.Select(r => new { r.Plugin, formId = r.Hex, r.EditorId }),
             breaks = parts.Skip(1).Select(x => x.Start).ToList(), manual = b.ManualBreaks,
             voiceOverride = b.VoiceOverride, speed = b.Speed, pause = b.ParagraphPauseMs, projectPause = proj.Audio.ParagraphPauseMs,
+            bookReverb = b.Reverb != false, projectReverb = proj.Audio.Reverb,
             voiceChoices = proj.Narrators.Select(n => new { key = BooksProject.NarratorKey(n.Id), name = "Narrator: " + (n.Name.Trim().Length > 0 ? n.Name : "Narrator") })
                 .Concat(proj.VoiceTypes.Keys.OrderBy(k => k).Select(k => new { key = BooksProject.VoiceTypeKey(k), name = "NPC voice: " + k })).ToList(),
             partRanges = parts.Select(x => new { start = x.Start, end = x.End, para = x.ParagraphEnd }).ToList(),
@@ -375,6 +376,7 @@ public sealed partial class Backend
                 if (p.TryGetProperty("voice", out var vo) && vo.ValueKind == JsonValueKind.String) b.VoiceOverride = vo.GetString()!;
                 if (p.TryGetProperty("speed", out var sp)) b.Speed = sp.ValueKind == JsonValueKind.Number ? Math.Clamp(sp.GetDouble(), 0.5, 2) : null;
                 if (p.TryGetProperty("pause", out var pa)) b.ParagraphPauseMs = pa.ValueKind == JsonValueKind.Number ? Math.Clamp(pa.GetInt32(), 0, 5000) : null;
+                if (p.TryGetProperty("reverb", out var rv)) b.Reverb = rv.ValueKind == JsonValueKind.True ? null : rv.ValueKind == JsonValueKind.False ? false : b.Reverb;
                 break;
             }
             case "restore": b.Spoken = BookText.DefaultSpoken(b.Title, b.InGame, out _, out _); b.SpokenEdited = false; b.ManualBreaks = false; b.Breaks.Clear(); break;

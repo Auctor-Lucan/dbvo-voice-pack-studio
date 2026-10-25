@@ -224,6 +224,7 @@ public sealed partial class Backend
             }
             case "grunts.reverb": return await GrReverb(p);
             case "grunts.effect": return await GrEffect(p);
+            case "grunts.fxPreview": return await GrFxPreview(p);
             case "grunts.trim": return await Locked(() => GrTrim(p));
             case "grunts.variants": return await GrVariants(p);
             case "grunts.measure": return StartGrMeasure(p);
@@ -756,6 +757,37 @@ public sealed partial class Backend
             return new { changed = false, done, problems, project = GrDto(proj) };
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>How a line sounds with an effect (or without any: effect ""), for listening in the effect picker; nothing is changed.</summary>
+    private async Task<object?> GrFxPreview(JsonElement p)
+    {
+        var proj = LoadGr(S(p, "id"));
+        var line = proj.Events.Values.SelectMany(s => s.Lines).FirstOrDefault(l => l.Id == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
+        var folder = GrFolder(proj);
+        var src = GruntService.SourcePath(line, folder);
+        // Always from the dry file: the original when an effect is on.
+        var dry = line.Reverb && File.Exists(GruntService.ReverbOriginal(folder, src)) ? GruntService.ReverbOriginal(folder, src) : src;
+        if (!File.Exists(dry)) throw new InvalidOperationException("The audio file is missing.");
+        var fxId = S(p, "effect");
+        var fx = fxId.Length > 0 ? Core.Audio.Effects.Find(GruntService.EffectsOf(proj), fxId) ?? throw new InvalidOperationException("Unknown effect.") : null;
+        var cache = Path.Combine(folder, "cache", "fx");
+        Directory.CreateDirectory(cache);
+        var key = GruntService.Hash(GruntService.Stamp(dry) + "|" + dry + "|" + (fx == null ? "" : JsonSerializer.Serialize(fx, JsonOptions)));
+        var outPath = Path.Combine(cache, key + ".wav");
+        if (!File.Exists(outPath))
+        {
+            var tools = File.Exists(_settings.FfmpegPath) ? GrExternal() : null;
+            if (fx != null) await Core.Audio.Effects.ApplyAsync(dry, outPath, fx, tools);
+            else
+            {
+                // the line as it is, in a format the page plays
+                var tmp = new GruntLine { Id = line.Id, Source = dry };
+                var wav = await GruntService.PreviewAsync(GrExternal(), tmp, folder);
+                File.Copy(wav, outPath, true);
+            }
+        }
+        return new { url = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, outPath).Replace('\\', '/') + "?t=" + File.GetLastWriteTimeUtc(outPath).Ticks };
     }
 
     private object GrTrim(JsonElement p)

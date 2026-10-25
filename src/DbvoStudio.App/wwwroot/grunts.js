@@ -550,29 +550,48 @@ export async function gruntProjectView(id) {
     } catch { renderAll(); }
   }
   async function effectDialog(e, l) {
-    let pick = l.reverb ? l.effectId : P().defaultEffect;
+    // A click picks an effect and plays the line with it (the file isn't changed until Apply); Normal is the line as it is.
+    let pick = l.reverb ? l.effectId : '';
     const groups = {};
     for (const fx of fxList()) (groups[fx.group] = groups[fx.group] || []).push(fx);
     const tiles = [];
-    const paint = () => tiles.forEach(([t, fx]) => t.classList.toggle('on', fx.id === pick));
-    const cols = h('div.fx-cols', Object.entries(groups).map(([g, list]) => h('div.fx-col',
+    const pa = new Audio();
+    let playTicket = 0;
+    const status = h('span.fx-play', '');
+    const paint = () => tiles.forEach(([t, fid]) => t.classList.toggle('on', fid === pick));
+    async function listen(fid, name) {
+      const ticket = ++playTicket;
+      status.textContent = `Making ${name}…`;
+      try {
+        const r = await rpc('grunts.fxPreview', { id, lineId: l.id, effect: fid });
+        if (ticket !== playTicket) return;
+        pa.src = r.url; await pa.play();
+        status.textContent = `▶ ${name}`;
+      } catch (err) { if (ticket === playTicket) status.textContent = ''; fail(err); }
+    }
+    const tile = (fid, name, desc, o = {}) => {
+      const t = h('button.fx-tile' + (o.empty ? '.empty' : '') + (o.normal ? '.normal' : ''), {
+        title: o.empty ? 'An empty slot: give it a filter or a reverb in Setup & export → Effects' : `${desc} Click to hear the line with it; double-click to apply.`, disabled: !!o.empty,
+        onclick: () => { pick = fid; paint(); listen(fid, name); }, ondblclick: () => { pick = fid; document.querySelector('#modal .btn.primary')?.click(); },
+      }, h('div.fx-name', name, o.badge || null), h('div.fx-desc', o.empty ? 'Empty · set it up in Setup & export → Effects' : desc));
+      tiles.push([t, fid]);
+      return t;
+    };
+    const cols = h('div.fx-cols', Object.entries(groups).map(([g, list], gi) => h('div.fx-col',
       h('div.fx-col-head', g),
-      list.map((fx) => {
-        const empty = fx.isEmpty;
-        const t = h('button.fx-tile' + (empty ? '.empty' : '') + (l.reverb && fx.id === l.effectId ? '.current' : ''), {
-          title: empty ? 'An empty slot: give it a filter or a reverb in Setup & export → Effects' : fx.description, disabled: empty,
-          onclick: () => { pick = fx.id; paint(); }, ondblclick: () => { pick = fx.id; document.querySelector('#modal .btn.primary')?.click(); },
-        }, h('div.fx-name', fx.name, l.reverb && fx.id === l.effectId ? h('span.fx-badge', 'on') : fx.id === P().defaultEffect ? h('span.fx-badge.dim', 'toggle') : null),
-        h('div.fx-desc', empty ? 'Empty · set it up in Setup & export → Effects' : fx.description));
-        tiles.push([t, fx]);
-        return t;
-      }))));
+      gi === 0 ? tile('', 'Normal', 'No effect: the line as it is.', { normal: true, badge: !l.reverb ? h('span.fx-badge', 'now') : null }) : null,
+      list.map((fx) => tile(fx.id, fx.name, fx.description, {
+        empty: fx.isEmpty,
+        badge: l.reverb && fx.id === l.effectId ? h('span.fx-badge', 'now') : fx.id === P().defaultEffect ? h('span.fx-badge.dim', 'toggle') : null,
+      })))));
     paint();
     const v = await modal(`Effect · ${l.file}`, [cols,
-      h('div.fx-note', 'The WAV file itself changes, so it sounds that way in the game. The original is kept in the project: another effect starts again from it, and Remove puts it back. Double-click an effect to apply it.')],
-      [{ label: 'Cancel', value: false }, l.reverb ? { label: 'Remove the effect', value: 'off' } : null, { label: 'Apply', primary: true, value: 'on' }].filter(Boolean), { wide: true, help: 'grunt-events' });
-    if (v === 'off') effectLines([l], '');
-    else if (v === 'on') effectLines([l], pick);
+      h('div.row.fx-foot', status, h('div.spacer'), h('span.fx-note', 'Click an effect to hear the line with it. Apply changes the WAV file itself; the original is kept, so Normal puts it back.'))],
+      [{ label: 'Cancel', value: false }, { label: 'Apply', primary: true, value: 'on' }], { wide: true, help: 'grunt-events' });
+    pa.pause(); playTicket++;
+    if (v !== 'on') return;
+    if (!pick) { if (l.reverb) effectLines([l], ''); }
+    else if (!(l.reverb && pick === l.effectId)) effectLines([l], pick);
   }
   async function trimDialog(e, l) {
     const dur = l.durationSeconds || 0;

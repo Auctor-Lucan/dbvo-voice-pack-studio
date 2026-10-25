@@ -98,6 +98,8 @@ public sealed class Book
     public double? Speed { get; set; }
     /// <summary>Pause at paragraph joins for this book (ms); null = the project's Audio setting.</summary>
     public int? ParagraphPauseMs { get; set; }
+    /// <summary>The project's reverb when this book is joined; false when its parts have an effect (two reverbs sound muddy). Null = on.</summary>
+    public bool? Reverb { get; set; }
 
     /// <summary>Built-in set: the text version this book came with, and a newer one if the set was updated since.</summary>
     public int SetVersion { get; set; }

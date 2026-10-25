@@ -929,3 +929,7 @@ mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: in
 /* The E on a line whose takes have an effect (click to take it off) */
 .fx-e { flex: none; width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--text); font-size: 10.5px; font-weight: 800; line-height: 1; padding: 0; cursor: pointer; }
 .fx-e:hover { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+.fx-tile.normal { border-style: solid; background: transparent; }
+.fx-foot { align-items: center; margin-top: 2px; }
+.fx-play { font-size: 12.5px; color: var(--accent); font-weight: 600; min-width: 160px; }
