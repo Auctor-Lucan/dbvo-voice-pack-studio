@@ -234,6 +234,7 @@ export async function gruntProjectView(id) {
       chip('extra', 'More than PCHT\'s own', 'PCHT events with more lines than the base plugin lists (the export adds them)'),
       chip('skipped', 'Skipped', 'Left out on purpose'), chip('custom', 'Custom', 'Events you added'),
       h('div.spacer'), q, cs, imp,
+      h('button.btn.sm', { title: 'Open every line\'s subtitle in one .toml file in your text editor; save it and come back, and the changes are read in', onclick: openSubtitles }, 'Subtitles .toml'),
       h('button.btn.sm', { title: 'Add, edit, import or export your own event definitions', onclick: customEventsDialog }, 'Custom events…'),
       h('button.btn.sm', { title: 'Show or hide the event panel', onclick: () => { showInsp = !showInsp; store.set('gr-insp', showInsp); renderAll(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel'));
   }
@@ -273,6 +274,7 @@ export async function gruntProjectView(id) {
   }
   function tile(e) {
     const t = h('div.gr-tile.st-' + e.status + (e.id === selId ? '.sel' : ''), {
+      'data-id': e.id,
       title: `${e.label}${e.description ? '\n' + e.description : ''}\n${STATUS_TIP[e.status] || ''} · drop audio files here`,
       onclick: () => select(e.id),
     },
@@ -294,8 +296,10 @@ export async function gruntProjectView(id) {
   }
   function select(eid) {
     selId = eid; store.set('gr-sel:' + id, eid);
+    // Only the highlight moves (re-drawing every block on each click was slow with many events).
     blocks.querySelectorAll('.gr-tile.sel').forEach((x) => x.classList.remove('sel'));
-    renderBlocks();
+    const t = blocks.querySelector(`.gr-tile[data-id="${CSS.escape(eid)}"]`);
+    if (t) t.classList.add('sel'); else renderBlocks();
     renderInspector();
     if (!showInsp) { showInsp = true; store.set('gr-insp', true); renderAll(); }
   }
@@ -327,7 +331,8 @@ export async function gruntProjectView(id) {
   }
   async function record(e, slot) {
     const s = slot ? e.slots.find((x) => x.id === slot) : null;
-    const saved = await recordTake({ patchId: id, kind: 'grunts', line: { lineId: e.id + '|' + (slot || ''), spoken: s ? `${e.label}: ${s.label} — “${s.text}”` : `${e.category} · ${e.label}${e.description ? '\n' + e.description : ''}` } });
+    const saved = await recordTake({ patchId: id, kind: 'grunts', subtitles: true,
+      line: { lineId: e.id + '|' + (slot || ''), spoken: s ? `“${s.text}”` : e.label, heading: s ? `${e.label} · ${s.label}` : e.category !== e.label ? e.category : '', hint: s ? '' : e.description, subtitle: s ? s.text : '' } });
     if (saved) { d = await rpc('grunts.get', { id }); byId = evById(); renderAll(); }
   }
   // Text-to-speech workspace: write, tag, try as often as needed, listen and compare; only Save puts a try on the event.
@@ -497,14 +502,49 @@ export async function gruntProjectView(id) {
         slot ? h('span.gr-slot', { title: slot.text }, slot.label) : h('span.gr-num.mono', { title: outName ? 'Exported as ' + outName : '' }, p.target === 'pcht' && e.kind === 'pool' ? outName.replace('.wav', '') : String(i + 1)),
         h('span.ellipsis.grow', { title: l.path + (slot ? `\n“${slot.text}”` : '') }, slot ? h('span.dim', `“${slot.text}” `) : null, l.file, l.exists ? null : h('span.badge.b-broken', { style: { marginLeft: '6px' } }, 'missing')),
         h('span.gr-dur.faint', { title: meta }, fmtSec(l.durationSeconds)),
+        h('button.gr-rv' + (l.reverb ? '.on' : ''), {
+          title: !l.exists ? 'The file is missing' : !l.wav ? 'Reverb works on WAV files (replace this line with a WAV first)'
+            : l.reverb ? 'Reverb is on: the file itself has it (the original is kept in the project). Click to take it off.'
+            : 'Reverb for inner thoughts or narration (your Audacity preset: room 81, reverberance 23, delay 99 ms, wet -4 dB, 1 s tail). Changes the file itself; the original is kept so it can be taken off.',
+          disabled: !l.exists || !l.wav, onclick: () => reverb(e, l, !l.reverb),
+        }, h('i'), 'Reverb'),
         e.kind === 'pool' ? h('button.icon-btn', { title: 'Move up', disabled: i === 0, onclick: () => line(e, l, { to: i - 1 }) }, '↑') : null,
         e.kind === 'pool' ? h('button.icon-btn', { title: 'Move down', disabled: i === e.lines.length - 1, onclick: () => line(e, l, { to: i + 1 }) }, '↓') : null,
         h('button.icon-btn', { title: 'More: replace the file, move to another event, open its folder' , onclick: (ev) => lineMenu(ev.currentTarget, e, l) }, '⋯'),
         h('button.icon-btn', { title: 'Remove this line (the file stays on disk unless it is the project\'s own recording)', onclick: () => line(e, l, { remove: true }) }, '×')),
       name || text ? h('div.row', { style: { gap: '6px', paddingLeft: '26px' } }, name, text) : null);
   }
+  async function reverb(e, l, on, force = false) {
+    try {
+      const r = await call('grunts.reverb', { lineId: l.id, on, force });
+      if (r.changed) {
+        if (await confirmBox('Take the reverb off?', r.message, 'Put the original back', true)) return reverb(e, l, on, true);
+        return;
+      }
+      if (playing === l.id) { audio.pause(); playing = null; }
+      renderAll();
+    } catch { renderAll(); }
+  }
+  // Subtitle for any line (not only text-to-speech ones), with Whisper's suggestion from the audio.
+  async function subtitleDialog(e, l) {
+    const inp = h('input', { type: 'text', value: l.text || '', placeholder: P().target === 'spvs' ? 'What the subtitle shows' : 'The words (PCHT shows no subtitles; .fuz files get lip sync from it)', style: { width: '100%' } });
+    const note = h('span.faint', '');
+    const sug = h('button.btn.sm', { title: 'Let Whisper (the WAV to LIP Tool\'s settings) listen to the line and suggest the words' }, 'Suggest with Whisper');
+    sug.addEventListener('click', async () => {
+      sug.disabled = true; note.textContent = 'Whisper is listening…';
+      try { const r = await rpc('grunts.transcribe', { id, lineId: l.id }); if (r.text) { inp.value = r.text; inp.focus(); inp.select(); note.textContent = 'Suggested: check it before saving.'; } else note.textContent = 'Whisper heard no words.'; }
+      catch (err) { note.textContent = ''; fail(err); } finally { sug.disabled = false; }
+    });
+    inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); document.querySelector('#modal .btn.primary')?.click(); } });
+    const ok = await modal(`Subtitle · ${l.file}`, [
+      h('div.dim', `${e.category} · ${e.label}`),
+      inp, h('div.row', sug, note, h('div.spacer'), h('button.btn.sm.ghost', { title: 'Play the line', onclick: () => playLine(l) }, '▶ Play')),
+    ], [{ label: 'Cancel', value: false }, { label: 'Save', primary: true, value: true }], { help: 'grunt-events' });
+    if (ok) line(e, l, { text: inp.value.trim() });
+  }
   function lineMenu(anchor, e, l) {
     popupMenu(anchor, [
+      { label: 'Apply subtitles…', sub: l.text ? `“${l.text}”` : 'Write the subtitle, or let Whisper suggest it from the audio', onclick: () => subtitleDialog(e, l) },
       { label: 'Replace the file…', sub: 'Keep the line (its place, name and text), use another audio file', onclick: async () => { const f = await rpc('pick.file', { title: 'Replacement audio', filter: 'Audio|*.wav;*.xwm;*.fuz;*.mp3;*.ogg;*.flac;*.m4a;*.opus' }); if (f) line(e, l, { replace: f }); } },
       P().voicePackId ? { label: 'New tries with text-to-speech…', sub: 'Make takes for this line in the workspace; saving one replaces this line\'s audio', onclick: () => tts(e, l.slot || '', l) } : null,
       e.kind === 'pool' ? { label: 'Move to another event…', onclick: () => moveDialog(e, l) } : null,
@@ -553,6 +593,16 @@ export async function gruntProjectView(id) {
     ], [{ label: 'Keep them', value: false }, { label: 'Forget them', danger: true, value: true }]);
     if (v) { try { await call('grunts.event', { eventIds: d.orphans.map((o) => o.id), forget: true }); renderAll(); } catch { /* shown */ } }
   }
+
+  async function openSubtitles() {
+    try { const r = await call('grunts.subtitles', { action: 'open' }); toast(`Opened ${r.path}. Save it and come back here: the changes are read in.`); } catch { /* shown */ }
+  }
+  // Coming back from the editor: read the subtitles .toml if it was saved.
+  async function syncSubtitles() {
+    if (!document.body.contains(view)) { window.removeEventListener('focus', syncSubtitles); return; }
+    try { const r = await call('grunts.subtitles', { action: 'sync' }, { quiet: true }); if (r.changed) { toast(`${r.changed} subtitle(s) read from the .toml.`); renderAll(); } } catch { /* ignore */ }
+  }
+  window.addEventListener('focus', syncSubtitles);
 
   // ---------------------------------------------------------------- import
   async function importPack() {
@@ -770,10 +820,10 @@ export async function gruntProjectView(id) {
     renderStatus();
   }
 
-  document.addEventListener('job-done', async (e) => {
-    if (!document.body.contains(view)) return;
+  document.addEventListener('job-done', async function onDone(e) {
+    if (!document.body.contains(view)) { document.removeEventListener('job-done', onDone); audio.pause(); return; }
     const r = e.detail || {};
-    if (r.kind !== 'checking-and-exporting-packs' || r.id !== id) return;
+    if (r.kind !== 'grunts-export' || r.id !== id) return;
     try { d = await rpc('grunts.get', { id }); byId = evById(); } catch { /* keep */ }
     renderAll();
     if (r.ok) showReport(r.report);

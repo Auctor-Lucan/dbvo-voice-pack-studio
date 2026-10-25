@@ -5,7 +5,7 @@ import { rpc, h, clear, toast, fail, modal } from './lib.js';
 const fmt = (s) => (Math.max(0, s) || 0).toFixed(2) + ' s';
 
 /** Opens the recorder for one line. Resolves to the updated line (or null when nothing was kept). */
-export async function recordTake({ patchId, line, onSaved, kind = 'patch' }) {
+export async function recordTake({ patchId, line, onSaved, kind = 'patch', subtitles = false }) {
   const lineId = line.lineId || line.id;
   const target = await rpc(kind + '.recordTarget', { id: patchId, lineId }).catch(() => ({ ready: false, why: '' }));
   let stream = null, rec = null, chunks = [], blob = null, url = null, startT = 0, raf = 0, timer = 0, saved = null;
@@ -24,6 +24,30 @@ export async function recordTake({ patchId, line, onSaved, kind = 'patch' }) {
   const keepBtn = h('button.btn', { disabled: true, title: kind === 'grunts' ? 'Keep your own voice as a new line' : 'Keep your own voice as a new take (a .lip is made from the line)' }, 'Keep my recording');
   const convBtn = h('button.btn.primary', { disabled: true, title: target.ready ? `Convert the recording into ${target.voiceName} with the Voice Changer (ElevenLabs speech-to-speech), then keep it as a new take. Billed by audio length.` : target.why || 'The Voice Changer is not set up.' },
     `Convert to ${target.voiceName || 'the voice pack voice'} and keep`);
+  // Subtitle (Player Grunts): typed, or suggested by Whisper from the recording (once after each take while the field is
+  // still empty, or on request).
+  const subIn = subtitles ? h('input', { type: 'text', value: line.subtitle || '', placeholder: 'Subtitle (optional): what the line says', style: { width: '100%' } }) : null;
+  const subNote = h('span.faint', '');
+  const subBtn = subtitles ? h('button.btn.sm', { disabled: true, title: 'Let Whisper listen to the recording (Start to End) and suggest the words' }, 'Suggest with Whisper') : null;
+  let subTouched = !!(line.subtitle);
+  if (subIn) subIn.addEventListener('input', () => { subTouched = true; });
+  async function suggest(auto) {
+    if (!blob || !subIn) return;
+    const mine = blob;
+    subBtn.disabled = true; subNote.textContent = 'Whisper is listening…';
+    try {
+      const data = await blobBase64(mine);
+      const r = await rpc(kind + '.transcribe', { id: patchId, data, ext: extOf(mine), start: +startIn.value, end: +endIn.value });
+      if (mine !== blob) return; // recorded again meanwhile
+      if (!r.text) { subNote.textContent = 'Whisper heard no words.'; return; }
+      if (auto && subTouched) { subNote.textContent = `Whisper heard: “${r.text}”`; return; }
+      subIn.value = r.text; subNote.textContent = 'Suggested by Whisper: check it.';
+    } catch (e) { subNote.textContent = auto ? 'No suggestion (Whisper isn\'t set up in the WAV to LIP Tool?)' : ''; if (!auto) fail(e); }
+    finally { subBtn.disabled = !blob; }
+  }
+  if (subBtn) subBtn.onclick = () => suggest(false);
+  const blobBase64 = (b) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(b); });
+  const extOf = (b) => ((b.type || '').includes('ogg') ? '.ogg' : '.webm');
   const actions = h('div.row', { style: { flexWrap: 'wrap' } }, keepBtn, convBtn, h('div.spacer'), h('button.btn.ghost', { title: 'Throw this recording away', onclick: () => discard() }, 'Discard'));
 
   const syncLbl = () => {
@@ -47,6 +71,7 @@ export async function recordTake({ patchId, line, onSaved, kind = 'patch' }) {
   function discard() {
     blob = null; if (url) URL.revokeObjectURL(url); url = null;
     trim.classList.add('hidden'); keepBtn.disabled = true; convBtn.disabled = true;
+    if (subBtn) subBtn.disabled = true;
     clock.textContent = '0.00 s';
     status.textContent = 'Recording discarded. Press Record to try again.';
   }
@@ -100,6 +125,7 @@ export async function recordTake({ patchId, line, onSaved, kind = 'patch' }) {
       keepBtn.disabled = false; convBtn.disabled = !target.ready;
       status.textContent = 'Listen, trim the start and end if needed, then keep it.';
       audio.src = url; audio.play().catch(() => {});
+      if (subBtn) { subBtn.disabled = false; suggest(true); }
     };
     rec.start(200);
     startT = performance.now();
@@ -125,9 +151,9 @@ export async function recordTake({ patchId, line, onSaved, kind = 'patch' }) {
     keepBtn.disabled = convBtn.disabled = recBtn.disabled = true;
     status.textContent = convert ? `Converting to ${target.voiceName}${kind === 'grunts' ? '' : ' and making the .lip'}…` : kind === 'grunts' ? 'Saving…' : 'Saving and making the .lip…';
     try {
-      const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
-      const ext = (blob.type || '').includes('ogg') ? '.ogg' : '.webm';
-      const r = await rpc(kind + '.record', { id: patchId, lineId, data, ext, start: +startIn.value, end: +endIn.value, convert });
+      const data = await blobBase64(blob);
+      const ext = extOf(blob);
+      const r = await rpc(kind + '.record', { id: patchId, lineId, data, ext, start: +startIn.value, end: +endIn.value, convert, subtitle: subIn ? subIn.value.trim() : '' });
       saved = r.line;
       if (onSaved) onSaved(r.line, r.takeId);
       toast(convert ? 'Converted and kept as a new take.' : kind === 'grunts' ? 'Recording added.' : 'Recording kept as a new take.');
@@ -143,10 +169,13 @@ export async function recordTake({ patchId, line, onSaved, kind = 'patch' }) {
   convBtn.onclick = () => keep(true);
 
   await modal('Record this line', [
+    line.heading ? h('div.field-label', { style: { margin: 0 } }, line.heading) : null,
     h('div.box.rec-line', line.spoken || line.finalLine || line.text),
+    line.hint ? h('div.faint', line.hint) : null,
     h('div.row', recBtn, meter, clock),
     status, trim,
     target.ready ? h('div.faint', `Voice Changer: ${target.voiceName}. Your delivery and timing are kept; only the voice changes.`) : h('div.faint', target.why),
+    subIn ? h('div.col', h('div.field-label', 'Subtitle'), subIn, h('div.row', subBtn, subNote)) : null,
     actions,
   ], [{ label: 'Close', value: null }], { help: 'recording-a-take' });
   // closed: release the microphone

@@ -261,6 +261,15 @@ public sealed partial class Backend
                     var (applied, markers, unmatched) = new Phase1Service(_lib, Runtime()).ImportFixPlugin(mod, pl, S(p, "path"));
                     return new { mod = ModDto(LoadMod(mod.Id)), applied, markers, unmatched };
                 });
+            case "mod.dismissNotice":
+                return await Locked(() =>
+                {
+                    var mod = LoadMod(S(p, "id"));
+                    var pl = mod.Plugins.First(x => x.FileName == S(p, "plugin"));
+                    pl.Notices.Remove(S(p, "text"));
+                    _lib.Save(mod);
+                    return ModDto(mod);
+                });
             case "mod.removeFix":
                 return await Locked(() =>
                 {

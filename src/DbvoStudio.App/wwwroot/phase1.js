@@ -567,7 +567,15 @@ export async function modView(id) {
         h('div.spacer'),
         h('button.btn.sm', { title: 'Upload the master files this plugin needs so its lines can be read', onclick: uploadMasters }, 'Upload masters…')));
     }
-    for (const n of plugin.notices) banners.append(h('div.banner.bad', h('span', n), h('div.spacer'), h('button.btn.sm', { title: 'Add the .strings files of a localized plugin', onclick: uploadStrings }, 'Add strings files…')));
+    for (const n of plugin.notices) {
+      // Information (texts re-read from the game's own strings) is not a missing-strings problem: shown in blue, dismissable.
+      if (/game's own wording/.test(n)) {
+        banners.append(h('div.banner.info', h('span', n, ' Lines you had edited are under ', h('b', 'Changed in mod'), '.'), h('div.spacer'),
+          h('button.btn.sm', { title: 'Hide this message', onclick: async () => { await rpc('mod.dismissNotice', { id, plugin: plugin.fileName, text: n }); reload(); } }, 'Dismiss')));
+        continue;
+      }
+      banners.append(h('div.banner.bad', h('span', n), h('div.spacer'), h('button.btn.sm', { title: 'Add the .strings files of a localized plugin', onclick: uploadStrings }, 'Add strings files…')));
+    }
     if (mod.uploadedMasters.length) {
       banners.append(h('div.banner.info', h('span', `Uploaded masters kept in this mod: ${mod.uploadedMasters.join(', ')}`), h('div.spacer'),
         h('button.btn.sm', { title: 'Delete the master plugins you added for reading this mod (your own copies elsewhere are untouched)', onclick: async () => { if (await confirmBox('Delete uploaded masters?', 'They are only needed for reading the plugin. You can upload them again for the next update.', 'Delete', true)) { await rpc('mod.deleteMasters', { id }); reload(); } } }, 'Delete to save space')));

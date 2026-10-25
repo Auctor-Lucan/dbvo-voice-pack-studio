@@ -39,7 +39,7 @@ public sealed record AudioInfo(double Seconds, int SampleRate, int Channels, str
 
 /// <summary>
 /// Player Grunts Tool: assigning audio to events, checking a project, and exporting PCHT / MPCHT / SPVS voice packs.
-/// Source files are never changed: imported audio is referenced where it is, exports are built in a temporary folder next
+/// Source files are never changed (except by the reverb toggle, which keeps the original): imported audio is referenced where it is, exports are built in a temporary folder next
 /// to the output and only moved into place once everything was written and checked.
 /// </summary>
 public static partial class GruntService
@@ -65,6 +65,8 @@ public static partial class GruntService
     /// <summary>Length, rate and channels of any audio ffmpeg can read (.fuz is unpacked first).</summary>
     public static async Task<AudioInfo?> ProbeAsync(ExternalTools tools, string path, CancellationToken ct = default)
     {
+        // A WAV's header has it all; ffmpeg (a process per file) only for the rest.
+        if (path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) && ProbeWavHeader(path) is { } wi) return wi;
         string input = path;
         string? tmp = null;
         try
@@ -660,9 +662,11 @@ public static partial class GruntService
         var result = new ExportResult();
         var cache = Path.Combine(projectFolder, "cache", "export");
         Directory.CreateDirectory(cache);
-        var converted = new Dictionary<string, string>(); // line+format → cached file
         try
         {
+            // Convert first (several files at a time), then write the plan in order.
+            var converted = await ConvertAllAsync(p, plan, projectFolder, cache, tools, progress, ct); // line+format → cached file
+            result.Converted = converted.Count;
             int done = 0, total = plan.Files.Count;
             foreach (var f in plan.Files)
             {
@@ -672,14 +676,7 @@ public static partial class GruntService
                 if (f.Bytes != null) await File.WriteAllBytesAsync(dest, f.Bytes, ct);
                 else if (f.Line != null)
                 {
-                    var key = f.Line.Id + "|" + f.Format;
-                    if (!converted.TryGetValue(key, out var made))
-                    {
-                        made = await ConvertAsync(p, f.Line, f.Format, projectFolder, cache, tools, ct);
-                        converted[key] = made;
-                        result.Converted++;
-                    }
-                    File.Copy(made, dest, true);
+                    File.Copy(converted[f.Line.Id + "|" + f.Format], dest, true);
                 }
                 result.Written++;
                 progress?.Report((++done, total, Path.GetFileName(f.Rel)));

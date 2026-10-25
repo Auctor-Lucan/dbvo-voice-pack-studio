@@ -120,6 +120,7 @@ a:hover { text-decoration: underline; }
 .menu button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 7px 10px; border-radius: 5px; cursor: pointer; }
 .menu button:hover { background: var(--accent-strong); color: var(--on-accent); }
 .menu .menu-sub { color: var(--faint); font-size: 11.5px; }
+.menu .menu-list { margin: 2px 0 0; padding-left: 16px; }
 .menu button:hover .menu-sub { color: #dbe9ff; }
 .menu-check { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 5px; cursor: pointer; }
 .menu-check:hover { background: var(--raised); }
@@ -864,3 +865,12 @@ mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: in
 .gr-try.sel { border-color: var(--accent); background: var(--accent-soft); }
 .gr-try input[type=radio] { margin: 0; }
 .gr-draft { align-self: flex-start; color: var(--warn); }
+
+/* Player Grunts: the per-line reverb toggle (a small switch with its label) */
+.gr-rv { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 22px; padding: 0 7px 0 4px; border-radius: 11px; border: 1px solid var(--line); background: transparent; color: var(--faint); font-size: 11px; cursor: pointer; }
+.gr-rv i { width: 20px; height: 12px; border-radius: 6px; background: var(--line); position: relative; transition: background .15s; }
+.gr-rv i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); transition: left .15s, background .15s; }
+.gr-rv.on { color: var(--text); border-color: var(--accent); }
+.gr-rv.on i { background: var(--accent); }
+.gr-rv.on i::after { left: 10px; background: var(--on-accent); }
+.gr-rv:disabled { opacity: .4; cursor: default; }

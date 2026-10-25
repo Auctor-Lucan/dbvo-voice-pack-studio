@@ -118,6 +118,10 @@ public sealed class GruntProject
     public string LastReport { get; set; } = "";
     /// <summary>Text-to-speech work in progress, by event|slot|line: the texts and every try until one is saved to the event.</summary>
     public Dictionary<string, GruntDraft> Drafts { get; set; } = new();
+    /// <summary>Reverb settings for the line toggle (Audacity's Reverb; the default is the inner-thoughts preset).</summary>
+    public Audio.ReverbSettings Reverb { get; set; } = new();
+    /// <summary>Write time of the subtitles .toml when it was last written or read (a newer file is read back in).</summary>
+    public long SubtitlesTomlTicks { get; set; }
 }
 
 /// <summary>The text-to-speech workspace of one event (or shout part, or line being redone): kept until saved or discarded.</summary>
@@ -179,6 +183,10 @@ public sealed class GruntLine
     public double? Lufs { get; set; }
     public double? PeakDb { get; set; }
     public DateTime AddedUtc { get; set; } = DateTime.UtcNow;
+    /// <summary>Reverb is applied to the file itself (inner thoughts, narration); the original is kept in the project to take it off.</summary>
+    public bool Reverb { get; set; }
+    /// <summary>Length and write time of the file the reverb wrote: a file changed since then isn't replaced by the original unasked.</summary>
+    public string ReverbStamp { get; set; } = "";
 }
 
 public sealed class PchtExportSettings

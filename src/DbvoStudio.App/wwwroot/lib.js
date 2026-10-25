@@ -541,6 +541,8 @@ export async function askFixOverwrite(paths) {
 
 /** Small pop-up menu under an anchor: items [{label, sub, onclick}]. */
 export function popupMenu(anchor, items) {
+  // A click on the button whose menu is open closes it (the mousedown already closed it; don't reopen on the click).
+  if (anchor && anchor.__menuClosed && Date.now() - anchor.__menuClosed < 600) { anchor.__menuClosed = 0; return null; }
   document.querySelectorAll('.menu').forEach((m) => m.remove());
   const r = anchor.getBoundingClientRect();
   const m = h('div.menu', items.map((it) => h('button', { title: it.title || it.sub || '', disabled: !!it.disabled, onclick: () => { m.remove(); it.onclick(); } }, h('div', it.label), it.sub ? h('div.menu-sub', it.sub) : null)));
@@ -549,7 +551,11 @@ export function popupMenu(anchor, items) {
   // keep the whole menu on screen (a button at the right edge opens it leftwards)
   m.style.left = Math.max(8, Math.min(r.left, window.innerWidth - mw - 8)) + 'px';
   m.style.top = (r.bottom + mh + 6 > window.innerHeight ? r.top - mh - 6 : r.bottom + 6) + 'px';
-  setTimeout(() => document.addEventListener('mousedown', function close(e) { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('mousedown', close); } }), 0);
+  setTimeout(() => document.addEventListener('mousedown', function close(e) {
+    if (m.contains(e.target)) return;
+    if (anchor && anchor.contains && anchor.contains(e.target)) anchor.__menuClosed = Date.now();
+    m.remove(); document.removeEventListener('mousedown', close);
+  }), 0);
   return m;
 }
 

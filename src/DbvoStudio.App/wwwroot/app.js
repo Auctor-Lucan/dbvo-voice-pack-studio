@@ -129,7 +129,8 @@ toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [
   { label: 'WAV to LIP Tool', sub: 'Whisper listens to WAV files and makes matching .lip files', onclick: () => go('wavlip') },
   { label: 'NPC Revoice Tool', sub: 'Replace NPC voice files in any mod', onclick: () => go('revoices') },
   { label: 'Voiced Books Tool', sub: 'Narrate books, letters and journals for Voiced Books of Skyrim', onclick: () => go('books') },
-  { label: 'Player Grunts Tool', sub: 'Player voice packs for PC Head Tracking (and Multi Voice Packs) and Smart Player Voice System', onclick: () => go('grunts') },
+  { label: 'Player Grunts Tool', title: 'Import, edit or create player voice packs for PC Head Tracking (and Multiple Voice Packs) and Smart Player Voice System (SPVS)',
+    sub: h('div', 'Import, edit or create voice packs for:', h('ul.menu-list', h('li', 'PC Head Tracking (and Multiple Voice Packs)'), h('li', 'Smart Player Voice System (SPVS)'))), onclick: () => go('grunts') },
 ]));
 
 // ---- background jobs (generation, .fuz, FOMOD, WAV to LIP)

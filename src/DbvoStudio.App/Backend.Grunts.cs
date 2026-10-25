@@ -220,11 +220,26 @@ public sealed partial class Backend
                 OpenPath(path);
                 return true;
             }
+            case "grunts.reverb": return await GrReverb(p);
+            case "grunts.transcribe": return await GrTranscribe(p);
+            case "grunts.subtitles": return await Locked(() => GrSubtitles(p));
             default: return await DispatchGruntDrafts(m, p);
         }
     }
 
+    private (string Sig, object Dto)? _grPathsCache;
+
+    /// <summary>The installed-mod folders and their state (cached until a folder or its plugin changes: reading the plugin is slow).</summary>
     private object GrPaths()
+    {
+        var sig = _settings.PchtFolder + "|" + _settings.SpvsFolder + "|" + FilesStamp(GrModFolder(GruntTargets.Pcht), GruntTargets.Pcht) + "|" + FilesStamp(GrModFolder(GruntTargets.Spvs), GruntTargets.Spvs);
+        if (_grPathsCache is { } c && c.Sig == sig) return c.Dto;
+        var dto = GrPathsRead();
+        _grPathsCache = (sig, dto);
+        return dto;
+    }
+
+    private object GrPathsRead()
     {
         var pcht = GrModFolder(GruntTargets.Pcht);
         var spvs = GrModFolder(GruntTargets.Spvs);
@@ -288,14 +303,31 @@ public sealed partial class Backend
             events,
             orphans,
             voices = voices.Select(v => new { v.Id, v.Name, v.Color }),
-            others = _lib.LoadGruntProjects().Where(x => x.Id != proj.Id).Select(x => new { x.Id, x.Name, x.Target, lines = x.Events.Values.Sum(s => s.Lines.Count) }),
+            others = GrOthers(proj.Id),
         };
+    }
+
+    private (DateTime At, List<(string Id, string Name, string Target, int Lines)> List)? _grOthers;
+
+    /// <summary>The other projects (for "Copy from another project"): read from disk at most every 20 seconds, the open ones from memory.</summary>
+    private object GrOthers(string id)
+    {
+        if (_grOthers is not { } c || (DateTime.UtcNow - c.At).TotalSeconds > 20)
+        {
+            c = (DateTime.UtcNow, _lib.LoadGruntProjects().Select(x => (x.Id, x.Name, x.Target, x.Events.Values.Sum(s => s.Lines.Count))).ToList());
+            _grOthers = c;
+        }
+        return c.List.Where(x => x.Id != id).Select(x =>
+        {
+            GruntProject? live; lock (_gr) _gr.TryGetValue(x.Id, out live);
+            return live != null ? new { id = live.Id, name = live.Name, target = live.Target, lines = live.Events.Values.Sum(s => s.Lines.Count) } : new { id = x.Id, name = x.Name, target = x.Target, lines = x.Lines };
+        }).ToList();
     }
 
     private static object GrLineDto(GruntLine l, string folder)
     {
         var path = GruntService.SourcePath(l, folder);
-        return new { l.Id, l.Source, path, file = Path.GetFileName(path), exists = File.Exists(path), l.Origin, l.Text, l.Spoken, l.FileName, l.Slot, l.DurationSeconds, l.SampleRate, l.Channels, l.Lufs, l.AddedUtc };
+        return new { l.Id, l.Source, path, file = Path.GetFileName(path), exists = File.Exists(path), l.Origin, l.Text, l.Spoken, l.FileName, l.Slot, l.DurationSeconds, l.SampleRate, l.Channels, l.Lufs, l.AddedUtc, l.Reverb, wav = path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) };
     }
 
     /// <summary>Reads length, rate and channels of new lines (outside the page lock; quick per file).</summary>
@@ -304,15 +336,16 @@ public sealed partial class Backend
         if (lines.Count == 0 || !File.Exists(_settings.FfmpegPath)) return;
         var tools = GrExternal();
         var folder = GrFolder(proj);
-        foreach (var l in lines)
+        // WAV headers are read directly; other formats run ffmpeg, several at a time.
+        await Parallel.ForEachAsync(lines, new ParallelOptions { MaxDegreeOfParallelism = 6 }, async (l, ct) =>
         {
             try
             {
-                var info = await GruntService.ProbeAsync(tools, GruntService.SourcePath(l, folder));
+                var info = await GruntService.ProbeAsync(tools, GruntService.SourcePath(l, folder), ct);
                 if (info != null) { l.DurationSeconds = info.Seconds; l.SampleRate = info.SampleRate; l.Channels = info.Channels; }
             }
             catch { /* shown as unknown length */ }
-        }
+        });
         await Locked(() => { _lib.Save(proj); return null; });
     }
 
@@ -356,6 +389,7 @@ public sealed partial class Backend
         var line = st.Lines.FirstOrDefault(l => l.Id == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
         if (B(p, "remove"))
         {
+            GruntService.ReleaseReverb(proj, line, GrFolder(proj));
             st.Lines.Remove(line);
             // A recording or generated take the project owns goes too; the user's own imported files are never touched.
             if (!Path.IsPathRooted(line.Source) && !proj.Events.Values.SelectMany(s => s.Lines).Any(l => l.Source == line.Source))
@@ -390,6 +424,7 @@ public sealed partial class Backend
             if (p.TryGetProperty("replace", out var rp) && rp.ValueKind == JsonValueKind.String && rp.GetString() is { Length: > 0 } path)
             {
                 if (!File.Exists(path) || !GruntService.IsAudio(path)) throw new InvalidOperationException("Pick an audio file.");
+                GruntService.ReleaseReverb(proj, line, GrFolder(proj));
                 line.Source = path; line.Origin = "import"; line.DurationSeconds = 0; line.Lufs = null;
                 _ = Task.Run(() => GrProbe(proj, new List<GruntLine> { line }));
             }
@@ -411,6 +446,7 @@ public sealed partial class Backend
             if (B(p, "clear"))
             {
                 var owned = st.Lines.Where(l => !Path.IsPathRooted(l.Source)).ToList();
+                foreach (var l in st.Lines.ToList()) GruntService.ReleaseReverb(proj, l, GrFolder(proj));
                 st.Lines.Clear();
                 foreach (var l in owned) if (!proj.Events.Values.SelectMany(s => s.Lines).Any(x => x.Source == l.Source)) try { File.Delete(GruntService.SourcePath(l, GrFolder(proj))); } catch { }
             }
@@ -605,7 +641,7 @@ public sealed partial class Backend
             var outBytes = await client.SpeechToSpeechAsync(voiceId, sts.ModelId, await File.ReadAllBytesAsync(cut), "recording.wav", vs, sts.Seed, sts.RemoveBackgroundNoise, sts.OutputFormat, CancellationToken.None);
             wav = await GrDecode(tools, work, outBytes, sts.OutputFormat);
         }
-        var line = await Locked(() => GrSaveTake(proj, ev, slot, wav, convert ? "recording (Voice Changer)" : "recording", ""));
+        var line = await Locked(() => GrSaveTake(proj, ev, slot, wav, convert ? "recording (Voice Changer)" : "recording", S(p, "subtitle").Trim()));
         return new { line, project = await Locked(() => GrDto(proj)) };
     }
 
@@ -641,6 +677,93 @@ public sealed partial class Backend
         st.Skipped = false;
         _lib.Save(proj);
         return GrLineDto(line, folder);
+    }
+
+    // ------------------------------------------------------------------ reverb, Whisper subtitles, subtitles .toml
+
+    private async Task<object?> GrReverb(JsonElement p)
+    {
+        GruntProject proj = null!; GruntLine line = null!;
+        await Locked(() =>
+        {
+            proj = LoadGr(S(p, "id"));
+            line = proj.Events.Values.SelectMany(s => s.Lines).FirstOrDefault(l => l.Id == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
+            return null;
+        });
+        var tools = File.Exists(_settings.FfmpegPath) ? GrExternal() : null;
+        await _gate.WaitAsync(); // the file and the project change together
+        try
+        {
+            try { await GruntService.SetReverbAsync(proj, line, GrFolder(proj), B(p, "on"), tools, B(p, "force")); }
+            catch (GruntService.FileChangedException ex) { return new { changed = true, message = ex.Message }; }
+            _lib.Save(proj);
+            return new { changed = false, project = GrDto(proj) };
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Whisper's transcript of a line's audio or of a recording (the WAV to LIP Tool's Whisper settings): a subtitle suggestion.</summary>
+    private async Task<object?> GrTranscribe(JsonElement p)
+    {
+        var proj = LoadGr(S(p, "id"));
+        var tools = GrExternal();
+        var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
+        Directory.CreateDirectory(workRoot);
+        using var work = new WorkFolder(workRoot);
+        string input;
+        if (S(p, "data") is { Length: > 0 } data)
+        {
+            var ext = S(p, "ext", ".webm");
+            input = work.File("in" + (ext.StartsWith('.') ? ext : "." + ext));
+            await File.WriteAllBytesAsync(input, Convert.FromBase64String(data));
+        }
+        else
+        {
+            var line = proj.Events.Values.SelectMany(s => s.Lines).FirstOrDefault(l => l.Id == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
+            input = GruntService.SourcePath(line, GrFolder(proj));
+            if (!File.Exists(input)) throw new InvalidOperationException("The audio file is missing.");
+            if (input.EndsWith(".fuz", StringComparison.OrdinalIgnoreCase)) { var x = work.File("in.xwm"); File.WriteAllBytes(x, Core.Audio.FuzFile.Split(File.ReadAllBytes(input)).Xwm); input = x; }
+        }
+        var wav = work.File("w.wav");
+        double D(string n) => p.TryGetProperty(n, out var x) && x.ValueKind == JsonValueKind.Number ? x.GetDouble() : 0;
+        var args = new List<string> { "-y", "-hide_banner", "-loglevel", "error", "-i", input };
+        double start = D("start"), end = D("end");
+        if (start > 0.001) { args.Add("-ss"); args.Add(start.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)); }
+        if (end > start + 0.05) { args.Add("-to"); args.Add(end.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)); }
+        args.AddRange(new[] { "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le", wav });
+        var r = await ExternalTools.RunAsync(tools.FfmpegPath, args);
+        if (r.ExitCode != 0 || !File.Exists(wav)) throw new ToolException("The audio couldn't be read for Whisper.");
+        var tool = new Tools.WavToLip(_settings.WavToLip, Tools(), WhisperModelsFolder(), e => { if (e.Kind == "log") App.Log("Whisper: " + e.Text); });
+        var (transcribe, engine) = await tool.CreateTranscriberAsync(CancellationToken.None);
+        string text;
+        await using (engine) text = (await transcribe(wav, CancellationToken.None)).Trim();
+        return new { text };
+    }
+
+    /// <summary>open: writes the project's subtitles .toml and opens it in the default editor. sync: reads it back if it was saved since.</summary>
+    private object GrSubtitles(JsonElement p)
+    {
+        var proj = LoadGr(S(p, "id"));
+        var folder = GrFolder(proj);
+        var path = GruntService.SubtitlesTomlPath(folder);
+        if (S(p, "action") == "open")
+        {
+            // A newer file (edited, not read yet) is read first so nothing typed is lost.
+            if (File.Exists(path) && File.GetLastWriteTimeUtc(path).Ticks > proj.SubtitlesTomlTicks && proj.SubtitlesTomlTicks > 0)
+                GruntService.ReadSubtitlesToml(proj, File.ReadAllText(path));
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(path, GruntService.BuildSubtitlesToml(proj, GrCatalog(proj.Target).Cat, folder), new System.Text.UTF8Encoding(false));
+            proj.SubtitlesTomlTicks = File.GetLastWriteTimeUtc(path).Ticks;
+            _lib.Save(proj);
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true }); }
+            catch { try { System.Diagnostics.Process.Start("notepad.exe", $"\"{path}\""); } catch { /* the path is shown */ } } // no program set for .toml
+            return new { path, changed = 0 };
+        }
+        if (!File.Exists(path) || proj.SubtitlesTomlTicks == 0 || File.GetLastWriteTimeUtc(path).Ticks <= proj.SubtitlesTomlTicks) return new { changed = 0 };
+        var (changed, unknown) = GruntService.ReadSubtitlesToml(proj, File.ReadAllText(path));
+        proj.SubtitlesTomlTicks = File.GetLastWriteTimeUtc(path).Ticks;
+        _lib.Save(proj);
+        return new { changed, unknown = unknown.Count, project = GrDto(proj) };
     }
 
     // ------------------------------------------------------------------ text-to-speech workspace
@@ -780,6 +903,7 @@ public sealed partial class Backend
                     if (line != null)
                     {
                         // Redoing a line: same place, name and slot; the project's own old audio goes.
+                        GruntService.ReleaseReverb(proj, line, folder);
                         if (!Path.IsPathRooted(line.Source) && !proj.Events.Values.SelectMany(s => s.Lines).Any(l => l != line && l.Source == line.Source))
                             try { File.Delete(GruntService.SourcePath(line, folder)); } catch { }
                         line.Source = rel; line.Origin = "generated";
