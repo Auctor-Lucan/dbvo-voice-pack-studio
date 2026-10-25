@@ -136,7 +136,8 @@ export async function gruntProjectView(id) {
     setSaving(true);
     try {
       const r = await rpc(method, { id, ...params });
-      const proj = r && r.events ? r : r && r.project && r.project.events ? r.project : null;
+      // A full project has an events list; some replies carry it as .project (and use .events for a count).
+      const proj = r && Array.isArray(r.events) ? r : r && r.project && Array.isArray(r.project.events) ? r.project : null;
       if (proj) { d = proj; byId = evById(); }
       return r;
     } catch (e) { if (!quiet) fail(e); throw e; } finally { setSaving(false); }
