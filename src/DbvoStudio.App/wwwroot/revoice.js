@@ -5,6 +5,7 @@ import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
+import { effectRow } from './fx.js';
 import { qaDialog } from './qa.js';
 
 const CERT = { Exact: 'Speaker known', Probable: 'Probable speakers', Unknown: 'Speaker unknown' };
@@ -93,7 +94,7 @@ export async function revoiceView(id) {
     // Credits show on every tab, filled once (the button keeps itself up to date).
     const needs = () => proj.lines.filter((l) => !l.excl && !l.gone && isMissing(l)).reduce((a, l) => a + l.spoken.length, 0);
     clear(creditsSlot).append(creditsEl || (creditsEl = creditsButton(needs, 'This project')));
-    const exp = h('button.btn.accent.export-btn', { title: 'Write the chosen takes as .fuz files at the game\'s paths. "new" counts takes that are not in the output folder yet.', disabled: !!app.job }, icon('export', { size: 15 }), 'Export .fuz', expNew, ' ▾');
+    const exp = h('button.btn.accent.export-btn', { title: 'Write the chosen takes as .fuz files at the game\'s paths. "new" counts takes that are not in the output folder yet.', }, icon('export', { size: 15 }), 'Export .fuz', expNew, ' ▾');
     exp.addEventListener('click', () => popupMenu(exp, [
       { label: 'Export .fuz files to the output folder', sub: `${proj.outputFolder || '(set the output folder in Setup first)'}\\Sound\\Voice\\<plugin>\\<voice type>\\<file>.fuz, the game's own paths (replaces files already there)` + (proj.plans.length ? '. Also the new voice type plugin, SkyPatcher and FLM files.' : ''), onclick: () => doExport(true) },
       { label: 'Export, but keep files already there', sub: 'The same, but .fuz files that exist in the output folder are left as they are', onclick: () => doExport(false) },
@@ -109,7 +110,7 @@ export async function revoiceView(id) {
       h('div.spacer'),
       creditsSlot,
       switchEl(proj.voiceChanger, toggleVc, 'Voice Changer', { title: 'Convert the game\'s current recordings into the new voice instead of text-to-speech' }),
-      h('button.btn', { title: 'Read the plugins and voice sources again and rebuild the line list (keeps your takes and edits)', disabled: !!app.job, onclick: scan }, proj.lastScan ? '⟳ Rescan' : 'Scan'),
+      h('button.btn', { title: 'Read the plugins and voice sources again and rebuild the line list (keeps your takes and edits)', onclick: scan }, proj.lastScan ? '⟳ Rescan' : 'Scan'),
       exp,
       h('span', { style: { width: '18px' } }),
       h('button.btn.ghost.danger.sm', { title: 'Delete this project and its takes (exported files stay)', onclick: async () => { if (await confirmBox('Delete revoice project?', 'Deletes its takes too. Exported files stay where they are.', 'Delete', true)) { try { await rpc('revoice.delete', { id }); go('revoices'); } catch (e) { fail(e); } } } }, 'Delete'));
@@ -180,7 +181,7 @@ export async function revoiceView(id) {
       : h('div.dim', 'Not scanned yet. Add the plugins and voice sources, then Scan.');
 
     wrap.append(
-      sec('Scan', h('button.btn.primary.sm', { title: 'Read everything and build the line list', disabled: !!app.job, onclick: scan }, proj.lastScan ? '⟳ Rescan' : 'Scan'), h('div', { style: { padding: '10px 0' } }, scanBox)),
+      sec('Scan', h('button.btn.primary.sm', { title: 'Read everything and build the line list', onclick: scan }, proj.lastScan ? '⟳ Rescan' : 'Scan'), h('div', { style: { padding: '10px 0' } }, scanBox)),
       sec('Plugins', null,
         h('div', { style: { padding: '10px 0' } }, drop),
         h('table.tbl', h('thead', h('tr', h('th', 'Plugin'), h('th', { title: 'Lines from this plugin are revoiced. Others are only read (masters, NPCs, conditions).' }, 'Revoice its lines'), h('th', ''))),
@@ -260,7 +261,7 @@ export async function revoiceView(id) {
     });
     const ok = await modal(`Orphaned voice files (${data.proposals.length})`, [
       h('div.faint', 'Files are first matched by the quest and topic part of their name. For the rest, Whisper (the WAV to LIP settings) listens to each file and the transcript is matched to the subtitles of silent lines. Check the matches, then Link.'),
-      h('div.row', h('button.btn.sm', { title: 'Transcribe the files that have no match yet and match them by text', disabled: !!app.job, onclick: async () => { try { await rpc('revoice.orphansWhisper', { id }); document.getElementById('modal').classList.add('hidden'); toast('Transcribing… the list opens again when it is done.'); } catch (e) { fail(e); } } }, '🎙 Match the rest with Whisper'),
+      h('div.row', h('button.btn.sm', { title: 'Transcribe the files that have no match yet and match them by text', onclick: async () => { try { await rpc('revoice.orphansWhisper', { id }); document.getElementById('modal').classList.add('hidden'); toast('Transcribing… the list opens again when it is done.'); } catch (e) { fail(e); } } }, '🎙 Match the rest with Whisper'),
         h('span.faint', `${data.proposals.filter((m) => m.lineId).length} matched`)),
       h('div.box', { style: { maxHeight: '420px', overflow: 'auto' } }, h('table.tbl', h('tbody', rows))),
     ], [{ label: 'Cancel', value: false }, { label: 'Link the matched files', primary: true, value: true }], { wide: true, help: 'setup' });
@@ -495,7 +496,7 @@ export async function revoiceView(id) {
       { id: 'take', title: 'Take', width: 64, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s). Click to play, switch or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } }, l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—')) },
       { id: 'act', title: '', width: 146, resizable: false, render: (l) => h('span.row.icon-bar', { style: { gap: '2px' } },
-        h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: inFlight.has(l.id) ? 'Making a new take…' : genBlock(l) || 'Regenerate (a new take; older takes stay)', disabled: !!genBlock(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.id], { autoplay: true }); } }, icon('regen')),
+        h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: inFlight.has(l.id) ? 'Making a new take…' : genBlock(l) || 'Regenerate (a new take; older takes stay)', disabled: !!genBlock(l), onmousedown: keepEditing, onclick: (e) => { e.stopPropagation(); regen(l); } }, icon('regen')),
         h('button.act-btn', { title: l.takes.length ? 'Open this line\'s takes folder' : 'No takes yet', disabled: !l.takes.length, onclick: (e) => { e.stopPropagation(); rpc('revoice.openTakeFolder', { id, lineId: l.id }).catch(fail); } }, icon('folder')),
         h('button.act-btn.flag-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit', onclick: (e) => { e.stopPropagation(); upd(l, 'mark'); } }, icon('flag')),
         h('button.act-btn', { title: l.sel ? 'Play the new take (or double-click the row)' : 'No take yet: generate the line first', disabled: !l.sel, onclick: (e) => { e.stopPropagation(); play(l); } }, icon('play'))) },
@@ -504,7 +505,6 @@ export async function revoiceView(id) {
   grid.el.addEventListener('selection', () => renderActions());
 
   function genBlock(l) {
-    if (app.job) return 'A job is running (see the top bar)';
     if (l.excl) return 'Excluded';
     if (l.gone) return 'No longer in the plugins';
     const sp = proj.speakers.find((x) => x.key === l.speaker);
@@ -633,13 +633,24 @@ export async function revoiceView(id) {
         l.original ? h('button.btn.sm', { title: 'Play the file the game uses now: ' + l.original, onclick: () => playOriginal(l) }, '▶ Now') : h('span.faint', { title: 'No voice file for this line yet: subtitles only in game' }, 'Silent in game now'),
         h('div.spacer')),
       h('div', h('div.field-label', 'Subtitle (in game)'), h('div.box.ellipsis', { title: l.text }, l.text)),
+      (() => {
+        const ids = grid.selected.has(l.id) && grid.selected.size > 1 ? [...grid.selected] : [l.id];
+        return effectRow(l.effect || '', ids.length, async (fx) => {
+          try {
+            const r = await withBusy(rpc('takes.effect', { kind: 'revoice', id, lineIds: ids, effect: fx }), fx ? 'Adding the effect' : 'Taking the effect off', `${ids.length} line(s)…`);
+            for (const nl of r.lines) replaceLine(nl, false);
+            grid.setRows(visible()); renderInspector();
+            toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
+          } catch (e) { fail(e); renderInspector(); }
+        });
+      })(),
       h('div', h('div.field-label', 'Spoken text (tags allowed)'), spoken,
         h('div.row', { style: { marginTop: '6px', gap: '6px' } },
           vcOn || !eleven ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.excl, onclick: () => autotag([l.id]) }, 'AI tag'),
           l.spokenEdited ? h('button.btn.sm.ghost', { title: 'Use the subtitle as the spoken text again', onclick: () => upd(l, 'resetSpoken') }, '↺ Restore') : null,
           h('div.spacer'),
           h('button.btn.sm', { title: app.job ? 'A job is running' : l.excl ? 'Excluded' : 'Record this line with your microphone, then keep it as it is or convert it into the speaker\'s voice', disabled: l.excl || l.gone || !!app.job, onclick: () => record(l) }, '🎙 Record'),
-          h('button.btn.sm.primary', { title: genBlock(l) || 'Make a new take of this line', disabled: !!genBlock(l), onclick: () => generate('selected', [l.id], { autoplay: true }) }, l.takes.length ? 'New take' : 'Generate'))),
+          h('button.btn.sm.primary', { title: genBlock(l) || 'Make a new take of this line', disabled: !!genBlock(l), onmousedown: keepEditing, onclick: () => regen(l) }, l.takes.length ? 'New take' : 'Generate'))),
       l.takes.length ? h('div', h('div.field-label', `Takes (${l.takes.length})`), h('div.col', { style: { gap: '4px' } }, l.takes.slice().reverse().map((t) => h('div.take.compact' + (t.id === l.sel ? '.sel' : ''),
         h('button.icon-btn', { title: 'Play this take', onclick: () => play(l, t) }, '▶'),
         h('div.grow', { style: { minWidth: 0 } },
@@ -699,7 +710,7 @@ export async function revoiceView(id) {
       h('div.spacer'),
       sel.length ? bulkBtn : null,
       h('button.btn' + (review ? '.review-on' : ''), { title: review ? 'End Review (Esc)' : 'Listen through the lines with the keyboard: Space plays, A approves and moves on, R makes a new take, F flags', onclick: () => setReview(!review) }, review ? '■ End review' : '▶ Review'),
-      h('button.btn', { disabled: !!app.job, title: `Check takes${sel.length ? ` of the ${sel.length} ticked line(s)` : ' of every line shown'}: Whisper compares what is said with the line, plus loudness and clipping. Flags only, deletes nothing.`, onclick: () => qaRun(sel.length ? sel : grid.rows.filter((l) => l.takes.length && !l.excl).map((l) => l.id)) }, 'Check takes'),
+      h('button.btn', { title: `Check takes${sel.length ? ` of the ${sel.length} ticked line(s)` : ' of every line shown'}: Whisper compares what is said with the line, plus loudness and clipping. Flags only, deletes nothing.`, onclick: () => qaRun(sel.length ? sel : grid.rows.filter((l) => l.takes.length && !l.excl).map((l) => l.id)) }, 'Check takes'),
       genBtn);
   }
 
@@ -769,7 +780,7 @@ export async function revoiceView(id) {
     if (key === ' ') { eat(); if (l) { if (!audio.paused) audio.pause(); else play(l); } }
     else if (key === 'ArrowDown' || key === 'ArrowUp') { eat(); moveFocus(key === 'ArrowDown' ? 1 : -1); }
     else if (key === 'a') { eat(); if (l && l.takes.length) { upd(l, 'approve', true).then(() => { renderReviewBar(); moveFocus(1); }); } else toast('This line has no take to approve.', true); }
-    else if (key === 'r') { eat(); if (l && !genBlock(l)) generate('selected', [l.id], { autoplay: true }); }
+    else if (key === 'r') { eat(); if (l && !genBlock(l)) regen(l); }
     else if (key === 'f') { eat(); if (l) upd(l, 'mark'); }
     else if (key === 'Escape') { eat(); setReview(false); }
   };
@@ -940,6 +951,16 @@ export async function revoiceView(id) {
     return btn;
   }
 
+  // Generate while the spoken text is being edited: save what was typed first, in the same click.
+  const keepEditing = (e) => { if (lastEdit && document.activeElement === lastEdit.el) e.preventDefault(); };
+  async function regen(l) {
+    const ed = lastEdit && lastEdit.line.id === l.id && document.activeElement === lastEdit.el ? lastEdit.el : null;
+    if (ed) {
+      if (ed.value !== l.spoken) await upd(l, 'spoken', ed.value);
+      if (document.activeElement === ed) ed.blur();
+    }
+    generate('selected', [l.id], { autoplay: true });
+  }
   async function upd(l, action, value) {
     try {
       const nl = await rpc('revoice.line', { id, lineId: l.id, action, value });

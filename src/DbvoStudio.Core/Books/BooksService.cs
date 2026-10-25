@@ -293,6 +293,9 @@ public sealed class BooksService
     public static List<string> VoicesFor(BooksProject p, Book b)
     {
         if (b.Excluded || b.Gone) return new();
+        // A voice picked for this book only: one of the narrators, or any NPC voice type set up in the Voices tab.
+        if (b.VoiceOverride.StartsWith("n:") && p.Narrators.Any(n => BooksProject.NarratorKey(n.Id) == b.VoiceOverride)) return new() { b.VoiceOverride };
+        if (b.VoiceOverride.StartsWith("vt:") && p.VoiceTypes.ContainsKey(b.VoiceOverride[3..])) return new() { b.VoiceOverride };
         if (b.Reader == "npc" && b.VoiceType.Length > 0)
         {
             if (!p.NpcVoices) return new();
@@ -404,7 +407,7 @@ public sealed class BooksService
     }
 
     /// <summary>The loudness level and gender of a voice (for the audio chain preset).</summary>
-    public static BookAudioSettings AudioFor(BooksProject p, string voice)
+    public static BookAudioSettings AudioFor(BooksProject p, string voice, Book? book = null)
     {
         string level = "loud"; bool female = false;
         if (voice.StartsWith("n:") && p.Narrators.FirstOrDefault(x => "n:" + x.Id == voice) is { } n) { level = n.Level; female = n.Female; }
@@ -415,6 +418,7 @@ public sealed class BooksService
             var preset = BookAudioSettings.Preset("normal", female);
             s.LoudnessLufs = preset.LoudnessLufs; s.LimiterThresholdDb = preset.LimiterThresholdDb; s.LimiterOutputDb = preset.LimiterOutputDb; s.ExtraGainDb = preset.ExtraGainDb;
         }
+        if (book?.ParagraphPauseMs is { } pp) s.ParagraphPauseMs = Math.Clamp(pp, 0, 5000);
         return s;
     }
 

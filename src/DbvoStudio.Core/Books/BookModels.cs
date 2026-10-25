@@ -92,6 +92,12 @@ public sealed class Book
     public bool ManualBreaks { get; set; }
 
     public List<BookVariant> Variants { get; set; } = new();
+    /// <summary>Read by this voice only (a narrator "n:id" or an NPC voice type "vt:Type"); empty = the usual readers.</summary>
+    public string VoiceOverride { get; set; } = "";
+    /// <summary>Speaking speed for this book (ElevenLabs 0.7–1.2, OmniVoice 0.5–2); null = the voice's own.</summary>
+    public double? Speed { get; set; }
+    /// <summary>Pause at paragraph joins for this book (ms); null = the project's Audio setting.</summary>
+    public int? ParagraphPauseMs { get; set; }
 
     /// <summary>Built-in set: the text version this book came with, and a newer one if the set was updated since.</summary>
     public int SetVersion { get; set; }

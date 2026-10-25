@@ -99,17 +99,19 @@ public static partial class GruntService
     {
         var src = SourcePath(line, projectFolder);
         if (!File.Exists(src)) throw new FileNotFoundException($"The audio file is missing: {src}");
-        if (src.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) && IsPlainWav(src)) return src;
+        bool trim = HasTrim(line);
+        if (!trim && src.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) && IsPlainWav(src)) return src;
         var cache = Path.Combine(projectFolder, "cache", "preview");
         Directory.CreateDirectory(cache);
-        var key = Hash($"{src}|{File.GetLastWriteTimeUtc(src).Ticks}|{new FileInfo(src).Length}");
+        var key = Hash($"{src}|{File.GetLastWriteTimeUtc(src).Ticks}|{new FileInfo(src).Length}|{TrimKey(line)}");
         var outPath = Path.Combine(cache, key + ".wav");
         if (File.Exists(outPath)) return outPath;
         string input = src; string? tmp = null;
         try
         {
             if (src.EndsWith(".fuz", StringComparison.OrdinalIgnoreCase)) { tmp = UnpackFuz(src); input = tmp; }
-            await tools.ToWavAsync(input, outPath + ".tmp.wav", 44100, false, 0, ct);
+            if (trim) await TrimmedAsync(tools, input, line, outPath + ".tmp.wav", 44100, ct);
+            else await tools.ToWavAsync(input, outPath + ".tmp.wav", 44100, false, 0, ct);
             File.Move(outPath + ".tmp.wav", outPath, true);
         }
         finally { if (tmp != null) try { File.Delete(tmp); } catch { } }
@@ -729,7 +731,7 @@ public static partial class GruntService
     {
         var src = SourcePath(l, projectFolder);
         var a = p.Audio;
-        var key = Hash(string.Join("|", src, File.GetLastWriteTimeUtc(src).Ticks, new FileInfo(src).Length, format, a.Normalize, a.TargetLufs, a.PeakDb, a.GainDb, a.SampleRate, format == "fuz" ? l.Text : "", "v1"));
+        var key = Hash(string.Join("|", src, File.GetLastWriteTimeUtc(src).Ticks, new FileInfo(src).Length, format, a.Normalize, a.TargetLufs, a.PeakDb, a.GainDb, a.SampleRate, format == "fuz" ? l.Text : "", TrimKey(l), "v1"));
         var outPath = Path.Combine(cache, key + "." + format);
         if (File.Exists(outPath)) return outPath;
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
@@ -738,7 +740,8 @@ public static partial class GruntService
         string input = src;
         if (src.EndsWith(".fuz", StringComparison.OrdinalIgnoreCase)) { input = work.File("in.xwm"); File.WriteAllBytes(input, FuzFile.Split(File.ReadAllBytes(src)).Xwm); }
         var plain = work.File("a.wav");
-        await tools.ToWavAsync(input, plain, a.SampleRate, false, 0, ct);
+        if (HasTrim(l)) await TrimmedAsync(tools, input, l, plain, a.SampleRate, ct);
+        else await tools.ToWavAsync(input, plain, a.SampleRate, false, 0, ct);
         double gain = a.GainDb;
         if (a.Normalize)
         {

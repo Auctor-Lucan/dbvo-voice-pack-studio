@@ -2,7 +2,7 @@
 import { VOICE_COLORS, voiceChip } from './phase2.js';
 import { THEMES, applyTheme } from './themes.js';
 import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, switchEl, segmented, popupMenu, needInfo, helpButton } from './lib.js';
-import { app, go, refreshState, applyBackground } from './app.js';
+import { app, go, refreshState, applyBackground, noteNav } from './app.js';
 
 const TABS = [
   ['general', 'General & tools'],
@@ -86,6 +86,7 @@ export async function settingsView(tab, selectedId) {
   const show = async (t, id) => {
     // Re-showing the same page (after a save) keeps the scroll position; another page starts at the top.
     const keepTop = t === tab && (id === undefined || id === voiceSel) ? body.scrollTop : 0;
+    if (t !== tab || (id !== undefined && id !== voiceSel)) noteNav({ view: 'settings', tab: t, ...(t === 'voices' ? { id: id !== undefined ? id : voiceSel } : {}) });
     tab = t;
     if (id !== undefined) voiceSel = id;
     store.set('settingsTab', t);

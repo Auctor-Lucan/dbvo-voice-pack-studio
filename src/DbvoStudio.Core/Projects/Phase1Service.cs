@@ -476,6 +476,33 @@ public sealed class Phase1Service
         return changed;
     }
 
+    /// <summary>A line whose words differ between the game's own strings and another strings file (a text overhaul, an older copy).</summary>
+    public sealed record StringsDifference(string Key, uint FormId, string Field, string Game, string Other, string? Final, bool Edited);
+
+    /// <summary>
+    /// Compares the plugin's player lines in the strings the game shows with the strings kept with the mod (or next to the
+    /// plugin, or the Global Settings strings folder). Returns the differences and where the other strings came from.
+    /// </summary>
+    public (List<StringsDifference> Diffs, string GameSource, string OtherSource) StringsDiff(Mod mod, ModPlugin mp)
+    {
+        if (!mp.Localized || mp.IsTopicFile || !File.Exists(mp.StoredFile)) return (new(), "", "");
+        var (game, gameSrc) = LoadStrings(mod, mp.StoredFile);
+        var other = ResolveStringsFolder(mod, mp.StoredFile);
+        if (game == null || other == null || string.Equals(Path.GetFullPath(other), Path.GetFullPath(gameSrc), StringComparison.OrdinalIgnoreCase)) return (new(), gameSrc, other ?? "");
+        var plugin = PluginFile.Read(mp.StoredFile);
+        plugin.AttachStrings(game);
+        var a = PlayerLineExtractor.Extract(plugin).Lines.GroupBy(x => (x.FormId, x.Field)).ToDictionary(g => g.Key, g => g.First().Original);
+        plugin.AttachStrings(StringsTable.Load(other, plugin.BaseName, _settings.StringsLanguage));
+        var lines = mp.Lines.Where(l => l.Status != Phase1Status.Removed).GroupBy(l => (l.FormId, l.Field)).ToDictionary(g => g.Key, g => g.First());
+        var list = new List<StringsDifference>();
+        foreach (var x in PlayerLineExtractor.Extract(plugin).Lines)
+        {
+            if (!a.TryGetValue((x.FormId, x.Field), out var g) || g == x.Original || !lines.TryGetValue((x.FormId, x.Field), out var l)) continue;
+            list.Add(new StringsDifference(l.Key, x.FormId, x.Field.ToString(), g, x.Original, l.Final, l.UserEdited));
+        }
+        return (list, gameSrc, other);
+    }
+
     private string? ResolveStringsFolder(Mod mod, string pluginPath)
     {
         var candidates = new[]

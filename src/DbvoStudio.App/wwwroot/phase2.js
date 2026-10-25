@@ -3,6 +3,7 @@ import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, co
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
+import { effectRow } from './fx.js';
 import { qaDialog } from './qa.js';
 
 const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Edited since take' };
@@ -327,12 +328,12 @@ export async function patchView(id) {
   function rowIcons(l) {
     const sel = l.takes.find((t) => t.id === l.selectedTakeId);
     const kept = l.takes.filter((t) => t.kept).length;
-    const regenTitle = l.excluded ? 'Excluded: clear the 🚫 to generate it' : l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running (see the top bar)' : !canGen(l) ? 'No source WAV or .fuz with this line\'s name. Turn on "Generate lines without a source with text-to-speech" in the Voice Changer banner to voice it.' : vc && !l.hasSource ? 'Generate with text-to-speech (no source file)' : 'Regenerate the draft variant (a new take; kept takes stay)';
+    const regenTitle = l.excluded ? 'Excluded: clear the 🚫 to generate it' : l.omitted ? 'Omitted: a reference topic file already has this line' : !canGen(l) ? 'No source WAV or .fuz with this line\'s name. Turn on "Generate lines without a source with text-to-speech" in the Voice Changer banner to voice it.' : vc && !l.hasSource ? 'Generate with text-to-speech (no source file)' : 'Regenerate the draft variant (a new take; kept takes stay)';
     const keepTitle = !sel ? 'No take yet' : voice && voice.naming === 'Legacy'
       ? (sel.kept ? 'Kept - click to un-keep. Legacy naming exports one take per line (the one in use).' : 'Keep this take. Legacy naming exports one take per line, so variants need DBVO 2.0 naming.')
       : (sel.kept ? `Kept (${kept} kept) - click to un-keep. Kept takes are exported as DBVO 2.0 variants (2+ → name\\0, 1, …).` : `Keep this take as a variant (${kept} kept). DBVO 2.0 exports every kept take; with none kept, the take in use.`);
     return h('span.row.icon-bar', { style: { gap: '2px' } },
-      h('button.act-btn' + (inFlight.has(l.lineId) ? '.spinning' : ''), { title: inFlight.has(l.lineId) ? 'Making a new take…' : regenTitle, disabled: l.excluded || l.omitted || !!app.job || !canGen(l), onclick: (e) => { e.stopPropagation(); generate('selected', [l.lineId], { autoplay: true }); } }, icon('regen')),
+      h('button.act-btn' + (inFlight.has(l.lineId) ? '.spinning' : ''), { title: inFlight.has(l.lineId) ? 'Making a new take…' : regenTitle, disabled: l.excluded || l.omitted || !canGen(l), onmousedown: keepEditing, onclick: (e) => { e.stopPropagation(); regen(l); } }, icon('regen')),
       h('button.act-btn' + (sel && sel.kept ? '.on' : ''), { title: keepTitle, disabled: !sel, onclick: (e) => { e.stopPropagation(); keep(l, sel); } }, icon('star', { filled: !!(sel && sel.kept) })),
       h('button.act-btn', { title: sel ? 'Open this line\'s takes folder' : 'No takes yet', disabled: !l.takes.length, onclick: (e) => { e.stopPropagation(); rpc('patch.openTakeFolder', { id, lineId: l.lineId }).catch(fail); } }, icon('folder')),
       h('button.act-btn.flag-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit (stays until you clear it; "Flagged lines" generates them)', onclick: (e) => { e.stopPropagation(); upd(l, 'mark', !l.marked); } }, icon('flag')),
@@ -353,7 +354,7 @@ export async function patchView(id) {
     const inp = h('input', { type: 'text', value: l.spoken, disabled: l.omitted });
     if (l.differs) { inp.style.color = 'var(--link)'; inp.title = 'Blue: the spoken text differs from the in-game line (your edit). The arrow on the left restores it.'; }
     inp.addEventListener('change', () => { if (inp.value !== l.spoken) upd(l, 'spoken', inp.value); });
-    inp.addEventListener('focus', () => { if (focusedId !== l.lineId) { focusedId = l.lineId; grid.focus(l.lineId); renderInspector(); } });
+    inp.addEventListener('focus', () => { editing = { lineId: l.lineId, el: inp }; if (focusedId !== l.lineId) { focusedId = l.lineId; grid.focus(l.lineId); renderInspector(); } });
     inp.addEventListener('keydown', (e) => {
       e.stopPropagation();
       if (e.key === 'Enter') inp.blur();
@@ -412,6 +413,31 @@ export async function patchView(id) {
     } catch (e) { fail(e); }
   }
 
+  // A click on Generate while the spoken text is being edited: keep the focus (no blur, so the row isn't re-drawn under
+  // the click), save the typed text, then generate it. One click is enough.
+  let editing = null;
+  const keepEditing = (e) => { if (editing && document.activeElement === editing.el) e.preventDefault(); };
+  async function regen(l) {
+    const ed = editing && editing.lineId === l.lineId && document.activeElement === editing.el ? editing.el : null;
+    if (ed) {
+      const cur = index.get(l.lineId) || l;
+      if (ed.value !== cur.spoken) await upd(cur, 'spoken', ed.value);
+      editing = null;
+      if (document.activeElement === ed) ed.blur();
+    }
+    generate('selected', [l.lineId], { autoplay: true });
+  }
+  // Effect on the takes of the focused line, or of every ticked line when it is one of them.
+  function fxRow(l) {
+    const ids = grid.selected.has(l.lineId) && grid.selected.size > 1 ? [...grid.selected] : [l.lineId];
+    return effectRow(l.effect || '', ids.length, async (fx) => {
+      try {
+        const r = await withBusy(rpc('takes.effect', { kind: 'patch', id, lineIds: ids, effect: fx }), fx ? 'Adding the effect' : 'Taking the effect off', `${ids.length} line(s)…`);
+        patch = r.patch; reindex(); grid.setRows(visible()); renderInspector();
+        toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
+      } catch (e) { fail(e); renderInspector(); }
+    });
+  }
   async function upd(l, action, value) {
     try {
       replaceLine(await rpc('line2.update', { id, lineId: l.lineId, action, value }));
@@ -758,6 +784,7 @@ export async function patchView(id) {
     spoken.addEventListener('input', grow);
     requestAnimationFrame(grow);
     spoken.addEventListener('change', () => { if (spoken.value !== l.spoken) upd(l, 'spoken', spoken.value); });
+    spoken.addEventListener('focus', () => { editing = { lineId: l.lineId, el: spoken }; });
     trackCaret(spoken, l);
     insp.append(
       h('div.row', statusDot(l), h('span.dim', l.omitted ? 'Omitted — already in ' + l.omittedBy : STATUS_TEXT[l.status] || l.status), h('div.spacer'),
@@ -771,13 +798,14 @@ export async function patchView(id) {
       h('div', h('div.field-label', 'File'), h('div.file-row', h('span.mono.ellipsis', { title: `${l.stem}.wav / .lip / .fuz` }, l.stem), h('span.ext-tags', h('span.badge.b-skip', '.wav'), h('span.badge.b-skip', '.lip'), h('span.badge.b-skip', '.fuz')),
         h('button.icon-btn', { title: 'Copy the file name', onclick: () => navigator.clipboard.writeText(l.stem).then(() => toast('Copied.')) }, '⧉'))),
       vc ? h('div', h('div.field-label', 'Source WAV'), l.hasSource ? h('div.row', h('button.btn.sm', { title: 'Play the original recording this line is converted from', onclick: () => playSource(l) }, '▶ Play source'), h('span.mono.faint.ellipsis', { title: l.sourceWav }, l.sourceWav)) : h('div.banner.bad', { style: { margin: 0 } }, 'No source WAV found with this name.')) : null,
+      fxRow(l),
       h('div', h('div.field-label', vc ? 'Text for the LIP' : 'Spoken text (tags allowed)'), spoken,
         h('div.row', { style: { marginTop: '6px', gap: '6px' } },
           vc || engine() !== 'elevenlabs' ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.omitted, onclick: () => autotag([l.lineId]) }, 'AI tag'),
           l.spokenEdited ? h('button.btn.sm.ghost', { title: 'Put the in-game line back as the spoken text', onclick: () => upd(l, 'resetSpoken') }, '↺ Restore') : null,
           h('div.spacer'),
           h('button.btn.sm', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running' : 'Record this line with your microphone, then keep it as it is or convert it into the voice pack voice', disabled: l.omitted || !!app.job, onclick: () => record(l) }, '🎙 Record'),
-          h('button.btn.sm.primary', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running' : !canGen(l) ? 'No source file for this line (text-to-speech for such lines is off)' : 'Make a new take of this line', disabled: l.omitted || !!app.job || !canGen(l), onclick: () => generate('selected', [l.lineId], { autoplay: true }) }, l.takes.length ? 'New take' : vc ? 'Convert' : 'Generate'))),
+          h('button.btn.sm.primary', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : !canGen(l) ? 'No source file for this line (text-to-speech for such lines is off)' : 'Make a new take of this line', disabled: l.omitted || !canGen(l), onmousedown: keepEditing, onclick: () => regen(l) }, l.takes.length ? 'New take' : vc ? 'Convert' : 'Generate'))),
       l.tagSuggestion ? h('div.box', h('div.field-label', 'AI suggestion'), h('div', diffAdded(l.spoken, l.tagSuggestion)),
         h('div.row', { style: { marginTop: '6px' } }, h('button.btn.sm.primary', { title: 'Keep the suggested tags', onclick: () => upd(l, 'acceptTags') }, 'Accept'), h('button.btn.sm', { title: 'Go back to the text before tagging', onclick: () => upd(l, 'rejectTags') }, 'Undo'))) : null,
       l.omittedBy ? switchEl(l.overrideOmit, (v) => upd(l, 'overrideOmit', v), `Generate anyway (it is in "${l.omittedBy}")`) : null,
@@ -802,9 +830,9 @@ export async function patchView(id) {
     const sel = [...grid.selected];
     const busy = !!app.job;
     const c = counts();
-    if (busy) actions.title = 'A job is running (see the top bar). Wait for it, or Cancel it.'; else actions.removeAttribute('title');
+    actions.removeAttribute('title'); // job starts wait in the queue while another task runs
     const verb = vc ? 'Convert' : 'Generate';
-    const exp = h('button.btn', { disabled: busy, title: 'Write WAV + LIP files and build .fuz files' }, 'Export ▾');
+    const exp = h('button.btn', { title: busy ? 'Write WAV + LIP files and build .fuz files (waits in the queue while the running task finishes)' : 'Write WAV + LIP files and build .fuz files' }, 'Export ▾');
     exp.addEventListener('click', () => popupMenu(exp, [
       { label: 'WAV + LIP, DBVO Fix plugins and topic file', sub: 'WAV + LIP to the WAV + LIP folder; the DBVO Fix plugins and topic file to their folders (replacing the ones there)', onclick: () => exportWavLip(false) },
       { label: 'WAV + LIP only', sub: 'Leaves the DBVO Fix plugins and topic file in those folders as they are: for when you will fix lines in Phase 1 first, even with Overwrite on for those files', onclick: () => exportWavLip(true) },
@@ -818,13 +846,13 @@ export async function patchView(id) {
       { label: `Keep only the used take · ticked lines (${sel.length})`, sub: 'Deletes the other takes and their files (kept ★ takes stay)', onclick: () => sel.length ? purge(sel) : toast('Tick the box of one or more rows first.', true) },
       { label: 'Keep only the used take · all lines', sub: 'Deletes every take that is not in use or kept ★', onclick: () => purge(null) },
     ]));
-    const imp = h('button.btn', { disabled: busy, title: 'Bring in takes or text from elsewhere' }, 'Import ▾');
+    const imp = h('button.btn', { title: 'Bring in takes or text from elsewhere' }, 'Import ▾');
     imp.addEventListener('click', () => popupMenu(imp, [
       { label: 'An earlier voice pack…', sub: 'DBVO 1 (Legacy names) or DBVO 2.0 folder: fills lines without takes, .fuz kept as it is', onclick: legacyImport },
       { label: 'Takes from another patch…', sub: 'Its takes for the same lines are added; yours are never replaced', onclick: mergeTakes },
       { label: 'Spoken text from a spreadsheet (CSV)…', sub: 'Shows every change first; you pick which to apply', onclick: importCsv },
     ]));
-    const checkBtn = h('button.btn', { disabled: busy, title: `Check takes${sel.length ? ` of the ${sel.length} ticked line(s)` : ' of every line'}: Whisper compares what is said with the line, plus loudness and clipping. Flags only, deletes nothing.`, onclick: () => qaRun(sel.length ? sel : null) }, 'Check takes');
+    const checkBtn = h('button.btn', { title: `Check takes${sel.length ? ` of the ${sel.length} ticked line(s)` : ' of every line'}: Whisper compares what is said with the line, plus loudness and clipping. Flags only, deletes nothing.`, onclick: () => qaRun(sel.length ? sel : null) }, 'Check takes');
     const reviewBtn = h('button.btn' + (review ? '.review-on' : ''), { title: review ? 'End Review (Esc)' : 'Listen through the lines with the keyboard: Space plays, A approves and moves on, R makes a new take, F flags', onclick: () => setReview(!review) }, review ? '■ End review' : '▶ Review');
     const chars = (ls) => ls.reduce((a, l) => a + (l.spoken || '').length, 0);
     const pend = patch.lines.filter(pendingLine);
@@ -934,7 +962,7 @@ export async function patchView(id) {
     if (key === ' ') { eat(); if (l) { if (!audio.paused) audio.pause(); else play(l); } }
     else if (key === 'ArrowDown' || key === 'ArrowUp') { eat(); moveFocus(key === 'ArrowDown' ? 1 : -1); }
     else if (key === 'a') { eat(); if (l && l.takes.length) { upd(l, 'approve', true).then(() => { renderReviewBar(); moveFocus(1); }); } else toast('This line has no take to approve.', true); }
-    else if (key === 'r') { eat(); if (l && !app.job && canGen(l) && !l.omitted && !l.excluded) generate('selected', [l.lineId], { autoplay: true }); }
+    else if (key === 'r') { eat(); if (l && canGen(l) && !l.omitted && !l.excluded) regen(l); }
     else if (key === 'f') { eat(); if (l) upd(l, 'mark', !l.marked); }
     else if (key === 'Escape') { eat(); setReview(false); }
   };
@@ -1181,7 +1209,7 @@ export async function patchView(id) {
           noSrc ? switchEl(!!patch.ttsForMissing, async (on) => { try { patch = await rpc('patch.saveMeta', { id, ttsForMissing: on }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Generate lines without a source with text-to-speech', { title: 'Off: lines without a source stay unvoiced. On: Generate options ▾ → Missing also voices them with text-to-speech.' }) : null));
       }
       if (c.fuzOnly) banners.append(h('div.banner.info', h('span', `${c.fuzOnly} line(s) have no WAV + LIP here but a .fuz in the final folder. Import them as takes so they count as done and can be played.`),
-        h('div.spacer'), h('button.btn.sm', { title: 'Unpack the .fuz files into WAV + LIP takes so they show as generated', disabled: !!app.job, onclick: async () => { try { await rpc('patch.importFuz', { id }); } catch (e) { fail(e); } } }, 'Import from .fuz')));
+        h('div.spacer'), h('button.btn.sm', { title: 'Unpack the .fuz files into WAV + LIP takes so they show as generated', onclick: async () => { try { await rpc('patch.importFuz', { id }); } catch (e) { fail(e); } } }, 'Import from .fuz')));
       if (c.unreviewed.length) banners.append(h('div.banner.warn', h('span', 'Flagged lines not reviewed in Phase 1: ' + c.unreviewed.map((u) => `${u.plugin} (${u.count})`).join(', ')),
         h('div.spacer'), patch.modIds.length === 1 ? h('button.btn.sm', { title: 'Open the mod this patch reads its lines from', onclick: () => go('mod', { id: patch.modIds[0] }) }, 'Open in Phase 1') : null));
     } catch { /* checks are advisory */ }

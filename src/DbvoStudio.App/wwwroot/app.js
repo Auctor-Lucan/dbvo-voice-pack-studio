@@ -10,6 +10,7 @@ import { booksListView, bookProjectView } from './books.js';
 import { gruntsListView, gruntProjectView } from './grunts.js';
 import { homeView, noteRecent } from './home.js';
 import { helpView, PAGE_HELP } from './help.js';
+import { initNav, beforeNavigate } from './nav.js';
 
 export const app = {
   state: null,
@@ -44,12 +45,21 @@ export async function refreshState() {
 }
 
 let navigated = false; // set once the user moves, so the start-up below never overrides a click made while it loads
-export function go(view, params = {}) {
+export function go(view, params = {}, { history = true } = {}) {
   navigated = true;
-  app.route = { view, ...params };
+  const next = { view, ...params };
+  if (history) beforeNavigate(next);
+  app.route = next;
   store.set('route', app.route);
   noteRecent(app.route);
-  render();
+  return render();
+}
+
+/** A page that changes what it shows without go() (a settings tab): Back returns to the previous one. */
+export function noteNav(route) {
+  beforeNavigate(route);
+  app.route = route;
+  store.set('route', route);
 }
 
 const SECTION = { home: 'home', help: 'help', mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches', fomods: 'fomods', fomod: 'fomods', settings: 'settings', voices: 'settings', wavlip: 'tools', vc: 'patches', revoices: 'tools', revoice: 'tools', books: 'tools', book: 'tools', grunts: 'tools', grunt: 'tools' };
@@ -67,6 +77,7 @@ export async function render() {
   // Keep the current page until the next one is ready, so switching pages never flashes an empty (or unshaded) frame.
   // "Loading…" only shows when a page takes noticeably long.
   const ticket = ++renderTicket;
+  app.paletteExtra = null; // the next page sets its own Ctrl+K entries
   const slow = setTimeout(() => { if (ticket === renderTicket) clear(main).append(h('div.empty.view', 'Loading…')); }, 400);
   try {
     if (!app.state) await refreshState();
@@ -135,7 +146,7 @@ toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [
 
 // ---- background jobs (generation, .fuz, FOMOD, WAV to LIP)
 const jobEl = document.getElementById('job');
-const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to LIP', generate: 'Generating', import: 'Importing', qa: 'Checking takes', 'revoice-qa': 'Checking takes', 'grunts-export': 'Exporting voice pack' };
+const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to LIP', generate: 'Generating', import: 'Importing', qa: 'Checking takes', 'revoice-qa': 'Checking takes', 'grunts-export': 'Exporting voice pack', 'grunts-measure': 'Measuring loudness', 'grunts-whisper': 'Whisper subtitles' };
 // Progress reports can arrive a moment after the job has finished (they travel separately); one of those must not
 // bring back the job bar and keep buttons disabled.
 let lastDone = null;
@@ -180,6 +191,8 @@ on('jobDone', async (d) => {
       r.warnings && r.warnings.length ? h('div.banner.warn', { style: { margin: 0 } }, h('ul', r.warnings.slice(0, 20).map((x) => h('li', x)))) : null,
     ], [{ label: 'Open folder', value: 'open' }, { label: 'OK', primary: true, value: true }]);
     if (v === 'open') rpc('open.path', { path: r.archive || r.staging });
+  } else if (d.kind === 'grunts-measure' || d.kind === 'grunts-whisper') {
+    if (d.message) toast(d.message, !d.ok);
   } else if (!d.ok && d.message) {
     toast(d.message, true);
   } else if (d.kind === 'generate') {
@@ -187,6 +200,7 @@ on('jobDone', async (d) => {
   }
 });
 document.getElementById('job-cancel').addEventListener('click', () => rpc('job.cancel').catch(fail));
+initNav();
 
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());

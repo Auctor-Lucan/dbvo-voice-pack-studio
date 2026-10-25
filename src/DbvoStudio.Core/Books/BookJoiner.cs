@@ -114,7 +114,7 @@ public static class BookJoiner
     {
         var parts = BooksService.LinesOf(p, voice, b.Stem, variant);
         if (parts.Count == 0 || parts.Any(l => l.SelectedTake == null)) return null;
-        var audio = BooksService.AudioFor(p, voice);
+        var audio = BooksService.AudioFor(p, voice, b);
         var key = JoinKey(voice, b.Stem, variant);
         var fp = Fingerprint(projectFolder, parts, audio);
         var folder = Path.Combine("joined", Safe(voice) + (variant.Length > 0 ? "@" + variant : ""));

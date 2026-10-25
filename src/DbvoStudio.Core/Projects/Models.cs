@@ -408,6 +408,10 @@ public sealed class Take
     public string? OriginalFuz { get; set; }
     /// <summary>The last quality check of this take (Check takes), or null.</summary>
     public TakeQa? Qa { get; set; }
+    /// <summary>The effect preset on this take's WAV (the dry original is kept in the folder's "dry" folder); empty = none.</summary>
+    public string Effect { get; set; } = "";
+    /// <summary>OriginalFuz while an effect is on (the imported .fuz doesn't have the effect, so it isn't reused meanwhile).</summary>
+    public string? DryOriginalFuz { get; set; }
 }
 
 /// <summary>Quality check of one take: what Whisper heard against the line, plus loudness and peak.</summary>
@@ -480,6 +484,8 @@ public class Phase2Line
     public string? FileStem { get; set; }
     /// <summary>The user deleted this line's last take: don't adopt WAV + LIP or .fuz from the export folders again.</summary>
     public bool NoAdopt { get; set; }
+    /// <summary>Effect preset for this line (reverb, filter, voice): put on every take, also new ones. Empty = none.</summary>
+    public string Effect { get; set; } = "";
 
     [JsonIgnore] public Take? SelectedTake => Takes.FirstOrDefault(t => t.Id == SelectedTakeId);
 

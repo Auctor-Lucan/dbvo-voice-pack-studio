@@ -24,59 +24,54 @@ public static partial class GruntService
     public static string ReverbOriginal(string projectFolder, string sourcePath) =>
         Path.Combine(projectFolder, "reverb-originals", Hash(Path.GetFullPath(sourcePath).ToLowerInvariant()) + ".wav");
 
+    public static List<EffectPreset> EffectsOf(GruntProject p) => p.Effects.Count > 0 ? p.Effects : Effects.BuiltIn();
+
     /// <summary>
-    /// Puts reverb on the line's WAV (the file itself changes, so it sounds that way wherever it is opened) or takes it off by
-    /// putting the original back. Every line of the project that uses the same file follows. Returns the new length.
+    /// Puts an effect (reverb, filter, voice) on the line's WAV (the file itself changes, so it sounds that way wherever it is
+    /// opened), or takes it off by putting the original back (effectId null). Changing to another effect starts again from the
+    /// original. Every line of the project that uses the same file follows. Returns the new length.
     /// </summary>
-    public static async Task<double> SetReverbAsync(GruntProject p, GruntLine line, string projectFolder, bool on, ExternalTools? tools, bool force = false, CancellationToken ct = default)
+    public static async Task<double> SetEffectAsync(GruntProject p, GruntLine line, string projectFolder, string? effectId, ExternalTools? tools, bool force = false, CancellationToken ct = default)
     {
         var src = SourcePath(line, projectFolder);
         if (!File.Exists(src)) throw new FileNotFoundException($"The audio file is missing: {src}");
         var same = p.Events.Values.SelectMany(s => s.Lines).Where(l => string.Equals(SourcePath(l, projectFolder), src, StringComparison.OrdinalIgnoreCase)).ToList();
         var original = ReverbOriginal(projectFolder, src);
-        double seconds;
-        if (on)
+        var current = line.Reverb ? (line.EffectId.Length > 0 ? line.EffectId : "inner") : null;
+        if (effectId == current && (effectId == null || File.Exists(original))) return line.DurationSeconds;
+        double seconds = 0;
+        if (current != null)
         {
-            if (line.Reverb && File.Exists(original)) return line.DurationSeconds;
-            if (!src.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"Reverb works on WAV files; this line is {Path.GetExtension(src).TrimStart('.').ToUpperInvariant()}. Replace it with a WAV (⋯ → Replace the file) first.");
-            WavFile w;
-            try { w = WavFile.Read(src); }
-            catch (InvalidDataException)
-            {
-                // 24-bit, 32-bit float or another WAV flavour: read it through ffmpeg as 16-bit at its own rate.
-                if (tools == null) throw new InvalidOperationException("This WAV isn't 16-bit; ffmpeg is needed to read it (Global Settings → Tools).");
-                var info = await ProbeAsync(tools, src, ct);
-                var tmp = Path.Combine(Path.GetTempPath(), "dbvo-rv-" + Guid.NewGuid().ToString("N")[..10] + ".wav");
-                try { await tools.ToWavAsync(src, tmp, info?.SampleRate is > 0 ? info.SampleRate : 44100, false, 0, ct); w = WavFile.Read(tmp); }
-                finally { try { File.Delete(tmp); } catch { } }
-            }
-            Directory.CreateDirectory(Path.GetDirectoryName(original)!);
-            File.Copy(src, original, true);
-            var outW = new WavFile { SampleRate = w.SampleRate, Channels = w.Channels, Samples = Reverb.Apply(w.Samples, w.SampleRate, w.Channels, p.Reverb) };
-            var tmpOut = src + ".dbvo-tmp";
-            outW.Write(tmpOut);
-            File.Move(tmpOut, src, true);
-            seconds = outW.DurationSeconds;
-            var stamp = Stamp(src);
-            foreach (var l in same) { l.Reverb = true; l.ReverbStamp = stamp; l.DurationSeconds = seconds; l.Lufs = null; l.PeakDb = null; }
-        }
-        else
-        {
+            // Back to the original first (also when switching to another effect).
             if (!File.Exists(original))
             {
-                foreach (var l in same) { l.Reverb = false; l.ReverbStamp = ""; }
-                throw new InvalidOperationException("The original (without reverb) isn't in the project folder any more, so the reverb can't be taken off. Replace the file with your original instead.");
+                foreach (var l in same) { l.Reverb = false; l.ReverbStamp = ""; l.EffectId = ""; }
+                throw new InvalidOperationException("The original (without the effect) isn't in the project folder any more, so the effect can't be taken off. Replace the file with your original instead.");
             }
             if (!force && line.ReverbStamp.Length > 0 && Stamp(src) != line.ReverbStamp)
-                throw new FileChangedException($"{Path.GetFileName(src)} was changed after the reverb was added. Taking the reverb off puts back the original from before, which replaces those changes.");
+                throw new FileChangedException($"{Path.GetFileName(src)} was changed after the effect was added. Taking it off puts back the original from before, which replaces those changes.");
             File.Copy(original, src, true);
             File.Delete(original);
-            try { seconds = WavFile.Read(src).DurationSeconds; } catch { seconds = 0; }
-            foreach (var l in same) { l.Reverb = false; l.ReverbStamp = ""; if (seconds > 0) l.DurationSeconds = seconds; l.Lufs = null; l.PeakDb = null; }
+            try { seconds = WavFile.Read(src).DurationSeconds; } catch { seconds = ProbeWavHeader(src)?.Seconds ?? 0; }
+            foreach (var l in same) { l.Reverb = false; l.ReverbStamp = ""; l.EffectId = ""; if (seconds > 0) l.DurationSeconds = seconds; l.Lufs = null; l.PeakDb = null; }
         }
+        if (effectId == null) return seconds;
+        var fx = Effects.Find(EffectsOf(p), effectId) ?? throw new InvalidOperationException("That effect preset doesn't exist any more.");
+        if (!src.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Effects work on WAV files; this line is {Path.GetExtension(src).TrimStart('.').ToUpperInvariant()}. Replace it with a WAV (⋯ → Replace the file) first.");
+        Directory.CreateDirectory(Path.GetDirectoryName(original)!);
+        File.Copy(src, original, true);
+        try { await Effects.ApplyAsync(original, src, fx, tools, ct); }
+        catch { File.Copy(original, src, true); File.Delete(original); throw; }
+        seconds = ProbeWavHeader(src)?.Seconds ?? 0;
+        var stamp = Stamp(src);
+        foreach (var l in same) { l.Reverb = true; l.EffectId = fx.Id; l.ReverbStamp = stamp; l.DurationSeconds = seconds; l.Lufs = null; l.PeakDb = null; }
         return seconds;
     }
+
+    /// <summary>8.2.0's reverb toggle: on = the project's default effect.</summary>
+    public static Task<double> SetReverbAsync(GruntProject p, GruntLine line, string projectFolder, bool on, ExternalTools? tools, bool force = false, CancellationToken ct = default) =>
+        SetEffectAsync(p, line, projectFolder, on ? (p.DefaultEffect.Length > 0 ? p.DefaultEffect : "inner") : null, tools, force, ct);
 
     /// <summary>
     /// Before a line leaves the project (removed, replaced): a reverbed file gets its original back, unless another line still
@@ -97,7 +92,132 @@ public static partial class GruntService
             }
         }
         catch { /* the file stays as it is */ }
-        line.Reverb = false; line.ReverbStamp = "";
+        line.Reverb = false; line.ReverbStamp = ""; line.EffectId = "";
+    }
+
+    // ------------------------------------------------------------------ trim and fades (not destructive)
+
+    public static bool HasTrim(GruntLine l) => l.TrimStart > 0.0005 || l.TrimEnd > 0.0005 || l.FadeInMs > 0.5 || l.FadeOutMs > 0.5;
+    public static string TrimKey(GruntLine l) => HasTrim(l) ? string.Format(CultureInfo.InvariantCulture, "{0:0.###}-{1:0.###}-{2:0}-{3:0}", l.TrimStart, l.TrimEnd, l.FadeInMs, l.FadeOutMs) : "";
+
+    /// <summary>The line's audio cut to its Start–End with its fades, as a mono-or-stereo 16-bit WAV at the given rate.</summary>
+    public static async Task TrimmedAsync(ExternalTools tools, string input, GruntLine l, string outWav, int rate, CancellationToken ct)
+    {
+        var args = new List<string> { "-y", "-hide_banner", "-loglevel", "error", "-i", input };
+        string F(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+        if (l.TrimStart > 0.0005) { args.Add("-ss"); args.Add(F(l.TrimStart)); }
+        if (l.TrimEnd > l.TrimStart + 0.02) { args.Add("-to"); args.Add(F(l.TrimEnd)); }
+        var af = new List<string>();
+        if (l.FadeInMs > 0.5) af.Add($"afade=t=in:d={F(l.FadeInMs / 1000)}");
+        if (l.FadeOutMs > 0.5) af.Add($"areverse,afade=t=in:d={F(l.FadeOutMs / 1000)},areverse");
+        if (af.Count > 0) { args.Add("-af"); args.Add(string.Join(",", af)); }
+        args.AddRange(new[] { "-ar", rate.ToString(CultureInfo.InvariantCulture), "-acodec", "pcm_s16le", "-map_metadata", "-1", outWav });
+        var r = await ExternalTools.RunAsync(tools.FfmpegPath, args, ct);
+        if (r.ExitCode != 0 || !File.Exists(outWav)) throw new ToolException($"Couldn't trim {Path.GetFileName(input)}: {r.StdErr.Trim().Split('\n').LastOrDefault()}");
+    }
+
+    // ------------------------------------------------------------------ variants
+
+    /// <summary>
+    /// New lines made from one: each a little higher or lower and faster or slower (pitch and speed spread evenly from -range
+    /// to +range, never the original itself), written to the project's audio folder. Returns the WAV paths (relative).
+    /// </summary>
+    public static async Task<List<(string Rel, double Pitch, double Speed)>> MakeVariantsAsync(GruntProject p, GruntEventDef ev, GruntLine line, string projectFolder,
+        int count, double pitchPct, double speedPct, ExternalTools tools, CancellationToken ct = default)
+    {
+        count = Math.Clamp(count, 1, 12);
+        var src = SourcePath(line, projectFolder);
+        if (!File.Exists(src)) throw new FileNotFoundException($"The audio file is missing: {src}");
+        var dir = Path.Combine("audio", Regex.Replace(ev.Id, @"[^A-Za-z0-9]+", "_").Trim('_'));
+        Directory.CreateDirectory(Path.Combine(projectFolder, dir));
+        string input = src; string? tmp = null;
+        var made = new List<(string, double, double)>();
+        try
+        {
+            if (src.EndsWith(".fuz", StringComparison.OrdinalIgnoreCase)) { tmp = UnpackFuz(src); input = tmp; }
+            int rate = ProbeWavHeader(input)?.SampleRate ?? (await ProbeAsync(tools, input, ct))?.SampleRate ?? 44100;
+            if (rate <= 0) rate = 44100;
+            for (int i = 0; i < count; i++)
+            {
+                // Spread evenly from -1 to +1 (the middle one of an odd count gets +0.5, so none is the original); speed alternates direction.
+                double t = count == 1 ? 1 : -1 + 2.0 * i / (count - 1);
+                if (Math.Abs(t) < 1e-9) t = 0.5;
+                double pitch = 1 + pitchPct / 100 * t, speed = 1 + speedPct / 100 * (i % 2 == 0 ? -t : t);
+                string F(double v) => v.ToString("0.#####", CultureInfo.InvariantCulture);
+                // pitch without changing length (asetrate + atempo back), then the speed change
+                var af = $"asetrate={rate}*{F(pitch)},aresample={rate},atempo={F(speed / pitch)}";
+                var rel = Path.Combine(dir, $"{Regex.Replace(Path.GetFileNameWithoutExtension(src), @"[^A-Za-z0-9_-]+", "_")}-v{i + 1}-{Projects.NewId.Short(3)}.wav");
+                var outPath = Path.Combine(projectFolder, rel);
+                var tl = new GruntLine { TrimStart = line.TrimStart, TrimEnd = line.TrimEnd, FadeInMs = line.FadeInMs, FadeOutMs = line.FadeOutMs };
+                string inp = input;
+                if (HasTrim(tl)) { inp = outPath + ".t.wav"; await TrimmedAsync(tools, input, tl, inp, rate, ct); }
+                var r = await ExternalTools.RunAsync(tools.FfmpegPath, new[] { "-y", "-hide_banner", "-loglevel", "error", "-i", inp, "-af", af, "-ar", rate.ToString(CultureInfo.InvariantCulture), "-acodec", "pcm_s16le", "-map_metadata", "-1", outPath }, ct);
+                if (inp != input) try { File.Delete(inp); } catch { }
+                if (r.ExitCode != 0 || !File.Exists(outPath)) throw new ToolException("ffmpeg couldn't make the variant: " + r.StdErr.Trim().Split('\n').LastOrDefault());
+                made.Add((rel, pitch, speed));
+            }
+        }
+        finally { if (tmp != null) try { File.Delete(tmp); } catch { } }
+        return made;
+    }
+
+    // ------------------------------------------------------------------ loudness
+
+    /// <summary>Loudness (LUFS) more than this far from the pack's middle value is flagged before export.</summary>
+    public const double LoudnessSpread = 4;
+
+    /// <summary>Measures loudness and true peak of lines (all, or only those not measured yet), several at a time.</summary>
+    public static async Task<int> MeasureAsync(GruntProject p, string projectFolder, ExternalTools tools, bool onlyMissing, IProgress<(int Done, int Total)>? progress, CancellationToken ct)
+    {
+        var todo = p.Events.Values.SelectMany(s => s.Lines).Where(l => !onlyMissing || l.Lufs == null).Where(l => File.Exists(SourcePath(l, projectFolder))).ToList();
+        int done = 0;
+        await Parallel.ForEachAsync(todo, new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 1, 6), CancellationToken = ct }, async (l, token) =>
+        {
+            var src = SourcePath(l, projectFolder);
+            string? tmp = null;
+            try
+            {
+                string input = src;
+                if (src.EndsWith(".fuz", StringComparison.OrdinalIgnoreCase)) { tmp = UnpackFuz(src); input = tmp; }
+                if (HasTrim(l)) { var t = Path.Combine(Path.GetTempPath(), "dbvo-m-" + Guid.NewGuid().ToString("N")[..8] + ".wav"); await TrimmedAsync(tools, input, l, t, 44100, token); if (tmp != null) File.Delete(tmp); tmp = t; input = t; }
+                var (lufs, peak) = await tools.MeasureAsync(input, token);
+                l.Lufs = lufs is { } x && !double.IsInfinity(x) ? Math.Round(x, 1) : -99;
+                l.PeakDb = peak is { } y && !double.IsInfinity(y) ? Math.Round(y, 1) : null;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { /* stays unmeasured */ }
+            finally { if (tmp != null) try { File.Delete(tmp); } catch { } }
+            progress?.Report((Interlocked.Increment(ref done), todo.Count));
+        });
+        return todo.Count;
+    }
+
+    /// <summary>The pack's middle loudness (median of the measured lines), or null.</summary>
+    public static double? PackLoudness(GruntProject p)
+    {
+        var v = p.Events.Values.SelectMany(s => s.Lines).Select(l => l.Lufs).Where(x => x is > -70).Select(x => x!.Value).OrderBy(x => x).ToList();
+        return v.Count < 3 ? null : v[v.Count / 2];
+    }
+
+    /// <summary>Lines much louder or quieter than the rest of the pack (and clipping ones), for Check.</summary>
+    public static List<GruntIssue> LoudnessIssues(GruntProject p, GruntCatalog cat)
+    {
+        var list = new List<GruntIssue>();
+        var mid = PackLoudness(p);
+        foreach (var ev in cat.Events)
+        {
+            if (!p.Events.TryGetValue(ev.Id, out var st) || st.Skipped) continue;
+            foreach (var l in st.Lines)
+            {
+                var name = Leaf(l.Source.Replace('/', '\\'));
+                if (l.PeakDb is > -0.1) list.Add(new GruntIssue("warning", $"{ev.Label}: {name} clips (peak {l.PeakDb:0.0} dBTP).", ev.Id, l.Id));
+                if (mid is not { } m || l.Lufs is not { } x || x <= -70) continue;
+                var d = x - m;
+                if (Math.Abs(d) > LoudnessSpread)
+                    list.Add(new GruntIssue("warning", $"{ev.Label}: {name} is {(d > 0 ? "too loud" : "too quiet")} compared with the pack ({x:0.0} LUFS, the pack's middle is {m:0.0}; {(p.Audio.Normalize ? "loudness matching on export evens it out" : "loudness matching is off")}).", ev.Id, l.Id));
+            }
+        }
+        return list;
     }
 
     // ------------------------------------------------------------------ quick probe

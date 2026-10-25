@@ -148,6 +148,8 @@ public sealed partial class Backend
             {
                 var proj = LoadGr(S(p, "id"));
                 var line = proj.Events.Values.SelectMany(s => s.Lines).FirstOrDefault(l => l.Id == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
+                // raw: without the trim and fades (the trim dialog plays the whole file)
+                if (B(p, "raw")) line = new GruntLine { Id = line.Id, Source = line.Source };
                 var wav = await GruntService.PreviewAsync(GrExternal(), line, GrFolder(proj));
                 // The page can only load files from the library; a WAV elsewhere is copied into the project's cache.
                 if (!Path.GetFullPath(wav).StartsWith(Path.GetFullPath(_lib.Root), StringComparison.OrdinalIgnoreCase))
@@ -221,6 +223,11 @@ public sealed partial class Backend
                 return true;
             }
             case "grunts.reverb": return await GrReverb(p);
+            case "grunts.effect": return await GrEffect(p);
+            case "grunts.trim": return await Locked(() => GrTrim(p));
+            case "grunts.variants": return await GrVariants(p);
+            case "grunts.measure": return StartGrMeasure(p);
+            case "grunts.whisperAll": return StartGrWhisper(p);
             case "grunts.transcribe": return await GrTranscribe(p);
             case "grunts.subtitles": return await Locked(() => GrSubtitles(p));
             default: return await DispatchGruntDrafts(m, p);
@@ -296,6 +303,7 @@ public sealed partial class Backend
                 proj.Id, proj.Name, proj.Target, proj.Gender, proj.VoicePackId, voicePack = voices.FirstOrDefault(v => v.Id == proj.VoicePackId)?.Name ?? "",
                 pcht = proj.Pcht, spvs = proj.Spvs, audio = proj.Audio, proj.OutputFolder, proj.LastExportUtc, proj.LastReport, exported = proj.ExportedFiles.Count,
                 defaultPlugin = GruntService.DefaultPluginName(proj),
+                effects = GruntService.EffectsOf(proj), proj.DefaultEffect, builtInEffects = Core.Audio.Effects.BuiltIn(), packLufs = GruntService.PackLoudness(proj),
             },
             catalog = new { cat.Source, cat.SourceInfo, notes, customs = cat.Events.Count(e => e.Origin == "custom") },
             paths = GrPaths(),
@@ -327,7 +335,7 @@ public sealed partial class Backend
     private static object GrLineDto(GruntLine l, string folder)
     {
         var path = GruntService.SourcePath(l, folder);
-        return new { l.Id, l.Source, path, file = Path.GetFileName(path), exists = File.Exists(path), l.Origin, l.Text, l.Spoken, l.FileName, l.Slot, l.DurationSeconds, l.SampleRate, l.Channels, l.Lufs, l.AddedUtc, l.Reverb, wav = path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) };
+        return new { l.Id, l.Source, path, file = Path.GetFileName(path), exists = File.Exists(path), l.Origin, l.Text, l.Spoken, l.FileName, l.Slot, l.DurationSeconds, l.SampleRate, l.Channels, l.Lufs, l.AddedUtc, l.Reverb, effectId = l.Reverb ? (l.EffectId.Length > 0 ? l.EffectId : "inner") : "", l.PeakDb, l.TrimStart, l.TrimEnd, l.FadeInMs, l.FadeOutMs, wav = path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) };
     }
 
     /// <summary>Reads length, rate and channels of new lines (outside the page lock; quick per file).</summary>
@@ -345,6 +353,18 @@ public sealed partial class Backend
                 if (info != null) { l.DurationSeconds = info.Seconds; l.SampleRate = info.SampleRate; l.Channels = info.Channels; }
             }
             catch { /* shown as unknown length */ }
+        });
+        // Loudness of the new lines, in the background (the line rows show it once measured).
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var tmp = new GruntProject();
+                GruntService.State(tmp, "x").Lines.AddRange(lines);
+                await GruntService.MeasureAsync(tmp, folder, tools, true, null, CancellationToken.None);
+                await Locked(() => { _lib.Save(proj); return null; });
+            }
+            catch { /* measured on Check or Measure loudness */ }
         });
         await Locked(() => { _lib.Save(proj); return null; });
     }
@@ -367,6 +387,9 @@ public sealed partial class Backend
             if (proj.Audio.Format is not ("wav" or "xwm" or "fuz")) proj.Audio.Format = "wav";
             proj.Audio.SampleRate = proj.Audio.SampleRate is 22050 or 44100 or 48000 ? proj.Audio.SampleRate : 44100;
         }
+        if (p.TryGetProperty("effects", out var fxs) && fxs.ValueKind == JsonValueKind.Array)
+            proj.Effects = fxs.Deserialize<List<Core.Audio.EffectPreset>>(JsonOptions) ?? proj.Effects;
+        Str("defaultEffect", v => { if (Core.Audio.Effects.Find(GruntService.EffectsOf(proj), v) != null) proj.DefaultEffect = v; });
         proj.Pcht.Prefix = proj.Pcht.Prefix.Trim();
         if (proj.Target == GruntTargets.Spvs && proj.Gender == "both") proj.Gender = proj.Spvs.Slot.StartsWith("Male") ? "male" : "female";
         _lib.Save(proj);
@@ -536,6 +559,7 @@ public sealed partial class Backend
         var installed = proj.Target == GruntTargets.Spvs && GrModFolder(GruntTargets.Spvs) is { } f ? GruntCatalogs.Resolve(GruntTargets.Spvs, f, Array.Empty<GruntEventDef>(), new List<string>()) : null;
         var plan = GruntService.Plan(proj, cat, GrFolder(proj), src, GrTools(), installed);
         foreach (var n in notes) plan.Issues.Add(new GruntIssue("info", n));
+        plan.Issues.AddRange(GruntService.LoudnessIssues(proj, cat));
         if (proj.Target == GruntTargets.Pcht && proj.Pcht.Multi && src != null && !PchtPlugins.IsMulti(src))
             plan.Issues.Add(new GruntIssue("error", $"The {GruntCatalogs.PchtPlugin} in the PC Head Tracking folder is the plain one. Point the folder at \"Multi Voice Packs support for PC Head Tracking\" (its version of the plugin), or turn Multi Voice Packs off."));
         return plan;
@@ -700,6 +724,159 @@ public sealed partial class Backend
             return new { changed = false, project = GrDto(proj) };
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>An effect preset on several lines at once (or off with effect ""): the line menu and "all lines of this event".</summary>
+    private async Task<object?> GrEffect(JsonElement p)
+    {
+        GruntProject proj = null!; List<GruntLine> lines = null!;
+        await Locked(() =>
+        {
+            proj = LoadGr(S(p, "id"));
+            var ids = Strings(p, "lineIds").ToHashSet();
+            lines = proj.Events.Values.SelectMany(s => s.Lines).Where(l => ids.Contains(l.Id)).ToList();
+            return null;
+        });
+        var fx = S(p, "effect");
+        var tools = File.Exists(_settings.FfmpegPath) ? GrExternal() : null;
+        var folder = GrFolder(proj);
+        int done = 0; var problems = new List<string>();
+        await _gate.WaitAsync();
+        try
+        {
+            // Lines sharing a file follow the first one; each file once.
+            foreach (var l in lines.GroupBy(x => GruntService.SourcePath(x, folder), StringComparer.OrdinalIgnoreCase).Select(g => g.First()))
+            {
+                try { await GruntService.SetEffectAsync(proj, l, folder, fx.Length == 0 ? null : fx, tools, B(p, "force")); done++; }
+                catch (GruntService.FileChangedException ex) { if (lines.Count == 1) return new { changed = true, message = ex.Message }; problems.Add(ex.Message); }
+                catch (Exception ex) { problems.Add(Path.GetFileName(GruntService.SourcePath(l, folder)) + ": " + FriendlyError.From(ex)); }
+            }
+            _lib.Save(proj);
+            if (lines.Count == 1 && problems.Count == 1) throw new InvalidOperationException(problems[0]);
+            return new { changed = false, done, problems, project = GrDto(proj) };
+        }
+        finally { _gate.Release(); }
+    }
+
+    private object GrTrim(JsonElement p)
+    {
+        var proj = LoadGr(S(p, "id"));
+        var line = proj.Events.Values.SelectMany(s => s.Lines).FirstOrDefault(l => l.Id == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
+        double D(string n) => p.TryGetProperty(n, out var x) && x.ValueKind == JsonValueKind.Number ? Math.Max(0, x.GetDouble()) : 0;
+        line.TrimStart = D("start"); line.TrimEnd = D("end"); line.FadeInMs = D("fadeIn"); line.FadeOutMs = D("fadeOut");
+        if (line.DurationSeconds > 0 && line.TrimEnd >= line.DurationSeconds - 0.005) line.TrimEnd = 0; // the whole length = no end trim
+        if (line.TrimEnd > 0 && line.TrimEnd <= line.TrimStart + 0.02) throw new InvalidOperationException("The end has to come after the start.");
+        line.Lufs = null; line.PeakDb = null;
+        _lib.Save(proj);
+        return GrDto(proj);
+    }
+
+    private async Task<object?> GrVariants(JsonElement p)
+    {
+        var proj = LoadGr(S(p, "id"));
+        var (cat, _) = GrCatalog(proj.Target);
+        var ev = cat.Events.FirstOrDefault(e => e.Id == S(p, "eventId")) ?? throw new InvalidOperationException("Event not found.");
+        if (ev.Kind != "pool") throw new InvalidOperationException("Variants go into pool events (a shout part has one file).");
+        var line = GruntService.State(proj, ev.Id).Lines.FirstOrDefault(l => l.Id == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
+        double D(string n, double d) => p.TryGetProperty(n, out var x) && x.ValueKind == JsonValueKind.Number ? x.GetDouble() : d;
+        var made = await GruntService.MakeVariantsAsync(proj, ev, line, GrFolder(proj), (int)D("count", 3), Math.Clamp(D("pitch", 3), 0, 25), Math.Clamp(D("speed", 3), 0, 25), GrExternal());
+        return await Locked(() =>
+        {
+            var st = GruntService.State(proj, ev.Id);
+            int at = st.Lines.IndexOf(line) + 1;
+            foreach (var (rel, pitch, speed) in made)
+            {
+                var w = GruntService.ProbeWavHeader(Path.Combine(GrFolder(proj), rel));
+                var nl = new GruntLine { Source = rel, Origin = "generated", Text = line.Text, Spoken = line.Spoken, DurationSeconds = w?.Seconds ?? 0, SampleRate = w?.SampleRate ?? 0, Channels = w?.Channels ?? 1 };
+                st.Lines.Insert(Math.Min(at++, st.Lines.Count), nl);
+            }
+            st.Skipped = false;
+            _lib.Save(proj);
+            return new { added = made.Count, project = GrDto(proj) };
+        });
+    }
+
+    private object StartGrMeasure(JsonElement p)
+    {
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
+        var id = S(p, "id");
+        var proj = LoadGr(id);
+        var tools = GrExternal();
+        bool all = B(p, "all");
+        _jobCts = new CancellationTokenSource();
+        var ct = _jobCts.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                Emit("progress", new { kind = "grunts-measure", done = 0, total = 1, message = "Measuring loudness" });
+                int n = await GruntService.MeasureAsync(proj, GrFolder(proj), tools, !all, new DirectProgress<(int Done, int Total)>(x => Emit("progress", new { kind = "grunts-measure", done = x.Done, total = x.Total })), ct);
+                await _gate.WaitAsync(); try { _lib.Save(proj); } finally { _gate.Release(); }
+                Emit("jobDone", new { kind = "grunts-measure", id, ok = true, message = $"Loudness measured for {n} line(s)." });
+            }
+            catch (OperationCanceledException) { Emit("jobDone", new { kind = "grunts-measure", id, ok = false, message = "Cancelled." }); }
+            catch (Exception ex) { Emit("jobDone", new { kind = "grunts-measure", id, ok = false, message = FriendlyError.From(ex) }); }
+            finally { _jobCts = null; }
+        });
+        return new { started = true };
+    }
+
+    /// <summary>Whisper fills in every empty subtitle of an event, or of the whole project (one model load for all).</summary>
+    private object StartGrWhisper(JsonElement p)
+    {
+        if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
+        var id = S(p, "id");
+        var proj = LoadGr(id);
+        var tools = GrExternal();
+        var eventId = S(p, "eventId");
+        var folder = GrFolder(proj);
+        var todo = proj.Events.Where(kv => eventId.Length == 0 || kv.Key == eventId).SelectMany(kv => kv.Value.Lines)
+            .Where(l => l.Text.Trim().Length == 0 && File.Exists(GruntService.SourcePath(l, folder))).ToList();
+        if (todo.Count == 0) throw new InvalidOperationException("Every line there has a subtitle already.");
+        _jobCts = new CancellationTokenSource();
+        var ct = _jobCts.Token;
+        _ = Task.Run(async () =>
+        {
+            int filled = 0;
+            try
+            {
+                Emit("progress", new { kind = "grunts-whisper", done = 0, total = todo.Count, message = "Loading Whisper" });
+                var tool = new Tools.WavToLip(_settings.WavToLip, Tools(), WhisperModelsFolder(), e => { if (e.Kind == "log") App.Log("Whisper: " + e.Text); });
+                var (transcribe, engine) = await tool.CreateTranscriberAsync(ct);
+                var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
+                Directory.CreateDirectory(workRoot);
+                using var work = new WorkFolder(workRoot);
+                await using (engine)
+                {
+                    for (int i = 0; i < todo.Count; i++)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var l = todo[i];
+                        Emit("progress", new { kind = "grunts-whisper", done = i, total = todo.Count, current = Path.GetFileName(GruntService.SourcePath(l, folder)) });
+                        try
+                        {
+                            var src = GruntService.SourcePath(l, folder);
+                            var input = src;
+                            if (src.EndsWith(".fuz", StringComparison.OrdinalIgnoreCase)) { input = work.File($"f{i}.xwm"); File.WriteAllBytes(input, Core.Audio.FuzFile.Split(File.ReadAllBytes(src)).Xwm); }
+                            var wav = work.File($"w{i}.wav");
+                            var r = await ExternalTools.RunAsync(tools.FfmpegPath, new[] { "-y", "-hide_banner", "-loglevel", "error", "-i", input, "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le", wav }, ct);
+                            if (r.ExitCode != 0) continue;
+                            var text = (await transcribe(wav, ct)).Trim();
+                            if (text.Length > 0 && l.Text.Trim().Length == 0) { l.Text = text; filled++; }
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception ex) { App.Log("Grunts Whisper: " + ex.Message); }
+                    }
+                }
+                await _gate.WaitAsync(); try { _lib.Save(proj); } finally { _gate.Release(); }
+                Emit("jobDone", new { kind = "grunts-whisper", id, ok = true, message = $"Whisper filled in {filled} of {todo.Count} empty subtitle(s). Check them before exporting." });
+            }
+            catch (OperationCanceledException) { await SaveQuiet(); Emit("jobDone", new { kind = "grunts-whisper", id, ok = false, message = $"Cancelled ({filled} filled in)." }); }
+            catch (Exception ex) { await SaveQuiet(); Emit("jobDone", new { kind = "grunts-whisper", id, ok = false, message = FriendlyError.From(ex) }); }
+            finally { _jobCts = null; }
+            async Task SaveQuiet() { await _gate.WaitAsync(); try { _lib.Save(proj); } catch { } finally { _gate.Release(); } }
+        });
+        return new { started = true, lines = todo.Count };
     }
 
     /// <summary>Whisper's transcript of a line's audio or of a recording (the WAV to LIP Tool's Whisper settings): a subtitle suggestion.</summary>

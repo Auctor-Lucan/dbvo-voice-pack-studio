@@ -118,8 +118,10 @@ public sealed class GruntProject
     public string LastReport { get; set; } = "";
     /// <summary>Text-to-speech work in progress, by event|slot|line: the texts and every try until one is saved to the event.</summary>
     public Dictionary<string, GruntDraft> Drafts { get; set; } = new();
-    /// <summary>Reverb settings for the line toggle (Audacity's Reverb; the default is the inner-thoughts preset).</summary>
-    public Audio.ReverbSettings Reverb { get; set; } = new();
+    /// <summary>The project's effect presets (reverbs, filters, voices), editable in Setup; empty = the built-in ones.</summary>
+    public List<Audio.EffectPreset> Effects { get; set; } = new();
+    /// <summary>The preset the line toggle and "all lines of this event" use.</summary>
+    public string DefaultEffect { get; set; } = "inner";
     /// <summary>Write time of the subtitles .toml when it was last written or read (a newer file is read back in).</summary>
     public long SubtitlesTomlTicks { get; set; }
 }
@@ -185,6 +187,13 @@ public sealed class GruntLine
     public DateTime AddedUtc { get; set; } = DateTime.UtcNow;
     /// <summary>Reverb is applied to the file itself (inner thoughts, narration); the original is kept in the project to take it off.</summary>
     public bool Reverb { get; set; }
+    /// <summary>The effect preset on the file (with <see cref="Reverb"/> on); empty = "inner" (files from 8.2.0).</summary>
+    public string EffectId { get; set; } = "";
+    /// <summary>Non-destructive trim and fades, applied when listening and exporting (seconds / milliseconds; 0 = none).</summary>
+    public double TrimStart { get; set; }
+    public double TrimEnd { get; set; }
+    public double FadeInMs { get; set; }
+    public double FadeOutMs { get; set; }
     /// <summary>Length and write time of the file the reverb wrote: a file changed since then isn't replaced by the original unasked.</summary>
     public string ReverbStamp { get; set; } = "";
 }

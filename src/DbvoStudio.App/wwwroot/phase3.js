@@ -134,7 +134,7 @@ export async function fomodView(id) {
   const move = (arr, i, d) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; changed(true); };
 
   function renderHead() {
-    const build = h('button.btn.primary', { disabled: !!app.job, title: 'Stage the installer and pack the archive' }, 'Build ▾');
+    const build = h('button.btn.primary', { title: 'Stage the installer and pack the archive' }, 'Build ▾');
     build.addEventListener('click', () => popupMenu(build, [
       { label: `Build and pack .${proj.archiveFormat}`, sub: `Stages everything, then writes the archive to ${proj.releaseFolder || '(set the release folder)'}`, onclick: () => runBuild(true) },
       { label: 'Stage only', sub: 'Builds the installer folder without packing, to check it or test it in MO2 / Vortex', onclick: () => runBuild(false) },

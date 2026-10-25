@@ -3,6 +3,7 @@
 // lines. Event definitions are data (built in, read from the installed mods, or the user's own custom events).
 import { rpc, h, clear, toast, fail, modal, confirmBox, store, debounce, switchEl, segmented, popupMenu, droppedPaths, icon, helpButton, withBusy } from './lib.js';
 import { app, go, refreshState } from './app.js';
+import { setPaletteExtra } from './nav.js';
 import { recordTake } from './recorder.js';
 import { insertTagAtCaret } from './tagtools.js';
 
@@ -149,7 +150,7 @@ export async function gruntProjectView(id) {
   function renderHead() {
     const p = P();
     const withAudio = d.events.filter((e) => e.lines.length).length;
-    const exp = h('button.btn.accent.export-btn', { title: 'Check the project, then write the voice pack to the output folder', disabled: !!app.job }, icon('export', { size: 15 }), ' Export ▾');
+    const exp = h('button.btn.accent.export-btn', { title: 'Check the project, then write the voice pack to the output folder' }, icon('export', { size: 15 }), ' Export ▾');
     exp.addEventListener('click', () => popupMenu(exp, [
       { label: 'Export the voice pack', sub: p.outputFolder ? `→ ${p.outputFolder}` : 'Choose the output folder first', onclick: doExport },
       { label: 'Check only', sub: 'List problems and what the export would write; nothing is written', onclick: () => check(false) },
@@ -477,6 +478,12 @@ export async function gruntProjectView(id) {
         h('button.btn.sm', { title: 'Choose audio files', onclick: () => pickFiles(e) }, 'Add files…'),
         h('button.btn.sm', { title: 'Record with your microphone (optionally through the Voice Changer)', disabled: !!app.job, onclick: () => record(e) }, '🎙 Record'),
         h('button.btn.sm', { title: canTts ? 'Open the text-to-speech workspace: write, tag and try until a take is right, then save it to the event' : 'Pick a DBVO voice pack in Setup & export first', disabled: !canTts, onclick: () => tts(e, e.kind === 'slots' ? (e.slots.find((x) => !e.lines.some((l) => l.slot === x.id)) || e.slots[0]).id : '') }, 'Text-to-speech'),
+        e.lines.some((l) => l.exists && l.wav) ? (() => {
+          const all = e.lines.filter((l) => l.exists && l.wav);
+          const on = all.every((l) => l.reverb);
+          return h('button.btn.sm', { title: on ? 'Take the effect off every line of this event (the originals come back)' : `${fxName(P().defaultEffect)} on every line of this event (Setup → Effects picks which effect)`, onclick: () => effectLines(on ? all : all.filter((l) => !l.reverb), on ? '' : P().defaultEffect) }, on ? `${fxShort(P().defaultEffect)} off for all` : `${fxShort(P().defaultEffect)} all lines`);
+        })() : null,
+        e.lines.some((l) => !l.text) ? h('button.btn.sm', { title: 'Let Whisper fill in the empty subtitles of this event', onclick: () => whisperAll(e.id) }, 'Whisper subtitles') : null,
         h('div.spacer'),
         h('button.act-btn' + (e.skipped ? '.on.bad' : ''), { title: e.skipped ? 'Skipped (left out of the export) - click to include' : 'Skip: leave this event out of the export', onclick: () => evAction(e, { skipped: !e.skipped }) }, icon('ban')),
         e.lines.length ? h('button.act-btn', { title: 'Remove every line of this event (your files stay on disk)', onclick: async () => { if (await confirmBox('Remove all lines?', `Removes the ${e.lines.length} line(s) of ${e.label} from the project. Your audio files stay where they are; the project's own recordings are deleted.`, 'Remove', true)) evAction(e, { clear: true }); } }, icon('x')) : null),
@@ -503,16 +510,108 @@ export async function gruntProjectView(id) {
         h('span.ellipsis.grow', { title: l.path + (slot ? `\n“${slot.text}”` : '') }, slot ? h('span.dim', `“${slot.text}” `) : null, l.file, l.exists ? null : h('span.badge.b-broken', { style: { marginLeft: '6px' } }, 'missing')),
         h('span.gr-dur.faint', { title: meta }, fmtSec(l.durationSeconds)),
         h('button.gr-rv' + (l.reverb ? '.on' : ''), {
-          title: !l.exists ? 'The file is missing' : !l.wav ? 'Reverb works on WAV files (replace this line with a WAV first)'
-            : l.reverb ? 'Reverb is on: the file itself has it (the original is kept in the project). Click to take it off.'
-            : 'Reverb for inner thoughts or narration (your Audacity preset: room 81, reverberance 23, delay 99 ms, wet -4 dB, 1 s tail). Changes the file itself; the original is kept so it can be taken off.',
+          title: !l.exists ? 'The file is missing' : !l.wav ? 'Effects work on WAV files (replace this line with a WAV first)'
+            : l.reverb ? `${fxName(l.effectId)} is on: the file itself has it (the original is kept in the project). Click to take it off; ⋯ → Effect… picks another.`
+            : `${fxName(P().defaultEffect)}: ${fxDesc(P().defaultEffect)} Changes the file itself; the original is kept so it can be taken off. ⋯ → Effect… for another one; Setup → Effects to change them.`,
           disabled: !l.exists || !l.wav, onclick: () => reverb(e, l, !l.reverb),
-        }, h('i'), 'Reverb'),
+        }, h('i'), fxShort(l.reverb ? l.effectId : P().defaultEffect)),
         e.kind === 'pool' ? h('button.icon-btn', { title: 'Move up', disabled: i === 0, onclick: () => line(e, l, { to: i - 1 }) }, '↑') : null,
         e.kind === 'pool' ? h('button.icon-btn', { title: 'Move down', disabled: i === e.lines.length - 1, onclick: () => line(e, l, { to: i + 1 }) }, '↓') : null,
         h('button.icon-btn', { title: 'More: replace the file, move to another event, open its folder' , onclick: (ev) => lineMenu(ev.currentTarget, e, l) }, '⋯'),
         h('button.icon-btn', { title: 'Remove this line (the file stays on disk unless it is the project\'s own recording)', onclick: () => line(e, l, { remove: true }) }, '×')),
-      name || text ? h('div.row', { style: { gap: '6px', paddingLeft: '26px' } }, name, text) : null);
+      name || text || l.lufs != null || hasTrim(l) ? h('div.row', { style: { gap: '6px', paddingLeft: '26px', flexWrap: 'nowrap' } }, name, text, text ? null : h('div.spacer'),
+        hasTrim(l) ? h('span.badge.b-skip', { title: `Trimmed ${l.trimStart.toFixed(2)} s – ${l.trimEnd ? l.trimEnd.toFixed(2) + ' s' : 'end'}${l.fadeInMs ? `, fade in ${l.fadeInMs} ms` : ''}${l.fadeOutMs ? `, fade out ${l.fadeOutMs} ms` : ''} (when listening and exporting; the file isn't changed)` }, '✂') : null,
+        lufsTag(l)) : null);
+  }
+  // ---- effects (reverb, filters, voices), loudness, trim, variants
+  const fxList = () => P().effects || [];
+  const fxOf = (fid) => fxList().find((x) => x.id === fid) || (P().builtInEffects || []).find((x) => x.id === fid) || { id: fid, name: fid, description: '' };
+  const fxName = (fid) => fxOf(fid).name;
+  const fxDesc = (fid) => fxOf(fid).description || '';
+  const fxShort = (fid) => (fid === 'inner' ? 'Reverb' : fxName(fid).split(' (')[0]);
+  const hasTrim = (l) => l.trimStart > 0.0005 || l.trimEnd > 0.0005 || l.fadeInMs > 0.5 || l.fadeOutMs > 0.5;
+  function lufsTag(l) {
+    if (l.lufs == null) return null;
+    if (l.lufs <= -70) return h('span.gr-lufs.bad', { title: 'Silent or too short to measure' }, 'silent');
+    const mid = d.project.packLufs;
+    const off = mid == null ? 0 : l.lufs - mid;
+    const cls = Math.abs(off) > 4 ? '.bad' : l.peakDb != null && l.peakDb > -0.1 ? '.warn' : '';
+    const w = Math.max(4, Math.min(100, ((l.lufs + 40) / 34) * 100));
+    return h('span.gr-lufs' + cls, { title: `Loudness ${l.lufs.toFixed(1)} LUFS${l.peakDb != null ? ` · peak ${l.peakDb.toFixed(1)} dBTP` : ''}${mid != null ? ` · the pack's middle is ${mid.toFixed(1)} LUFS (${off >= 0 ? '+' : ''}${off.toFixed(1)} LU)` : ''}${Math.abs(off) > 4 ? (off > 0 ? ' · too loud compared with the pack' : ' · too quiet compared with the pack') : ''}` },
+      h('i', h('b', { style: { width: w + '%' } })), `${l.lufs.toFixed(1)} LUFS`);
+  }
+  async function effectLines(lines, fid, force = false) {
+    try {
+      const r = await withBusy(call('grunts.effect', { lineIds: lines.map((x) => x.id), effect: fid, force }), fid ? 'Adding the effect' : 'Taking the effect off', `${lines.length} line(s)…`);
+      if (r.changed) { if (await confirmBox('Put the original back?', r.message, 'Put the original back', true)) return effectLines(lines, fid, true); return; }
+      if (r.problems && r.problems.length) toast(r.problems.slice(0, 3).join(' · '), true);
+      audio.pause(); playing = null;
+      renderAll();
+    } catch { renderAll(); }
+  }
+  async function effectDialog(e, l) {
+    let pick = l.reverb ? l.effectId : P().defaultEffect;
+    const groups = {};
+    for (const fx of fxList()) (groups[fx.group] = groups[fx.group] || []).push(fx);
+    const radios = h('div.gr-fx-pick', Object.entries(groups).map(([g, list]) => h('div', h('div.field-label', g), list.map((fx) => {
+      const r = h('input', { type: 'radio', name: 'gr-fx', checked: fx.id === pick });
+      r.addEventListener('change', () => { pick = fx.id; });
+      return h('label.gr-fx-opt', { title: fx.description }, r, h('b', fx.name), h('span.faint', ' ' + fx.description));
+    }))));
+    const v = await modal(`Effect · ${l.file}`, [radios, h('div.faint', 'Changes the WAV file itself (so it sounds that way in the game and anywhere you open it). The original is kept in the project: choosing another effect starts again from it, and Remove puts it back. Edit the effects in Setup & export → Effects.')],
+      [{ label: 'Cancel', value: false }, l.reverb ? { label: 'Remove the effect', value: 'off' } : null, { label: 'Apply', primary: true, value: 'on' }].filter(Boolean), { wide: true, help: 'grunt-events' });
+    if (v === 'off') effectLines([l], '');
+    else if (v === 'on') effectLines([l], pick);
+  }
+  async function trimDialog(e, l) {
+    const dur = l.durationSeconds || 0;
+    if (!dur) { toast('The length of this line isn\'t known yet.', true); return; }
+    const startIn = h('input', { type: 'range', min: 0, max: dur, step: 0.01, value: l.trimStart || 0 });
+    const endIn = h('input', { type: 'range', min: 0, max: dur, step: 0.01, value: l.trimEnd || dur });
+    const sl = h('span.mono'), el = h('span.mono');
+    const fin = h('input', { type: 'number', min: 0, max: 2000, step: 5, value: l.fadeInMs || 0, style: { width: '80px' } });
+    const fout = h('input', { type: 'number', min: 0, max: 2000, step: 5, value: l.fadeOutMs || 0, style: { width: '80px' } });
+    const sync = () => { if (+startIn.value > +endIn.value - 0.05) startIn.value = Math.max(0, +endIn.value - 0.05); sl.textContent = (+startIn.value).toFixed(2) + ' s'; el.textContent = (+endIn.value).toFixed(2) + ' s'; };
+    startIn.addEventListener('input', sync); endIn.addEventListener('input', sync); sync();
+    const a = new Audio();
+    const playSel = async () => {
+      try {
+        // the whole file, played from Start to End (the fades are heard after saving)
+        a.src = await rpc('grunts.audio', { id, lineId: l.id, raw: true });
+        a.currentTime = +startIn.value;
+        const stop = +endIn.value;
+        const tick = () => { if (a.currentTime >= stop) { a.pause(); a.removeEventListener('timeupdate', tick); } };
+        a.addEventListener('timeupdate', tick);
+        await a.play();
+      } catch (err) { fail(err); }
+    };
+    const v = await modal(`Trim and fade · ${l.file}`, [
+      h('div.rec-trim', h('div.row', h('span.faint', 'Start'), startIn, sl), h('div.row', h('span.faint', 'End'), endIn, el)),
+      h('div.row', { style: { gap: '10px' } }, h('span.faint', 'Fade in'), fin, h('span.faint', 'ms · Fade out'), fout, h('span.faint', 'ms'), h('div.spacer'), h('button.btn.sm', { title: 'Play from Start to End', onclick: playSel }, '▶ Play selection')),
+      h('div.faint', 'The file isn\'t changed: the cut and the fades are used when listening and exporting, and can be changed or reset any time.'),
+    ], [{ label: 'Cancel', value: false }, { label: 'Reset', value: 'reset' }, { label: 'Save', primary: true, value: true }], { help: 'grunt-events' });
+    a.pause();
+    if (!v) return;
+    const o = v === 'reset' ? { start: 0, end: 0, fadeIn: 0, fadeOut: 0 } : { start: +startIn.value, end: +endIn.value >= dur - 0.005 ? 0 : +endIn.value, fadeIn: +fin.value || 0, fadeOut: +fout.value || 0 };
+    try { await call('grunts.trim', { lineId: l.id, ...o }); renderAll(); } catch { /* shown */ }
+  }
+  async function variantsDialog(e, l) {
+    const count = h('input', { type: 'number', min: 1, max: 12, value: 4, style: { width: '70px' } });
+    const pitch = h('input', { type: 'number', min: 0, max: 25, step: 0.5, value: 3, style: { width: '70px' } });
+    const speed = h('input', { type: 'number', min: 0, max: 25, step: 0.5, value: 3, style: { width: '70px' } });
+    const ok = await modal(`Variants of ${l.file}`, [
+      h('div.dim', 'New lines made from this one, each a little higher or lower and faster or slower, so a pool doesn\'t repeat the same grunt.'),
+      h('div.row', { style: { gap: '10px' } }, h('span.faint', 'How many'), count, h('span.faint', 'Pitch ±'), pitch, h('span.faint', '% · Speed ±'), speed, h('span.faint', '%')),
+      h('div.faint', 'They are spread evenly over the range (never the original itself) and added right after this line. Its trim, fades and subtitle carry over.'),
+    ], [{ label: 'Cancel', value: false }, { label: 'Make them', primary: true, value: true }], { help: 'grunt-events' });
+    if (!ok) return;
+    try { const r = await withBusy(call('grunts.variants', { eventId: e.id, lineId: l.id, count: +count.value || 4, pitch: +pitch.value || 0, speed: +speed.value || 0 }), 'Making variants', '…'); toast(`${r.added} variant(s) added.`); renderAll(); } catch { /* shown */ }
+  }
+  async function whisperAll(eventId) {
+    try { const r = await call('grunts.whisperAll', { eventId: eventId || '' }); toast(r.queued ? 'Whisper subtitles: queued after the running task.' : `Whisper is filling in ${r.lines} empty subtitle(s)…`); } catch { /* shown */ }
+  }
+  async function measure(all) {
+    try { const r = await call('grunts.measure', { all: !!all }); if (r.queued) toast('Loudness measuring: queued after the running task.'); } catch { /* shown */ }
   }
   async function reverb(e, l, on, force = false) {
     try {
@@ -545,6 +644,9 @@ export async function gruntProjectView(id) {
   function lineMenu(anchor, e, l) {
     popupMenu(anchor, [
       { label: 'Apply subtitles…', sub: l.text ? `“${l.text}”` : 'Write the subtitle, or let Whisper suggest it from the audio', onclick: () => subtitleDialog(e, l) },
+      l.exists && l.wav ? { label: 'Effect…', sub: l.reverb ? `On: ${fxName(l.effectId)}` : 'Reverb, cave, hall, radio, telepathy, robotic, demon…', onclick: () => effectDialog(e, l) } : null,
+      l.exists ? { label: 'Trim and fade…', sub: hasTrim(l) ? 'Trimmed (click to change or reset)' : 'Cut the start or end, fade in or out (the file isn\'t changed)', onclick: () => trimDialog(e, l) } : null,
+      l.exists && e.kind === 'pool' ? { label: 'Make variants…', sub: 'Pitch and speed variants of this line to fill the pool', onclick: () => variantsDialog(e, l) } : null,
       { label: 'Replace the file…', sub: 'Keep the line (its place, name and text), use another audio file', onclick: async () => { const f = await rpc('pick.file', { title: 'Replacement audio', filter: 'Audio|*.wav;*.xwm;*.fuz;*.mp3;*.ogg;*.flac;*.m4a;*.opus' }); if (f) line(e, l, { replace: f }); } },
       P().voicePackId ? { label: 'New tries with text-to-speech…', sub: 'Make takes for this line in the workspace; saving one replaces this line\'s audio', onclick: () => tts(e, l.slot || '', l) } : null,
       e.kind === 'pool' ? { label: 'Move to another event…', onclick: () => moveDialog(e, l) } : null,
@@ -584,6 +686,8 @@ export async function gruntProjectView(id) {
         d.catalog.source === 'installed' ? h('span.faint', { title: d.catalog.sourceInfo }, ` · events read from the installed ${TARGET[P().target]}`) : h('span.faint', ' · built-in event list')),
       h('div.spacer'),
       d.orphans.length ? h('button.btn.sm.ghost', { title: 'Lines of events the current event list doesn\'t have', onclick: orphansDialog }, `${d.orphans.length} unknown event(s)`) : null,
+      lines ? h('button.btn.sm.ghost', { title: 'Measure every line\'s loudness (LUFS) and peak; lines far from the pack\'s middle are flagged in Check', onclick: () => measure(true) }, 'Measure loudness') : null,
+      lines ? h('button.btn.sm.ghost', { title: 'Let Whisper fill in every empty subtitle of the project (one model load for all)', onclick: () => whisperAll('') }, 'Whisper all subtitles') : null,
       h('button.btn.sm', { title: 'List every problem before exporting', onclick: () => check(false) }, 'Check'));
   }
   async function orphansDialog() {
@@ -795,13 +899,48 @@ export async function gruntProjectView(id) {
         h('span.faint', 'Peak ceiling'), num(a.peakDb, (v) => saveProject({ audio: { peakDb: v } }), { min: -12, max: 0, step: 0.5 }), h('span.faint', 'dBTP'))),
       srow('Extra gain', 'After normalizing, e.g. to sit the grunts under dialogue', h('div.row', num(a.gainDb, (v) => saveProject({ audio: { gainDb: v } }), { min: -24, max: 12, step: 0.5 }), h('span.faint', 'dB'))),
       srow('Sample rate', 'Mono, 16-bit', segmented([[22050, '22.05 kHz'], [44100, '44.1 kHz'], [48000, '48 kHz']], a.sampleRate, (v) => saveProject({ audio: { sampleRate: Number(v) } })))));
+    wrap.append(renderEffects());
     wrap.append(sec('Output', 'checking-and-exporting-packs', null,
       srow('Output folder', 'A new mod folder is best. Exports only replace their own earlier files; others are asked about first.', h('div.row', h('span.mono.ellipsis.grow', p.outputFolder || '— not set —'), h('button.btn.sm', { title: 'Choose the output folder', onclick: pickOutput }, 'Choose…'),
         p.outputFolder ? h('button.btn.sm', { title: 'Open it', onclick: () => rpc('grunts.openFolder', { id, which: 'output' }).catch(fail) }, 'Open') : null)),
-      srow('Last export', p.lastExportUtc ? new Date(p.lastExportUtc).toLocaleString() + ` · ${p.exported} files` : 'Not exported yet', h('div.row', h('button.btn.sm', { title: 'List problems and what would be written', onclick: () => check(false) }, 'Check'), p.lastReport ? h('button.btn.sm', { title: 'Show the report', onclick: () => showReport(p.lastReport) }, 'Report') : null, h('div.spacer'), h('button.btn.accent', { title: 'Write the voice pack', disabled: !!app.job, onclick: () => doExport() }, icon('export', { size: 15 }), ' Export')))),
+      srow('Last export', p.lastExportUtc ? new Date(p.lastExportUtc).toLocaleString() + ` · ${p.exported} files` : 'Not exported yet', h('div.row', h('button.btn.sm', { title: 'List problems and what would be written', onclick: () => check(false) }, 'Check'), p.lastReport ? h('button.btn.sm', { title: 'Show the report', onclick: () => showReport(p.lastReport) }, 'Report') : null, h('div.spacer'), h('button.btn.accent', { title: 'Write the voice pack', onclick: () => doExport() }, icon('export', { size: 15 }), ' Export')))),
       sec('Custom events', 'custom-events', h('button.btn.sm', { title: 'Add, edit, import or export your own event definitions', onclick: customEventsDialog }, 'Manage…'),
         h('div.faint', { style: { padding: '10px 0' } }, `${d.catalog.customs} custom event(s) for ${TARGET[p.target]}. They are kept in the library, shared by every ${TARGET[p.target]} project, and can be exported to share.`)));
     return wrap;
+  }
+
+  // Setup → Effects: the project's presets (the line toggle uses the default one).
+  function renderEffects() {
+    const list = fxList().map((x) => JSON.parse(JSON.stringify(x)));
+    const builtIns = P().builtInEffects || [];
+    const saveFx = debounce(() => saveProject({ effects: list }), 500);
+    const num = (obj, k, o) => { const i = h('input', { type: 'number', value: obj[k], min: o.min, max: o.max, step: o.step || 1, style: { width: '68px' }, title: o.title || '' }); i.addEventListener('change', () => { obj[k] = Number(i.value); saveFx(); }); return h('span.gr-fx-num', h('span.faint', o.label), i); };
+    const rows = list.map((fx) => {
+      const isDefault = fx.id === P().defaultEffect;
+      const builtIn = builtIns.find((b) => b.id === fx.id);
+      const det = h('details.gr-fx-row',
+        h('summary', h('b', fx.name), h('span.faint', ` · ${fx.group}`), isDefault ? h('span.badge.b-valid', { style: { marginLeft: '8px' } }, 'toggle') : null, h('span.faint.ellipsis', { style: { marginLeft: '10px' } }, fx.description)),
+        h('div.col', { style: { gap: '8px', padding: '8px 0 4px 14px' } },
+          h('div.row', { style: { gap: '8px' } },
+            (() => { const n = h('input', { type: 'text', value: fx.name, style: { width: '220px' } }); n.addEventListener('change', () => { fx.name = n.value.trim() || fx.name; saveFx(); }); return n; })(),
+            (() => { const t = h('input', { type: 'text', value: fx.description, placeholder: 'What it sounds like', style: { flex: '1' } }); t.addEventListener('change', () => { fx.description = t.value; saveFx(); }); return t; })()),
+          fx.reverb ? h('div.row.wrap', { style: { gap: '10px' } },
+            num(fx.reverb, 'roomSize', { label: 'Room', min: 0, max: 100 }), num(fx.reverb, 'reverberance', { label: 'Reverberance', min: 0, max: 100 }),
+            num(fx.reverb, 'hfDamping', { label: 'Damping', min: 0, max: 100 }), num(fx.reverb, 'preDelayMs', { label: 'Delay ms', min: 0, max: 200 }),
+            num(fx.reverb, 'toneLow', { label: 'Tone low', min: 0, max: 100 }), num(fx.reverb, 'toneHigh', { label: 'Tone high', min: 0, max: 100 }),
+            num(fx.reverb, 'wetGainDb', { label: 'Wet dB', min: -20, max: 10, step: 0.5 }), num(fx.reverb, 'dryGainDb', { label: 'Dry dB', min: -20, max: 10, step: 0.5 }),
+            num(fx.reverb, 'tailSeconds', { label: 'Tail s', min: 0, max: 5, step: 0.1, title: 'Silence added at the end first, so the reverb rings out (the line\'s own length when shorter)' })) : null,
+          h('div.row', { style: { gap: '8px' } }, h('span.faint', 'ffmpeg filter'), (() => { const t = h('input.mono', { type: 'text', value: fx.filter, placeholder: '(none)', style: { flex: '1', fontSize: '12px' }, title: 'An ffmpeg -af chain applied before the reverb; {rate} is the file\'s sample rate' }); t.addEventListener('change', () => { fx.filter = t.value.trim(); saveFx(); }); return t; })(),
+            num(fx, 'gainDb', { label: 'Gain dB', min: -20, max: 20, step: 0.5 })),
+          h('div.row', { style: { gap: '6px' } },
+            isDefault ? h('span.faint', 'The line toggle and "all lines" use this one.') : h('button.btn.sm', { title: 'The line toggle and "all lines of this event" use this effect', onclick: () => saveProject({ effects: list, defaultEffect: fx.id }) }, 'Use for the toggle'),
+            h('button.btn.sm.ghost', { title: 'A copy to change without losing this one', onclick: () => { const c = JSON.parse(JSON.stringify(fx)); c.id = fx.id + '-' + Math.random().toString(36).slice(2, 6); c.name = fx.name + ' (copy)'; list.push(c); saveProject({ effects: list }); } }, 'Duplicate'),
+            builtIn ? h('button.btn.sm.ghost', { title: 'Back to the built-in settings of this effect', onclick: () => { Object.assign(fx, JSON.parse(JSON.stringify(builtIn))); saveProject({ effects: list }); } }, 'Reset') : h('button.btn.sm.ghost.danger', { title: 'Delete this effect (lines that have it keep it until you take it off)', disabled: isDefault, onclick: () => { saveProject({ effects: list.filter((x) => x !== fx) }); } }, 'Delete'))));
+      return det;
+    });
+    return h('div.section', h('div.section-head', h('h2', 'Effects'), helpButton('grunt-events'), h('div.spacer'),
+      h('button.btn.sm.ghost', { title: 'Every built-in effect back as it came (your copies go)', onclick: async () => { if (await confirmBox('Reset the effects?', 'Every effect goes back to its built-in settings and your own copies are removed. Lines keep the effect they have.', 'Reset', true)) saveProject({ effects: builtIns, defaultEffect: 'inner' }); } }, 'Reset all')),
+      h('div.section-body', h('div.faint', { style: { padding: '6px 0 8px' } }, 'Reverbs, filters and voice effects for lines: the switch on each line (and "all lines of this event") uses the one marked toggle; ⋯ → Effect… picks any. The reverb is Audacity\'s; the rest are ffmpeg filters.'), rows));
   }
 
   // ---------------------------------------------------------------- layout
@@ -823,6 +962,7 @@ export async function gruntProjectView(id) {
   document.addEventListener('job-done', async function onDone(e) {
     if (!document.body.contains(view)) { document.removeEventListener('job-done', onDone); audio.pause(); return; }
     const r = e.detail || {};
+    if ((r.kind === 'grunts-measure' || r.kind === 'grunts-whisper') && r.id === id) { try { d = await rpc('grunts.get', { id }); byId = evById(); } catch { /* keep */ } renderAll(); return; }
     if (r.kind !== 'grunts-export' || r.id !== id) return;
     try { d = await rpc('grunts.get', { id }); byId = evById(); } catch { /* keep */ }
     renderAll();
@@ -832,5 +972,7 @@ export async function gruntProjectView(id) {
 
   renderAll();
   requestAnimationFrame(() => { blocks.scrollTop = store.get('gr-scroll:' + id, 0); });
+  // Ctrl+K: every event of this project.
+  setPaletteExtra(() => d.events.map((e) => ({ kind: 'Event', label: `${e.category} · ${e.label}`, sub: `${e.lines.length} line(s) · ${P().name}`, run: () => { tab = 'events'; store.set('gr-tab:' + id, 'events'); selId = e.id; catFilter = ''; search = ''; filter = 'all'; renderAll(); requestAnimationFrame(() => blocks.querySelector(`.gr-tile[data-id="${CSS.escape(e.id)}"]`)?.scrollIntoView({ block: 'center' })); } })));
   return view;
 }

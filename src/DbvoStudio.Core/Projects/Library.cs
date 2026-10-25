@@ -189,8 +189,12 @@ public sealed class Library
         return JsonSerializer.Deserialize<T>(s, Json);
     }
 
+    /// <summary>Called before a JSON file is written (the app keeps the old content for Undo).</summary>
+    public static Action<string>? BeforeSave;
+
     public static void SaveJson<T>(string path, T value)
     {
+        BeforeSave?.Invoke(path);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var tmp = path + ".tmp";
         using (var s = File.Create(tmp))

@@ -281,6 +281,9 @@ public sealed partial class Backend
             book = BkBookDto(proj, b), inGame = b.InGame, spoken = b.Spoken, updatedText = b.UpdatedText, raw = b.Raw.Length > 0,
             records = b.Records.Select(r => new { r.Plugin, formId = r.Hex, r.EditorId }),
             breaks = parts.Skip(1).Select(x => x.Start).ToList(), manual = b.ManualBreaks,
+            voiceOverride = b.VoiceOverride, speed = b.Speed, pause = b.ParagraphPauseMs, projectPause = proj.Audio.ParagraphPauseMs,
+            voiceChoices = proj.Narrators.Select(n => new { key = BooksProject.NarratorKey(n.Id), name = "Narrator: " + (n.Name.Trim().Length > 0 ? n.Name : "Narrator") })
+                .Concat(proj.VoiceTypes.Keys.OrderBy(k => k).Select(k => new { key = BooksProject.VoiceTypeKey(k), name = "NPC voice: " + k })).ToList(),
             partRanges = parts.Select(x => new { start = x.Start, end = x.End, para = x.ParagraphEnd }).ToList(),
             issues = BkIssues(b).Select(i => new { i.Kind, i.Message, i.Serious, i.Find }),
             variantsList = b.Variants.Select(v => new { v.Id, v.Plugin, v.Label, v.WhenInstalled, v.Spoken }),
@@ -365,6 +368,13 @@ public sealed partial class Backend
             {
                 var v = b.Variants.FirstOrDefault(x => x.Id == S(p, "variant")) ?? throw new InvalidOperationException("Variant not found.");
                 v.Spoken = S(p, "value");
+                break;
+            }
+            case "overrides":
+            {
+                if (p.TryGetProperty("voice", out var vo) && vo.ValueKind == JsonValueKind.String) b.VoiceOverride = vo.GetString()!;
+                if (p.TryGetProperty("speed", out var sp)) b.Speed = sp.ValueKind == JsonValueKind.Number ? Math.Clamp(sp.GetDouble(), 0.5, 2) : null;
+                if (p.TryGetProperty("pause", out var pa)) b.ParagraphPauseMs = pa.ValueKind == JsonValueKind.Number ? Math.Clamp(pa.GetInt32(), 0, 5000) : null;
                 break;
             }
             case "restore": b.Spoken = BookText.DefaultSpoken(b.Title, b.InGame, out _, out _); b.SpokenEdited = false; b.ManualBreaks = false; b.Breaks.Clear(); break;
@@ -563,13 +573,23 @@ public sealed partial class Backend
         };
     }
 
+    private static VoicePack? WithSpeed(VoicePack? v, double? speed)
+    {
+        if (v == null || speed is not { } sp) return v;
+        v.Eleven.Speed = Math.Clamp(sp, 0.7, 1.2);
+        v.OmniVoice.Speed = Math.Clamp(sp, 0.5, 2);
+        return v;
+    }
+
     private object StartBkGenerate(JsonElement p)
     {
         if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         var id = S(p, "id");
         var proj = LoadBk(id);
         var all = BkSelect(proj, p);
-        var groups = all.GroupBy(l => l.Voice).Select(g => (Voice: BooksService.VoicePackFor(proj, g.Key), Key: g.Key, Lines: g.ToList())).Where(g => g.Voice != null).ToList();
+        // One group per voice and speed (a book can have its own speed).
+        double? SpeedOf(BookLine l) => proj.Books.FirstOrDefault(b => b.Stem == l.Stem)?.Speed;
+        var groups = all.GroupBy(l => (l.Voice, SpeedOf(l))).Select(g => (Voice: WithSpeed(BooksService.VoicePackFor(proj, g.Key.Voice), g.Key.Item2), Key: g.Key.Voice, Lines: g.ToList())).Where(g => g.Voice != null).ToList();
         if (groups.Count == 0) throw new InvalidOperationException(all.Count == 0 ? "Nothing to generate." : "Pick a voice for the narrator or voice types first (Voices tab).");
         var tools = BooksTools();
         _jobCts = new CancellationTokenSource();

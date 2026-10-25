@@ -96,3 +96,48 @@ public class GruntExtrasTests
         Assert.Equal(0, GruntService.ReadSubtitlesToml(p, toml.Replace("Take \\\"this\\\"!", "Have at you!")).Changed);
     }
 }
+
+public class EffectsTests
+{
+    private static DbvoStudio.Core.Tools.ExternalTools Tools() => new() { FfmpegPath = "/usr/bin/ffmpeg", FaceFxWrapperPath = "" };
+
+    [Fact]
+    public async Task Every_built_in_effect_runs()
+    {
+        if (!File.Exists("/usr/bin/ffmpeg")) return;
+        var dir = Path.Combine(Path.GetTempPath(), "fx-" + Guid.NewGuid().ToString("N")[..8]); Directory.CreateDirectory(dir);
+        var src = Path.Combine(dir, "a.wav");
+        var s = new short[22050]; for (int i = 0; i < s.Length; i++) s[i] = (short)(Math.Sin(2 * Math.PI * 200 * i / 44100) * 9000);
+        new WavFile { SampleRate = 44100, Channels = 1, Samples = s }.Write(src);
+        foreach (var fx in Effects.BuiltIn())
+        {
+            var o = Path.Combine(dir, fx.Id + ".wav");
+            await Effects.ApplyAsync(src, o, fx, Tools());
+            var w = WavFile.Read(o);
+            Assert.True(w.Samples.Length >= s.Length * 0.95, fx.Id + " keeps the length");
+            Assert.True(w.Samples.Any(x => x != 0), fx.Id + " not silent");
+        }
+        Directory.Delete(dir, true);
+    }
+
+    [Fact]
+    public async Task Take_effect_on_and_off()
+    {
+        if (!File.Exists("/usr/bin/ffmpeg")) return;
+        var root = Path.Combine(Path.GetTempPath(), "tk-" + Guid.NewGuid().ToString("N")[..8]); Directory.CreateDirectory(Path.Combine(root, "takes"));
+        var s = new short[22050]; for (int i = 0; i < s.Length; i++) s[i] = (short)(Math.Sin(i / 9.0) * 9000);
+        new WavFile { SampleRate = 44100, Channels = 1, Samples = s }.Write(Path.Combine(root, "takes", "t.wav"));
+        var orig = File.ReadAllBytes(Path.Combine(root, "takes", "t.wav"));
+        var line = new DbvoStudio.Core.Projects.Phase2Line();
+        var t = new DbvoStudio.Core.Projects.Take { WavPath = Path.Combine("takes", "t.wav"), OriginalFuz = "old.fuz" };
+        line.Takes.Add(t);
+        Assert.Equal(1, await DbvoStudio.Core.Projects.TakeEffects.SetAsync(root, line, "radio", null, Tools()));
+        Assert.Equal("radio", t.Effect); Assert.Null(t.OriginalFuz);
+        Assert.NotEqual(orig, File.ReadAllBytes(Path.Combine(root, "takes", "t.wav")));
+        await DbvoStudio.Core.Projects.TakeEffects.SetAsync(root, line, "robot", null, Tools()); // switch: from the dry one
+        await DbvoStudio.Core.Projects.TakeEffects.SetAsync(root, line, null, null, Tools());
+        Assert.Equal("", t.Effect); Assert.Equal("old.fuz", t.OriginalFuz);
+        Assert.Equal(orig, File.ReadAllBytes(Path.Combine(root, "takes", "t.wav")));
+        Directory.Delete(root, true);
+    }
+}

@@ -78,7 +78,7 @@ export async function wavLipView() {
   const bar = h('div.bar', h('div.bar-fill', { style: { width: '0%' } }));
   const logEl = h('div.log', logLines.join('\n'));
   const log = (t) => { logLines.push(t); if (logLines.length > 2000) logLines.shift(); logEl.textContent = logLines.join('\n'); logEl.scrollTop = logEl.scrollHeight; };
-  const startBtn = h('button.btn.primary', { title: 'Transcribe each WAV and write a .lip next to it', disabled: !!app.job, onclick: start }, 'Transcribe + Generate .LIP');
+  const startBtn = h('button.btn.primary', { title: 'Transcribe each WAV and write a .lip next to it', onclick: start }, 'Transcribe + Generate .LIP');
 
   whisper.style.maxWidth = 'none';
   tools.style.maxWidth = 'none';
@@ -95,7 +95,6 @@ export async function wavLipView() {
       h('div.section-body', bar, statusEl, logEl))));
 
   async function start() {
-    if (app.job) return;
     if (!files.length) { toast('Add at least one WAV file first.', true); return; }
     const overwrites = files.filter((f) => f.hasLip).length;
     if (overwrites && !(await confirmBox('Overwrite .lip files?', `${overwrites} .lip file(s) already exist and would be overwritten. Continue?`, 'Continue'))) return;

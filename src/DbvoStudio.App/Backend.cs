@@ -62,13 +62,22 @@ public sealed partial class Backend
         var id = msg.TryGetProperty("id", out var idEl) ? idEl.GetInt32() : 0;
         var method = msg.GetProperty("method").GetString() ?? "";
         var p = msg.TryGetProperty("params", out var pe) ? pe : default;
+        UndoEntry? undo = null;
         try
         {
-            object? result = await Dispatch(method, p, droppedFiles);
+            // A job start while another job runs waits in the queue.
+            object? result = TryQueue(method, p, droppedFiles);
+            if (result == null)
+            {
+                undo = BeginUndo(method);
+                result = await Dispatch(method, p, droppedFiles);
+            }
+            EndUndo(undo); undo = null;
             _post(new { id, result });
         }
         catch (Exception ex)
         {
+            EndUndo(undo); // what changed before the error can be taken back too
             App.Log($"{method} failed: {ex}");
             _post(new { id, error = FriendlyError.From(ex) });
         }
@@ -440,6 +449,8 @@ public sealed partial class Backend
                 if (rv != NotHandled) return rv;
                 var bk = await DispatchBooks(m, p, dropped);
                 if (bk != NotHandled) return bk;
+                var v82 = await DispatchV82(m, p, dropped);
+                if (v82 != NotHandled) return v82;
                 var gr = await DispatchGrunts(m, p, dropped);
                 if (gr != NotHandled) return gr;
                 throw new InvalidOperationException("Unknown action: " + m);
@@ -903,7 +914,7 @@ public sealed partial class Backend
     private static object Line2Dto(Phase2Line l, VoicePack? v) => new
     {
         l.LineId, l.FinalLine, l.OriginalLine, l.Spoken, l.SpokenEdited, status = l.Status.ToString(), l.OmittedBy, l.OverrideOmit,
-        omitted = l.IsOmitted, l.LastError, l.TagSuggestion, l.SelectedTakeId, l.Marked, excluded = l.Excluded, undo = l.UndoSpoken != null, approved = l.Approved,
+        omitted = l.IsOmitted, l.LastError, l.TagSuggestion, l.SelectedTakeId, l.Marked, excluded = l.Excluded, undo = l.UndoSpoken != null, approved = l.Approved, effect = l.Effect,
         hasSource = l.SourceWav != null, sourceWav = l.SourceWav,
         stem = v == null ? "" : LineNaming.Stem(l.FinalLine, v.Naming),
         legacyName = LineNaming.Legacy(l.FinalLine),

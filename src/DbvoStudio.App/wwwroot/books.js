@@ -103,7 +103,7 @@ export async function bookProjectView(id) {
 
   // ---------------------------------------------------------------- head
   function renderHead() {
-    const exp = h('button.btn.accent.export-btn', { title: 'Join the parts, add reverb and loudness, encode xWMA and pack the archives, .ini and installer', disabled: !!app.job }, icon('export', { size: 15 }), ' Export ▾');
+    const exp = h('button.btn.accent.export-btn', { title: 'Join the parts, add reverb and loudness, encode xWMA and pack the archives, .ini and installer', }, icon('export', { size: 15 }), ' Export ▾');
     exp.addEventListener('click', () => popupMenu(exp, [
       { label: 'Export everything', sub: `Archives (${proj.packaging === 'loose' ? 'loose files' : 'BSA + plugin'}) per narrator${proj.voiceTypes.length && proj.npcVoices ? ' and for NPC voices' : ''}, ${proj.writeIni ? proj.iniFile + ', ' : ''}topic file, validation report and a FOMOD installer → ${proj.outputFolder || '(choose the output folder first)'}`, onclick: () => doExport(true) },
       { label: 'Export without the installer', sub: 'The same, but no fomod folder', onclick: () => doExport(false) },
@@ -123,7 +123,7 @@ export async function bookProjectView(id) {
       helpButton({ setup: 'books-setup', voices: 'narrators-and-authors', books: 'books-and-the-editor' }[tab] || 'voiced-books-tool'),
       h('div.spacer'),
       creditsSlot,
-      h('button.btn', { title: proj.source === 'plugins' ? 'Read the plugins again and rebuild the book list (keeps your edits and takes)' : 'Read the game\'s own text for the editor and the checks, and pick up an updated built-in set', disabled: !!app.job, onclick: scan }, proj.lastScan ? '⟳ Rescan' : 'Scan'),
+      h('button.btn', { title: proj.source === 'plugins' ? 'Read the plugins again and rebuild the book list (keeps your edits and takes)' : 'Read the game\'s own text for the editor and the checks, and pick up an updated built-in set', onclick: scan }, proj.lastScan ? '⟳ Rescan' : 'Scan'),
       exp,
       h('button.btn.ghost.danger.sm', { title: 'Delete this project and its takes (exported files stay)', onclick: async () => { if (await confirmBox('Delete Voiced Books project?', 'Deletes its takes and joined audio too. Exported files stay where they are.', 'Delete', true)) { try { await rpc('books.delete', { id }); go('books'); } catch (e) { fail(e); } } } }, 'Delete'));
     const needs = () => proj.narrators.concat(proj.voiceTypes).reduce((a, v) => a + ((v.stats && v.stats.charactersLeft) || 0), 0);
@@ -168,7 +168,7 @@ export async function bookProjectView(id) {
         h('div.faint', 'The spoken texts, which books are read by NPC voices and the USSEP variants come with the set. You only add narrator voices (and voices for the NPC voice types you want). Edits you make are kept; when a newer set changes a book you edited, the book shows "updated text available".'),
         proj.baseGameFolder
           ? (ls ? h('div.stat-row', h('span', h('b', ls.books.toLocaleString()), ' books'), h('span', h('b', ls.npc.toLocaleString()), ' read by NPC voices'), h('span.faint', 'game text read ' + new Date(ls.scannedUtc).toLocaleString()))
-            : h('div.banner.info', { style: { margin: 0 } }, h('span', 'Scan once to show the game\'s own text next to each spoken text, and for the checks.'), h('div.spacer'), h('button.btn.sm', { title: 'Read the game text', disabled: !!app.job, onclick: scan }, 'Scan')))
+            : h('div.banner.info', { style: { margin: 0 } }, h('span', 'Scan once to show the game\'s own text next to each spoken text, and for the checks.'), h('div.spacer'), h('button.btn.sm', { title: 'Read the game text', onclick: scan }, 'Scan')))
           : h('div.banner.warn', { style: { margin: 0 } }, 'Without the base game folder the editor shows only the spoken text, and the checks against the game text are off. Generating and exporting work.'));
     } else {
       const drop = h('div.dropzone', h('div', h('b', 'Drop plugins (.esp / .esm / .esl), their .bsa archives or a mod folder here')),
@@ -207,7 +207,8 @@ export async function bookProjectView(id) {
           ...[['reverbRoomSize', 'Room size %'], ['reverbPreDelayMs', 'Pre-delay ms'], ['reverbReverberance', 'Reverberance %'], ['reverbHfDamping', 'Damping %'], ['reverbToneLow', 'Tone low %'], ['reverbToneHigh', 'Tone high %'], ['reverbWetGainDb', 'Wet dB'], ['reverbDryGainDb', 'Dry dB']]
             .map(([k, l]) => h('label.col', { style: { gap: '2px' } }, h('span.faint', l), num(a[k], (v) => setAudio(k, v), { width: '80px' }))))))),
       srow('Pauses', 'Silence added where two parts meet: after a paragraph, or after a sentence inside one. The book ends with silence, as the Audacity macros do.', h('div.row',
-        h('span.faint', 'Paragraph'), num(a.paragraphPauseMs, (v) => setAudio('paragraphPauseMs', v), { min: 0, max: 2000, width: '76px', title: 'Milliseconds (250–400 sounds natural)' }), h('span.faint', 'ms · Sentence'),
+        h('span.faint', 'Paragraph'), segmented([['0', 'None'], ['250', 'Short'], ['500', 'Medium'], ['900', 'Long']], String(a.paragraphPauseMs), (v) => setAudio('paragraphPauseMs', Number(v))),
+        num(a.paragraphPauseMs, (v) => setAudio('paragraphPauseMs', v), { min: 0, max: 2000, width: '76px', title: 'Milliseconds (250–400 sounds natural). A book can have its own (editor → This book).' }), h('span.faint', 'ms · Sentence'),
         num(a.sentencePauseMs, (v) => setAudio('sentencePauseMs', v), { min: 0, max: 2000, width: '76px' }), h('span.faint', 'ms · End'), num(a.endSilenceMs, (v) => setAudio('endSilenceMs', v), { min: 0, max: 5000, width: '76px' }), h('span.faint', 'ms'))),
       srow('Loudness', 'One loudness pass over the whole book, then the limiter: the IVBOS "LOUD" chain (−12 LUFS, limiter at −3 dB with output −1 dB). A narrator set to Normal skips the loudness push.', h('div.row',
         num(a.loudnessLufs, (v) => setAudio('loudnessLufs', v), { min: -40, max: 0, width: '76px', title: 'Integrated loudness in LUFS (0 = leave as it is)' }), h('span.faint', 'LUFS · Limiter'),
@@ -217,7 +218,7 @@ export async function bookProjectView(id) {
         proj.xwma ? h('span.faint', 'xWMAEncode.exe found') : h('span', { style: { color: 'var(--warn)' } }, 'xWMAEncode.exe is not set (Global Settings → General & tools → Tools): needed to export'))));
 
     wrap.append(
-      sec(proj.source !== 'plugins' ? 'Texts' : 'Plugins', proj.source !== 'plugins' ? 'the-built-in-skyrim-dlc-set' : 'books-from-a-mod', proj.source === 'plugins' ? h('button.btn.primary.sm', { title: 'Read the plugins and build the book list', disabled: !!app.job, onclick: scan }, ls ? '⟳ Rescan' : 'Scan') : null, textsBody),
+      sec(proj.source !== 'plugins' ? 'Texts' : 'Plugins', proj.source !== 'plugins' ? 'the-built-in-skyrim-dlc-set' : 'books-from-a-mod', proj.source === 'plugins' ? h('button.btn.primary.sm', { title: 'Read the plugins and build the book list', onclick: scan }, ls ? '⟳ Rescan' : 'Scan') : null, textsBody),
       sec('Names and output', 'export-and-the-installer', null,
         srow('Project name', null, text(proj.name, (v) => save({ name: v || proj.name }))),
         srow('Mod name', 'In archive names: "<prefix> <mod name> - <narrator>".', text(proj.modName, (v) => save({ modName: v }), { placeholder: 'e.g. VIGILANT' })),
@@ -452,7 +453,6 @@ export async function bookProjectView(id) {
   }
 
   function genBlock(b) {
-    if (app.job) return 'A job is running (see the top bar)';
     if (b.excl) return 'Left out';
     if (b.gone) return 'No longer in the plugins';
     if (!b.voices.length) return proj.narrators.length ? 'No voice reads this book (NPC voices are off?)' : 'Add a narrator first';
@@ -746,6 +746,27 @@ export async function bookProjectView(id) {
       sel.addEventListener('change', () => { if (sel.value) act('reader', 'npc', { voiceType: sel.value }); else act('reader', 'narrator'); });
       return sel;
     }
+    // This book only: another voice, its own speed, its own pause between paragraphs.
+    function overridesBtn() {
+      const set = [d.voiceOverride ? 'voice' : '', d.speed != null ? 'speed ' + d.speed : '', d.pause != null ? `pause ${d.pause} ms` : ''].filter(Boolean);
+      const btn = h('button.btn.sm' + (set.length ? '.on' : ''), { title: set.length ? `This book: ${set.join(', ')}` : 'Voice, speed and paragraph pause for this book only' }, set.length ? `This book: ${set.join(' · ')}` : 'This book ▾');
+      btn.addEventListener('click', async () => {
+        const vsel = h('select', { style: { width: '100%' } }, h('option', { value: '' }, 'As usual (the reader chosen for it)'), d.voiceChoices.map((c) => h('option', { value: c.key, selected: c.key === d.voiceOverride }, c.name)));
+        const sp = h('input', { type: 'number', min: 0.5, max: 2, step: 0.05, value: d.speed ?? '', placeholder: 'the voice\'s own', style: { width: '120px' } });
+        let pause = d.pause;
+        const custom = h('input', { type: 'number', min: 0, max: 5000, step: 50, value: pause ?? '', placeholder: `${d.projectPause} (project)`, style: { width: '120px' } });
+        const seg = segmented([['', 'Project'], ['0', 'None'], ['250', 'Short'], ['500', 'Medium'], ['900', 'Long']], pause == null ? '' : String(pause), (v) => { pause = v === '' ? null : Number(v); custom.value = pause ?? ''; });
+        custom.addEventListener('input', () => { pause = custom.value === '' ? null : Number(custom.value); });
+        const ok = await modal(`This book · ${d.book.title || stem}`, [
+          h('div.col', h('div.field-label', 'Voice'), vsel, h('div.faint', 'One voice reads this book instead of the usual readers (a narrator or an NPC voice type from the Voices tab). Its parts get new takes in that voice.')),
+          h('div.col', h('div.field-label', 'Speed'), h('div.row', sp, h('span.faint', 'ElevenLabs 0.7–1.2, OmniVoice 0.5–2 · empty: the voice\'s own · used for new takes'))),
+          h('div.col', h('div.field-label', 'Pause between paragraphs'), h('div.row', seg, custom, h('span.faint', 'ms'))),
+        ], [{ label: 'Cancel', value: false }, { label: 'Save', primary: true, value: true }], { help: 'books-and-the-editor' });
+        if (!ok) return;
+        await act('overrides', null, { voice: vsel.value, speed: sp.value === '' ? null : Number(sp.value), pause: pause == null || Number.isNaN(pause) ? null : pause });
+      });
+      return btn;
+    }
     async function act(action, value, extra = {}) {
       try { if (dirty) await saveText(); d = await rpc('books.book', { id, stem, action, value, ...extra }); renderEd(true); replaceBook(d.book); } catch (e) { fail(e); }
     }
@@ -800,6 +821,7 @@ export async function bookProjectView(id) {
       clear(headBox).append(
         h('div.grow', h('h2', b.title || stem), h('div.faint.mono', `${stem}.xwm · ${d.records.map((r) => `${r.editorId} ${r.formId}~${r.plugin}`).join(' · ')}`)),
         readerSel(),
+        overridesBtn(),
         d.voices.length > 1 ? segmented(d.voices.map((x) => [x.key, x.name, x.hasVoice ? 'Show this voice\'s takes' : 'This voice has no voice picked yet']), voice, (k) => { voice = k; store.set('bk-ed-voice', k); renderEd(false); }) : d.voices.length ? h('span.faint', d.voices[0].name) : h('span.faint', 'No voice reads this book'),
         helpButton('books-and-the-editor'),
         h('button.btn', { title: 'Close (Esc). The text is saved when you leave the box.', onclick: close }, 'Close'));
@@ -831,7 +853,7 @@ export async function bookProjectView(id) {
             h('div.row', h('span.dot.' + (l ? l.status : 'Pending'), { title: l ? (l.status + (l.err ? ': ' + l.err : '')) : 'Not generated' }),
               h('b', { style: { cursor: 'pointer' }, title: 'Select this part in the spoken text', onclick: () => selectRange(r.start, r.end) }, `Part ${i + 1}`),
               h('span.faint', `${(r.end - r.start).toLocaleString()} chars${r.para ? ' · ¶' : ''}`), h('div.spacer'),
-              l ? h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: v && v.hasVoice ? (l.takes.length ? 'A new take of this part' : 'Generate this part') : 'Pick a voice first', disabled: !v || !v.hasVoice || !!app.job, onclick: () => { inFlight.add(l.id); edAutoPlay.add(l.id); renderEd(false); generate('lines', null, { lineIds: [l.id], single: true }); } }, icon('regen')) : null,
+              l ? h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: v && v.hasVoice ? (l.takes.length ? 'A new take of this part' : 'Generate this part') : 'Pick a voice first', disabled: !v || !v.hasVoice, onclick: () => { inFlight.add(l.id); edAutoPlay.add(l.id); renderEd(false); generate('lines', null, { lineIds: [l.id], single: true }); } }, icon('regen')) : null,
               takeSel,
               l && l.takes.length ? h('button.icon-btn', { title: 'Delete the take in use', onclick: async () => { if (await confirmBox('Delete take?', 'Deletes this part\'s take in use and its file.', 'Delete', true)) lineAct(l.id, 'deleteTake', l.sel); } }, '🗑') : null,
               t ? h('button.icon-btn', { title: 'Play this part\'s take', onclick: () => playTake(t) }, '▶') : null),
@@ -848,7 +870,7 @@ export async function bookProjectView(id) {
             const need = lines.filter((l) => !l.takes.length || l.status !== 'Generated');
             const ids = (need.length ? need : lines).map((l) => l.id);
             const label = need.length ? (need.length === lines.length ? (lines.length === 1 ? 'Generate' : 'Generate all parts') : `Generate ${need.length} missing part${need.length === 1 ? '' : 's'}`) : (lines.length === 1 ? 'New take' : 'New take of every part');
-            return h('button.btn.sm.primary', { title: need.length ? 'Generate the parts that have no take yet or whose text changed since their take, in this voice' : 'Every part has a current take: make a new take of each, in this voice (earlier takes stay)', disabled: !v || !v.hasVoice || !!app.job || !lines.length,
+            return h('button.btn.sm.primary', { title: need.length ? 'Generate the parts that have no take yet or whose text changed since their take, in this voice' : 'Every part has a current take: make a new take of each, in this voice (earlier takes stay)', disabled: !v || !v.hasVoice || !lines.length,
               onclick: () => { ids.forEach((x) => inFlight.add(x)); if (ids.length === 1) edAutoPlay.add(ids[0]); renderEd(false); generate('lines', null, { lineIds: ids, single: ids.length === 1 }); } }, label);
           })(),
           h('div.spacer'),

@@ -653,6 +653,12 @@ public sealed partial class Phase2Service
             }
             finally
             {
+                // The line's effect (reverb, filter, voice) goes on the new take too.
+                if (newTake != null && line.Effect.Length > 0)
+                {
+                    try { await TakeEffects.ApplyAsync(root, newTake, line.Effect, null, tools, CancellationToken.None); }
+                    catch (Exception ex) { line.LastError = "The take was made, but its effect couldn't be added: " + FriendlyError.From(ex); }
+                }
                 int d = Interlocked.Increment(ref done);
                 progress?.Report(new GenerationProgress(d, total, failed, line.FinalLine, line.LastError));
                 await saveLock.WaitAsync(CancellationToken.None);
