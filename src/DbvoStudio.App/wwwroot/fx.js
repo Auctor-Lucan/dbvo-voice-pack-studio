@@ -32,8 +32,8 @@ export function effectIcon(id, onRemove) {
 /**
  * A row with the effect select. ticked = how many lines a change applies to (1: this line). onPick(effectId) does the work.
  */
-export function effectRow(current, ticked, onPick, title) {
-  const sel = h('select', { title: title || 'An effect on every take of the line (and new takes): reverb for thoughts and narration, a radio, telepathy, a ghost… The dry takes are kept, so No effect takes it off.', style: { maxWidth: '200px' } }, h('option', { value: '' }, 'No effect'));
+export function effectRow(current, ticked, onPick, title, { compact = false } = {}) {
+  const sel = h('select', { title: title || 'An effect on every take of the line (and new takes): reverb for thoughts and narration, a radio, telepathy, a ghost… The dry takes are kept, so No effect takes it off.', style: compact ? {} : { maxWidth: '200px' } }, h('option', { value: '' }, 'No effect'));
   effectsList().then((list) => {
     const groups = {};
     for (const fx of list.filter((x) => !x.isEmpty)) (groups[fx.group] = groups[fx.group] || []).push(fx);
@@ -41,6 +41,7 @@ export function effectRow(current, ticked, onPick, title) {
     sel.value = current || '';
   });
   sel.addEventListener('change', () => onPick(sel.value));
+  if (compact) return sel; // a toolbar that has no room for the label (the options say what it is)
   return h('div.row', { style: { gap: '8px', alignItems: 'center', flexWrap: 'nowrap' } }, h('span.field-label', { style: { margin: 0 } }, 'Effect'), sel,
     ticked > 1 ? h('span.faint', `applies to the ${ticked} ticked lines`) : null);
 }

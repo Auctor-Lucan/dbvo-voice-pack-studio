@@ -865,12 +865,12 @@ export async function bookProjectView(id) {
             h('button.icon-btn', { title: 'Remove this break (join the two parts)', onclick: () => act('breaks', breaks.filter((_, j) => j !== i)) }, '✕')) : null;
           return [card2, brk];
         }).flat(),
-        h('div.row', { style: { marginTop: '6px' } },
+        h('div.row.bk-gen-row', { style: { marginTop: '6px' } },
           (() => {
             // Parts that need work (no take, or the text changed since): those. Otherwise a new take of every part.
             const need = lines.filter((l) => !l.takes.length || l.status !== 'Generated');
             const ids = (need.length ? need : lines).map((l) => l.id);
-            const label = need.length ? (need.length === lines.length ? (lines.length === 1 ? 'Generate' : 'Generate all parts') : `Generate ${need.length} missing part${need.length === 1 ? '' : 's'}`) : (lines.length === 1 ? 'New take' : 'New take of every part');
+            const label = need.length ? (need.length === lines.length ? (lines.length === 1 ? 'Generate' : 'Generate all') : `Generate ${need.length} missing`) : (lines.length === 1 ? 'New take' : 'New takes');
             return h('button.btn.sm.primary', { title: need.length ? 'Generate the parts that have no take yet or whose text changed since their take, in this voice' : 'Every part has a current take: make a new take of each, in this voice (earlier takes stay)', disabled: !v || !v.hasVoice || !lines.length,
               onclick: () => { ids.forEach((x) => inFlight.add(x)); if (ids.length === 1) edAutoPlay.add(ids[0]); renderEd(false); generate('lines', null, { lineIds: ids, single: ids.length === 1 }); } }, label);
           })(),
@@ -880,11 +880,23 @@ export async function bookProjectView(id) {
               d = await rpc('books.bookGet', { id, stem }); renderEd(false); replaceBook(d.book);
               toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed. The whole book is joined again with it.`, !!r.problems.length);
             } catch (e) { fail(e); }
-          }, 'Every part of this book in this voice, and new takes: reverb, radio, telepathy… Adding one turns the book reverb off (two reverbs sound muddy).') : null,
-          d.projectReverb ? switchEl(d.bookReverb, (on) => act('overrides', null, { reverb: on }), 'Book reverb', { title: 'The project\'s reverb when this book is joined (Audio settings). Off for a book whose parts have an effect; loudness and the limiter always stay.' }) : null,
+          }, 'Effect on every part of this book in this voice, and on new takes: reverb, radio, telepathy… Adding one turns the book reverb off (two reverbs sound muddy).', { compact: true }) : null,
+          d.projectReverb ? switchEl(d.bookReverb, (on) => act('overrides', null, { reverb: on }), 'Reverb', { title: 'The project\'s reverb when this book is joined (Audio settings). Off for a book whose parts have an effect; loudness and the limiter always stay.' }) : null,
           h('div.spacer'),
-          h('button.btn.sm', { title: 'Join the parts (with reverb, pauses and loudness) and play the whole book', disabled: !lines.length || lines.some((l) => !l.sel), onclick: async () => { try { const r = await rpc('books.join', { id, stem, voice, variant }); edAudio.src = r.url; edAudio.play().catch(fail); toast(`${fmtTime(r.seconds)} · ${r.lufs.toFixed(1)} LUFS · peak ${r.peakDb.toFixed(1)} dB`); } catch (e) { fail(e); } } }, '▶ Whole book'),
-          h('button.btn.sm.ghost', { title: 'Stop playback', onclick: () => edAudio.pause() }, '■')));
+          (() => {
+            // One button: join and play the whole book, or stop it while it plays.
+            const b = h('button.btn.sm', { title: 'Join the parts (with reverb, pauses and loudness) and play the whole book; click again to stop', disabled: !lines.length || lines.some((l) => !l.sel) }, edAudio.paused ? '▶ Book' : '■ Stop');
+            b.addEventListener('click', async () => {
+              if (!edAudio.paused) { edAudio.pause(); b.textContent = '▶ Book'; return; }
+              try {
+                const r = await rpc('books.join', { id, stem, voice, variant });
+                edAudio.src = r.url; await edAudio.play(); b.textContent = '■ Stop';
+                edAudio.onended = edAudio.onpause = () => { if (b.isConnected) b.textContent = '▶ Book'; };
+                toast(`${fmtTime(r.seconds)} · ${r.lufs.toFixed(1)} LUFS · peak ${r.peakDb.toFixed(1)} dB`);
+              } catch (e) { fail(e); }
+            });
+            return b;
+          })()));
       // checks
       clear(checksBox).append(h('div.ed-col-head', h('b', 'Checks'), h('span.faint', 'flags, never blocks')),
         d.issues.length ? h('div.col', { style: { gap: '4px' } }, d.issues.map((x) => {
