@@ -116,6 +116,34 @@ public sealed class GruntProject
     /// <summary>Data-relative paths the last export wrote (so a new export can clean up only its own old files).</summary>
     public List<string> ExportedFiles { get; set; } = new();
     public string LastReport { get; set; } = "";
+    /// <summary>Text-to-speech work in progress, by event|slot|line: the texts and every try until one is saved to the event.</summary>
+    public Dictionary<string, GruntDraft> Drafts { get; set; } = new();
+}
+
+/// <summary>The text-to-speech workspace of one event (or shout part, or line being redone): kept until saved or discarded.</summary>
+public sealed class GruntDraft
+{
+    public string EventId { get; set; } = "";
+    public string Slot { get; set; } = "";
+    /// <summary>Set when the workspace makes new tries for an existing line (Save replaces its audio).</summary>
+    public string ReplaceLineId { get; set; } = "";
+    public string Subtitle { get; set; } = "";
+    public string Spoken { get; set; } = "";
+    public List<GruntTry> Tries { get; set; } = new();
+    public string SelectedId { get; set; } = "";
+    public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class GruntTry
+{
+    public string Id { get; set; } = NewId.Short();
+    /// <summary>Relative to the project folder.</summary>
+    public string File { get; set; } = "";
+    public string Spoken { get; set; } = "";
+    public double Seconds { get; set; }
+    /// <summary>Engine, model, stability, speed, seed: shown with the try.</summary>
+    public string Settings { get; set; } = "";
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class GruntEventState
@@ -137,8 +165,10 @@ public sealed class GruntLine
     public string Source { get; set; } = "";
     /// <summary>import | recording | generated</summary>
     public string Origin { get; set; } = "import";
-    /// <summary>Subtitle (SPVS .toml) and the text for text-to-speech; shout words for slots.</summary>
+    /// <summary>Subtitle (SPVS .toml); shout words for slots.</summary>
     public string Text { get; set; } = "";
+    /// <summary>Text-to-speech lines: what the voice was given, with [tags] and formatting.</summary>
+    public string Spoken { get; set; } = "";
     /// <summary>SPVS script-based events: the file name to export as (no extension). Empty = numbered.</summary>
     public string FileName { get; set; } = "";
     /// <summary>Slots events: the slot this line fills.</summary>

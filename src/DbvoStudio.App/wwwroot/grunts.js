@@ -4,6 +4,7 @@
 import { rpc, h, clear, toast, fail, modal, confirmBox, store, debounce, switchEl, segmented, popupMenu, droppedPaths, icon, helpButton, withBusy } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { recordTake } from './recorder.js';
+import { insertTagAtCaret } from './tagtools.js';
 
 const TARGET = { pcht: 'PCHT', spvs: 'SPVS' };
 const TARGET_LONG = { pcht: 'PC Head Tracking', spvs: 'Smart Player Voice System' };
@@ -329,20 +330,112 @@ export async function gruntProjectView(id) {
     const saved = await recordTake({ patchId: id, kind: 'grunts', line: { lineId: e.id + '|' + (slot || ''), spoken: s ? `${e.label}: ${s.label} — “${s.text}”` : `${e.category} · ${e.label}${e.description ? '\n' + e.description : ''}` } });
     if (saved) { d = await rpc('grunts.get', { id }); byId = evById(); renderAll(); }
   }
-  async function tts(e, slot) {
-    const s = slot ? e.slots.find((x) => x.id === slot) : null;
-    const ta = h('textarea', { rows: 3, placeholder: 'What the player says, e.g. "Another one bites the dust." Tags like [laughs] work with v3 models.', style: { width: '100%' } }, s ? s.text : '');
-    const ok = await modal(`Text-to-speech · ${e.label}`, [
-      h('div.faint', `Voice: ${P().voicePack || '(pick a DBVO voice pack in Setup & export)'}. The line's text is kept as its subtitle.`), ta,
-    ], [{ label: 'Cancel', value: false }, { label: 'Generate', primary: true, value: true }], { help: 'grunt-events' });
-    if (!ok || !ta.value.trim()) return;
-    try {
-      toast('Generating…');
-      const r = await call('grunts.tts', { eventId: e.id, slot: slot || '', text: ta.value.trim() });
-      if (r && r.project) { d = r.project; byId = evById(); }
-      renderAll();
-      if (r && r.line) playLine(r.line);
-    } catch { /* shown */ }
+  // Text-to-speech workspace: write, tag, try as often as needed, listen and compare; only Save puts a try on the event.
+  // The texts and every try are kept with the project (closing keeps them; Discard throws them away).
+  async function tts(e, slot = '', line = null) {
+    const key = { eventId: e.id, slot: slot || '', lineId: line ? line.id : '' };
+    let dr;
+    try { dr = await rpc('grunts.draft', { id, ...key }); } catch (err) { fail(err); return; }
+    const V = dr.voice;
+    const sub = h('input', { type: 'text', value: dr.subtitle, placeholder: P().target === 'spvs' ? 'What the subtitle shows, e.g. Got you!' : 'Optional: kept with the line (PCHT shows no subtitles)', style: { width: '100%' } });
+    const spoken = h('textarea.gr-spoken', { rows: 3, placeholder: V.engine === 'elevenlabs' ? 'What the voice gets, e.g. [effortful grunt] Hhh-AH! or [breathless] Not... yet.' : 'What the voice gets, with punctuation and formatting for delivery' }, dr.spoken);
+    const saveText = debounce(() => rpc('grunts.draftText', { id, ...key, subtitle: sub.value, spoken: spoken.value }).catch(() => {}), 600);
+    sub.addEventListener('input', saveText);
+    spoken.addEventListener('input', saveText);
+    let sendTags = V.engine !== 'voxcpm';
+    let stability = V.stability, speed = V.speed, keepSeed = false;
+    const chip = (t) => { const c = h('span.chip.tag-chip', { title: 'Insert at the cursor in the spoken text' }, t); c.addEventListener('mousedown', (ev) => ev.preventDefault()); c.addEventListener('click', () => { insertTagAtCaret(spoken, t); saveText(); }); return c; };
+    const custom = h('input', { type: 'text', placeholder: '[any tag]', title: 'Type a tag and press Enter to insert it at the cursor', style: { width: '120px' } });
+    custom.addEventListener('keydown', (ev) => { if (ev.key !== 'Enter' || !custom.value.trim()) return; ev.preventDefault(); let t = custom.value.trim(); if (!t.startsWith('[')) t = `[${t.replace(/[[\]]/g, '')}]`; insertTagAtCaret(spoken, t); custom.value = ''; saveText(); });
+    const tagNote = V.engine === 'voxcpm' ? h('span.faint', 'VoxCPM reads [tags] aloud, so they are left out unless you turn this on; punctuation, … and CAPS still shape the delivery.')
+      : V.engine === 'omnivoice' ? h('span.faint', 'OmniVoice reads inline tags such as [laughter], [sigh] and [gasp].')
+      : V.tagModel ? h('span.faint', 'v3 / v4 models perform [tags]: emotions, breaths, grunts, laughs, shouts…') : h('span', { style: { color: 'var(--warn)' } }, `${V.model} ignores [tags]; pick a v3 or v4 model in the voice pack to use them.`);
+    const tagbar = h('div.row.wrap.gr-tagbar', h('span.field-label', { style: { margin: 0 } }, 'Tags'), V.tags.map(chip), custom,
+      V.engine === 'elevenlabs' ? null : switchEl(sendTags, (v) => { sendTags = v; }, 'Send [tags]', { title: 'Leave [tags] in the text sent to the local engine' }),
+      h('div.spacer'), h('button.btn.sm.ghost', { title: 'Copy the subtitle into the spoken text', onclick: () => { spoken.value = sub.value; saveText(); spoken.focus(); } }, 'Subtitle → spoken'));
+    // Per-try voice settings (the voice pack stays as it is).
+    const settings = h('div.row.wrap', { style: { gap: '14px' } });
+    if (V.engine === 'elevenlabs') {
+      const stab = V.discrete
+        ? segmented([[0, 'Creative'], [0.5, 'Natural'], [1, 'Robust']], [0, 0.5, 1].reduce((a, b) => (Math.abs(b - stability) < Math.abs(a - stability) ? b : a)), (v) => { stability = Number(v); })
+        : (() => { const r = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: stability }); const lbl = h('span.mono', stability.toFixed(2)); r.addEventListener('input', () => { stability = Number(r.value); lbl.textContent = stability.toFixed(2); }); return h('span.row', r, lbl); })();
+      const sp = h('input', { type: 'number', min: 0.7, max: 1.2, step: 0.05, value: speed, style: { width: '70px' } });
+      sp.addEventListener('change', () => { speed = Number(sp.value) || 1; });
+      settings.append(h('div.tgroup', h('label', 'Stability'), stab), h('div.tgroup', h('label', 'Speed'), sp),
+        V.seed != null ? h('div.tgroup', h('label', 'Seed'), switchEl(false, (v) => { keepSeed = v; }, `Keep ${V.seed}`, { title: 'Off: a new seed every try (different takes). On: the voice pack\'s seed (the same take for the same text).' })) : null);
+    } else if (V.engine === 'omnivoice') {
+      const sp = h('input', { type: 'number', min: 0.5, max: 2, step: 0.05, value: speed, style: { width: '70px' } });
+      sp.addEventListener('change', () => { speed = Number(sp.value) || 1; });
+      settings.append(h('div.tgroup', h('label', 'Speed'), sp));
+    }
+    const status = h('span.faint', '');
+    const genBtn = h('button.btn.primary', { title: 'Make a new try with this text and these settings (Ctrl+Enter)', disabled: !V.ready }, '▶ Generate try');
+    const tries = h('div.gr-tries');
+    const triesLbl = h('div.field-label');
+    const saveBtn = h('button.btn.primary', {}, '');
+    const audioT = new Audio();
+    const paintTries = () => {
+      clear(tries);
+      triesLbl.textContent = dr.tries.length ? `Tries (${dr.tries.length}) · pick the one to save` : 'Tries';
+      if (!dr.tries.length) tries.append(h('div.dim', { style: { padding: '10px 4px' } }, 'No tries yet. Write the spoken text, add tags, Generate, listen; change and try again. Nothing reaches the event until you save a try.'));
+      dr.tries.forEach((t, n) => {
+        const sel = t.id === dr.selectedId;
+        const row = h('div.gr-try' + (sel ? '.sel' : ''), { title: 'Click to pick this try', onclick: () => { dr.selectedId = t.id; rpc('grunts.draftText', { id, ...key, selectedId: t.id }).catch(() => {}); paintTries(); } },
+          h('input', { type: 'radio', name: 'gr-try', checked: sel }),
+          h('button.icon-btn', { title: 'Play this try', onclick: (ev) => { ev.stopPropagation(); audioT.src = t.url + '?t=' + n; audioT.play().catch(fail); } }, '▶'),
+          h('b.mono', '#' + (n + 1)), h('span.mono.faint', fmtSec(t.seconds)),
+          h('span.ellipsis.grow', { title: t.spoken }, t.spoken),
+          h('span.faint.ellipsis', { style: { maxWidth: '240px' }, title: t.settings }, t.settings),
+          h('button.icon-btn', { title: 'Throw this try away', onclick: async (ev) => { ev.stopPropagation(); try { dr = await rpc('grunts.tryDelete', { id, ...key, tryId: t.id }); paintTries(); } catch (err) { fail(err); } } }, '🗑'));
+        tries.append(row);
+      });
+      tries.scrollTop = tries.scrollHeight;
+      const target = line ? `Replace ${line.file}` : slot ? `Save to ${dr.slotLabel || 'the part'}` : `Save to ${e.label}`;
+      saveBtn.textContent = dr.selectedId ? `${target} (try #${dr.tries.findIndex((t) => t.id === dr.selectedId) + 1})` : target;
+      saveBtn.disabled = !dr.selectedId;
+    };
+    async function generate() {
+      if (!spoken.value.trim()) { toast('Write the spoken text first.', true); spoken.focus(); return; }
+      genBtn.disabled = true; status.textContent = 'Generating…';
+      try {
+        const r = await rpc('grunts.try', { id, ...key, spoken: spoken.value, subtitle: sub.value, stability, speed, keepSeed, sendTags });
+        dr = r.draft; paintTries(); status.textContent = '';
+        const t = dr.tries.find((x) => x.id === r.tryId);
+        if (t) { audioT.src = t.url; audioT.play().catch(() => {}); }
+      } catch (err) { status.textContent = ''; fail(err); } finally { genBtn.disabled = !V.ready; }
+    }
+    genBtn.addEventListener('click', generate);
+    spoken.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); generate(); } });
+    let committed = null;
+    saveBtn.addEventListener('click', async () => {
+      try {
+        const r = await rpc('grunts.commit', { id, ...key, tryId: dr.selectedId, subtitle: sub.value });
+        committed = r; d = r.project; byId = evById();
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      } catch (err) { fail(err); }
+    });
+    const discard = h('button.btn.ghost.danger', { title: 'Throw away every try and the texts of this workspace' }, 'Discard all');
+    let armed = false;
+    discard.addEventListener('click', async () => {
+      // A second click confirms (a dialog on top would close this workspace).
+      if (dr.tries.length && !armed) { armed = true; discard.textContent = `Delete ${dr.tries.length} tr${dr.tries.length === 1 ? 'y' : 'ies'}? Click again`; setTimeout(() => { armed = false; discard.textContent = 'Discard all'; }, 4000); return; }
+      try { d = await rpc('grunts.discard', { id, ...key }); byId = evById(); document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); } catch (err) { fail(err); }
+    });
+    paintTries();
+    const voiceLine = V.ready ? [V.voicePack, V.engine === 'elevenlabs' ? 'ElevenLabs' : V.engine === 'voxcpm' ? 'VoxCPM' : 'OmniVoice', V.voiceName !== V.voicePack ? V.voiceName : null, V.model].filter(Boolean).join(' · ') : (V.voicePack ? `${V.voicePack} has no ${V.engine} voice yet.` : 'Pick a DBVO voice pack in Setup & export first.');
+    await modal(`Text-to-speech · ${e.label}${dr.slotLabel ? ' · ' + dr.slotLabel : ''}`, [
+      h('div.row', { style: { gap: '10px' } }, h('span.dim', 'Voice: ', h('b', voiceLine)), dr.words ? h('span.faint', `Words: “${dr.words}”`) : null),
+      h('div.col', h('div.field-label', 'Subtitle'), sub),
+      h('div.col', h('div.field-label', 'Spoken text · [tags] and formatting for the voice'), spoken, tagbar, tagNote),
+      settings.childNodes.length ? settings : null,
+      h('div.row', genBtn, status, h('div.spacer'), h('span.faint', 'Ctrl+Enter generates')),
+      h('div.col', triesLbl, tries),
+      h('div.row', discard, h('div.spacer'), saveBtn),
+    ], [{ label: 'Close (keeps the tries)', value: null }], { wide: true, help: 'text-to-speech-workspace' });
+    audioT.pause();
+    if (committed) { toast(line ? 'Line replaced.' : 'Saved to the event.'); selId = e.id; }
+    else { try { d = await rpc('grunts.get', { id }); byId = evById(); } catch { /* keep */ } }
+    renderAll();
   }
 
   // ---------------------------------------------------------------- inspector
@@ -378,10 +471,12 @@ export async function gruntProjectView(id) {
       h('div.row.wrap', { style: { gap: '6px' } },
         h('button.btn.sm', { title: 'Choose audio files', onclick: () => pickFiles(e) }, 'Add files…'),
         h('button.btn.sm', { title: 'Record with your microphone (optionally through the Voice Changer)', disabled: !!app.job, onclick: () => record(e) }, '🎙 Record'),
-        e.spoken || e.kind === 'slots' ? h('button.btn.sm', { title: canTts ? 'Make a line with text-to-speech in the voice pack\'s voice' : 'Pick a DBVO voice pack in Setup & export first', disabled: !canTts, onclick: () => tts(e) }, 'Text-to-speech') : null,
+        h('button.btn.sm', { title: canTts ? 'Open the text-to-speech workspace: write, tag and try until a take is right, then save it to the event' : 'Pick a DBVO voice pack in Setup & export first', disabled: !canTts, onclick: () => tts(e, e.kind === 'slots' ? (e.slots.find((x) => !e.lines.some((l) => l.slot === x.id)) || e.slots[0]).id : '') }, 'Text-to-speech'),
         h('div.spacer'),
         h('button.act-btn' + (e.skipped ? '.on.bad' : ''), { title: e.skipped ? 'Skipped (left out of the export) - click to include' : 'Skip: leave this event out of the export', onclick: () => evAction(e, { skipped: !e.skipped }) }, icon('ban')),
         e.lines.length ? h('button.act-btn', { title: 'Remove every line of this event (your files stay on disk)', onclick: async () => { if (await confirmBox('Remove all lines?', `Removes the ${e.lines.length} line(s) of ${e.label} from the project. Your audio files stay where they are; the project's own recordings are deleted.`, 'Remove', true)) evAction(e, { clear: true }); } }, icon('x')) : null),
+      (e.drafts || []).length ? h('div.col', { style: { gap: '4px' } }, e.drafts.map((dd) => h('button.btn.sm.gr-draft', { title: 'Open the text-to-speech workspace you left', onclick: () => tts(e, dd.slot, dd.lineId ? e.lines.find((l) => l.id === dd.lineId) || null : null) },
+        `▶ ${dd.tries} unsaved tr${dd.tries === 1 ? 'y' : 'ies'}${dd.slot ? ' · ' + ((e.slots.find((x) => x.id === dd.slot) || {}).label || dd.slot) : ''}${dd.lineId ? ' · redoing a line' : ''}`))) : null,
       e.kind === 'slots' ? renderSlots(e) : renderPool(e));
   }
   async function evAction(e, o) { try { await call('grunts.event', { eventId: e.id, ...o }); renderAll(); } catch { renderAll(); } }
@@ -411,6 +506,7 @@ export async function gruntProjectView(id) {
   function lineMenu(anchor, e, l) {
     popupMenu(anchor, [
       { label: 'Replace the file…', sub: 'Keep the line (its place, name and text), use another audio file', onclick: async () => { const f = await rpc('pick.file', { title: 'Replacement audio', filter: 'Audio|*.wav;*.xwm;*.fuz;*.mp3;*.ogg;*.flac;*.m4a;*.opus' }); if (f) line(e, l, { replace: f }); } },
+      P().voicePackId ? { label: 'New tries with text-to-speech…', sub: 'Make takes for this line in the workspace; saving one replaces this line\'s audio', onclick: () => tts(e, l.slot || '', l) } : null,
       e.kind === 'pool' ? { label: 'Move to another event…', onclick: () => moveDialog(e, l) } : null,
       l.exists ? { label: 'Show in its folder', sub: l.path, onclick: () => rpc('open.path', { path: l.path.replace(/[\\/][^\\/]*$/, '') }).catch(fail) } : null,
     ].filter(Boolean));

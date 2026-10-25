@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using DbvoStudio.Core.ElevenLabs;
+using DbvoStudio.Core.Engines;
 using DbvoStudio.Core.Grunts;
 using DbvoStudio.Core.Plugins;
 using DbvoStudio.Core.Projects;
@@ -210,7 +211,6 @@ public sealed partial class Backend
                 return new { ready, voiceName, why = !hasKey ? "Add your ElevenLabs API key in Global Settings to convert recordings." : v == null ? "Pick a DBVO voice pack for this project (Export settings → Voice) to convert recordings." : voiceId.Length == 0 ? "The voice pack has no ElevenLabs voice." : "" };
             }
             case "grunts.record": return await GrRecord(p);
-            case "grunts.tts": return await GrTts(p);
             case "grunts.openFolder":
             {
                 var proj = LoadGr(S(p, "id"));
@@ -220,7 +220,7 @@ public sealed partial class Backend
                 OpenPath(path);
                 return true;
             }
-            default: return NotHandled;
+            default: return await DispatchGruntDrafts(m, p);
         }
     }
 
@@ -268,6 +268,7 @@ public sealed partial class Backend
                 pcht = e.PchtFolders,
                 slots = e.Slots.Select(x => new { x.Id, x.Label, x.Text, files = x.Files.Count, patch = x.Files.Any(f => f.Contains(GruntCatalogs.PchtPatchPlugin)) }),
                 skipped = st?.Skipped ?? false, note = st?.Note ?? "", status, missing,
+                drafts = proj.Drafts.Values.Where(d => d.EventId == e.Id && d.Tries.Count > 0).Select(d => new { d.Slot, lineId = d.ReplaceLineId, tries = d.Tries.Count }),
                 lines = lines.Select(l => GrLineDto(l, folder)),
             };
         }).ToList();
@@ -294,7 +295,7 @@ public sealed partial class Backend
     private static object GrLineDto(GruntLine l, string folder)
     {
         var path = GruntService.SourcePath(l, folder);
-        return new { l.Id, l.Source, path, file = Path.GetFileName(path), exists = File.Exists(path), l.Origin, l.Text, l.FileName, l.Slot, l.DurationSeconds, l.SampleRate, l.Channels, l.Lufs, l.AddedUtc };
+        return new { l.Id, l.Source, path, file = Path.GetFileName(path), exists = File.Exists(path), l.Origin, l.Text, l.Spoken, l.FileName, l.Slot, l.DurationSeconds, l.SampleRate, l.Channels, l.Lufs, l.AddedUtc };
     }
 
     /// <summary>Reads length, rate and channels of new lines (outside the page lock; quick per file).</summary>
@@ -642,35 +643,239 @@ public sealed partial class Backend
         return GrLineDto(line, folder);
     }
 
-    private async Task<object?> GrTts(JsonElement p)
+    // ------------------------------------------------------------------ text-to-speech workspace
+
+    private static string DraftKey(string eventId, string slot, string lineId) => $"{eventId}|{slot}|{lineId}";
+
+    private (GruntProject Proj, GruntEventDef Ev, string Key, GruntDraft Draft) GrDraft(JsonElement p, bool create)
     {
-        var (proj, ev, slot) = GrTarget(p);
-        var text = S(p, "text").Trim();
-        if (text.Length == 0) throw new InvalidOperationException("Write what the line says first.");
-        var rt = Runtime();
-        if (string.IsNullOrWhiteSpace(rt.ElevenLabsApiKey)) throw new InvalidOperationException("Text-to-speech needs your ElevenLabs API key (Global Settings → General & tools → ElevenLabs).");
-        var v = _lib.LoadVoicePacks().FirstOrDefault(x => x.Id == proj.VoicePackId) ?? throw new InvalidOperationException("Pick a DBVO voice pack for this project first (Export settings → Voice).");
-        if ((v.Engine ?? "elevenlabs") != "elevenlabs" || v.Eleven.VoiceId.Length == 0) throw new InvalidOperationException("The voice pack needs an ElevenLabs voice for text-to-speech here.");
-        var es = v.Eleven;
-        var req = new TtsRequest
+        var proj = LoadGr(S(p, "id"));
+        var (cat, _) = GrCatalog(proj.Target);
+        var ev = cat.Events.FirstOrDefault(e => e.Id == S(p, "eventId")) ?? throw new InvalidOperationException("Event not found.");
+        string slot = S(p, "slot"), lineId = S(p, "lineId");
+        var key = DraftKey(ev.Id, slot, lineId);
+        if (!proj.Drafts.TryGetValue(key, out var d))
         {
-            VoiceId = es.VoiceId, ModelId = es.ModelId, Text = text, OutputFormat = es.OutputFormat, Seed = es.Seed,
-            LanguageCode = string.IsNullOrWhiteSpace(es.LanguageCode) ? null : es.LanguageCode,
-            ApplyTextNormalization = es.TextNormalization == "auto" ? null : es.TextNormalization,
-            VoiceSettings = ModelCapabilities.Build(es.ModelId, es.Stability, es.Similarity, es.Style, es.SpeakerBoost, es.Speed),
+            d = new GruntDraft { EventId = ev.Id, Slot = slot, ReplaceLineId = lineId };
+            // A line being redone starts from its own texts; a shout part from its words.
+            var line = lineId.Length > 0 ? GruntService.State(proj, ev.Id).Lines.FirstOrDefault(l => l.Id == lineId) : null;
+            var s = ev.Slots.FirstOrDefault(x => x.Id == slot);
+            d.Subtitle = line?.Text ?? s?.Text ?? "";
+            d.Spoken = line != null ? (line.Spoken.Length > 0 ? line.Spoken : line.Text) : s?.Text ?? "";
+            if (create) proj.Drafts[key] = d;
+        }
+        return (proj, ev, key, d);
+    }
+
+    private object GrDraftDto(GruntProject proj, GruntEventDef ev, GruntDraft d)
+    {
+        var folder = GrFolder(proj);
+        var v = _lib.LoadVoicePacks().FirstOrDefault(x => x.Id == proj.VoicePackId);
+        var engine = v?.Engine ?? "elevenlabs";
+        string voiceName = v == null ? "" : engine == "voxcpm" ? v.VoxCpm.Voice : engine == "omnivoice" ? v.OmniVoice.Voice : v.Eleven.VoiceName;
+        string model = v == null ? "" : engine == "voxcpm" ? "VoxCPM" : engine == "omnivoice" ? v.OmniVoice.Model : v.Eleven.ModelId;
+        // ElevenLabs v3/v4 and OmniVoice read [tags]; VoxCPM would say them, so they are left out for it by default.
+        var tags = engine == "omnivoice" ? new List<string> { "[laughter]", "[sigh]", "[gasp]" } : v?.Tags ?? new List<string>();
+        return new
+        {
+            eventId = ev.Id, d.Slot, lineId = d.ReplaceLineId, d.Subtitle, d.Spoken, d.SelectedId,
+            tries = d.Tries.Select(t => new
+            {
+                t.Id, t.Spoken, t.Seconds, t.Settings, t.CreatedUtc,
+                url = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, Path.Combine(folder, t.File)).Replace('\\', '/'),
+                exists = File.Exists(Path.Combine(folder, t.File)),
+            }),
+            voice = new
+            {
+                ready = v != null && voiceName.Length > 0, voicePack = v?.Name ?? "", engine, voiceName, model, tags,
+                tagModel = engine == "elevenlabs" && ModelCapabilities.IsTagModel(v?.Eleven.ModelId ?? ""),
+                stability = v?.Eleven.Stability ?? 0.5, speed = engine == "omnivoice" ? v?.OmniVoice.Speed ?? 1 : v?.Eleven.Speed ?? 1,
+                seed = v?.Eleven.Seed, discrete = ModelCapabilities.HasDiscreteStability(v?.Eleven.ModelId ?? ""),
+                hasKey = !string.IsNullOrWhiteSpace(Secrets.Unprotect(_settings.ElevenLabsApiKey)),
+            },
+            label = ev.Label, slotLabel = ev.Slots.FirstOrDefault(x => x.Id == d.Slot)?.Label ?? "", words = ev.Slots.FirstOrDefault(x => x.Id == d.Slot)?.Text ?? "",
+            target = proj.Target,
         };
-        using var client = new ElevenLabsClient(rt.ElevenLabsApiKey);
-        var audio = await client.TextToSpeechAsync(req, CancellationToken.None);
+    }
+
+    private void GrDeleteTry(GruntProject proj, GruntTry t)
+    {
+        try { File.Delete(Path.Combine(GrFolder(proj), t.File)); } catch { }
+    }
+
+    private async Task<object?> DispatchGruntDrafts(string m, JsonElement p)
+    {
+        switch (m)
+        {
+            case "grunts.draft":
+                return await Locked(() => { var (proj, ev, _, d) = GrDraft(p, false); return GrDraftDto(proj, ev, d); });
+            case "grunts.draftText":
+                return await Locked(() =>
+                {
+                    var (proj, ev, _, d) = GrDraft(p, true);
+                    if (p.TryGetProperty("subtitle", out var su) && su.ValueKind == JsonValueKind.String) d.Subtitle = su.GetString()!;
+                    if (p.TryGetProperty("spoken", out var sp) && sp.ValueKind == JsonValueKind.String) d.Spoken = sp.GetString()!;
+                    if (p.TryGetProperty("selectedId", out var se) && se.ValueKind == JsonValueKind.String) d.SelectedId = se.GetString()!;
+                    d.UpdatedUtc = DateTime.UtcNow;
+                    _lib.Save(proj);
+                    return GrDraftDto(proj, ev, d);
+                });
+            case "grunts.try":
+            {
+                (GruntProject proj, GruntEventDef ev, string key, GruntDraft d) = (null!, null!, "", null!);
+                await Locked(() => { (proj, ev, key, d) = GrDraft(p, true); return null; });
+                var spoken = S(p, "spoken").Trim();
+                if (spoken.Length == 0) throw new InvalidOperationException("Write what the voice says first (the spoken text).");
+                var (wav, seconds, settings) = await GrSynth(proj, spoken, p);
+                return await Locked(() =>
+                {
+                    var t = new GruntTry { Spoken = spoken, Seconds = seconds, Settings = settings };
+                    t.File = Path.Combine("drafts", GruntService.Hash(key), t.Id + ".wav");
+                    var dest = Path.Combine(GrFolder(proj), t.File);
+                    Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                    File.Copy(wav, dest, true);
+                    try { File.Delete(wav); } catch { }
+                    d.Spoken = S(p, "spoken");
+                    if (p.TryGetProperty("subtitle", out var su) && su.ValueKind == JsonValueKind.String) d.Subtitle = su.GetString()!;
+                    d.Tries.Add(t);
+                    d.SelectedId = t.Id;
+                    d.UpdatedUtc = DateTime.UtcNow;
+                    proj.Drafts[key] = d;
+                    _lib.Save(proj);
+                    return new { tryId = t.Id, draft = GrDraftDto(proj, ev, d) };
+                });
+            }
+            case "grunts.tryDelete":
+                return await Locked(() =>
+                {
+                    var (proj, ev, _, d) = GrDraft(p, true);
+                    var t = d.Tries.FirstOrDefault(x => x.Id == S(p, "tryId"));
+                    if (t != null) { d.Tries.Remove(t); GrDeleteTry(proj, t); if (d.SelectedId == t.Id) d.SelectedId = d.Tries.LastOrDefault()?.Id ?? ""; }
+                    _lib.Save(proj);
+                    return GrDraftDto(proj, ev, d);
+                });
+            case "grunts.discard":
+                return await Locked(() =>
+                {
+                    var (proj, ev, key, d) = GrDraft(p, false);
+                    foreach (var t in d.Tries) GrDeleteTry(proj, t);
+                    proj.Drafts.Remove(key);
+                    _lib.Save(proj);
+                    return GrDto(proj);
+                });
+            case "grunts.commit":
+                return await Locked(() =>
+                {
+                    var (proj, ev, key, d) = GrDraft(p, false);
+                    var t = d.Tries.FirstOrDefault(x => x.Id == S(p, "tryId", d.SelectedId)) ?? throw new InvalidOperationException("Pick the try to keep first.");
+                    var folder = GrFolder(proj);
+                    var src = Path.Combine(folder, t.File);
+                    if (!File.Exists(src)) throw new InvalidOperationException("That try's audio file is gone; make a new try.");
+                    if (p.TryGetProperty("subtitle", out var su) && su.ValueKind == JsonValueKind.String) d.Subtitle = su.GetString()!;
+                    var rel = Path.Combine("audio", System.Text.RegularExpressions.Regex.Replace(ev.Id, @"[^A-Za-z0-9]+", "_").Trim('_'), $"tts-{DateTime.Now:yyyyMMdd-HHmmss}-{NewId.Short(4)}.wav");
+                    Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(folder, rel))!);
+                    File.Move(src, Path.Combine(folder, rel), true);
+                    var st = GruntService.State(proj, ev.Id);
+                    var line = d.ReplaceLineId.Length > 0 ? st.Lines.FirstOrDefault(l => l.Id == d.ReplaceLineId) : null;
+                    if (line != null)
+                    {
+                        // Redoing a line: same place, name and slot; the project's own old audio goes.
+                        if (!Path.IsPathRooted(line.Source) && !proj.Events.Values.SelectMany(s => s.Lines).Any(l => l != line && l.Source == line.Source))
+                            try { File.Delete(GruntService.SourcePath(line, folder)); } catch { }
+                        line.Source = rel; line.Origin = "generated";
+                    }
+                    else
+                    {
+                        line = new GruntLine { Source = rel, Origin = "generated" };
+                        if (ev.Kind == "slots")
+                        {
+                            var sl = ev.Slots.FirstOrDefault(x => x.Id == d.Slot) ?? ev.Slots.FirstOrDefault(x => !st.Lines.Any(l => l.Slot == x.Id)) ?? ev.Slots.First();
+                            st.Lines.RemoveAll(l => l.Slot == sl.Id);
+                            line.Slot = sl.Id;
+                        }
+                        st.Lines.Add(line);
+                    }
+                    line.Text = d.Subtitle.Trim();
+                    line.Spoken = t.Spoken;
+                    line.DurationSeconds = t.Seconds; line.SampleRate = 44100; line.Channels = 1; line.Lufs = null;
+                    st.Skipped = false;
+                    foreach (var other in d.Tries.Where(x => x != t)) GrDeleteTry(proj, other);
+                    proj.Drafts.Remove(key);
+                    _lib.Save(proj);
+                    return new { line = GrLineDto(line, folder), project = GrDto(proj) };
+                });
+            default: return NotHandled;
+        }
+    }
+
+    /// <summary>One text-to-speech try with the project's voice pack (ElevenLabs, VoxCPM or OmniVoice). Returns a temporary WAV.</summary>
+    private async Task<(string Wav, double Seconds, string Settings)> GrSynth(GruntProject proj, string spoken, JsonElement p)
+    {
+        var v = _lib.LoadVoicePacks().FirstOrDefault(x => x.Id == proj.VoicePackId) ?? throw new InvalidOperationException("Pick a DBVO voice pack for this project first (Setup & export → DBVO voice pack).");
+        var rt = Runtime();
+        var engine = v.Engine ?? "elevenlabs";
+        double? D(string n) => p.TryGetProperty(n, out var x) && x.ValueKind == JsonValueKind.Number ? x.GetDouble() : null;
+        bool sendTags = !p.TryGetProperty("sendTags", out var stg) || stg.ValueKind != JsonValueKind.False;
+        var prons = Phase2Service.MergePronunciations(_settings.Pronunciations, v.Pronunciations);
         var tools = GrExternal();
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
         Directory.CreateDirectory(workRoot);
         using var work = new WorkFolder(workRoot);
-        var wav = await GrDecode(tools, work, audio, es.OutputFormat);
+        byte[] audio; string format; string settings;
+        switch (engine)
+        {
+            case "voxcpm":
+            case "omnivoice":
+            {
+                var text = sendTags ? spoken : Core.Naming.SpokenText.StripTags(spoken);
+                text = Phase2Service.ApplyPronunciations(text, prons, "local");
+                using var local = new LocalEngineClient(engine == "voxcpm" ? _settings.LocalEngines.VoxCpmAddress : _settings.LocalEngines.OmniVoiceAddress);
+                if (engine == "voxcpm")
+                {
+                    if (v.VoxCpm.Voice.Length == 0) throw new InvalidOperationException("The voice pack has no VoxCPM reference voice.");
+                    audio = await local.VoxCpmAsync(text, v.VoxCpm);
+                    settings = $"VoxCPM · {v.VoxCpm.Voice} · cfg {v.VoxCpm.CfgValue:0.##}{(sendTags ? "" : " · tags left out")}";
+                }
+                else
+                {
+                    if (v.OmniVoice.Voice.Length == 0) throw new InvalidOperationException("The voice pack has no OmniVoice reference voice.");
+                    var os = JsonSerializer.Deserialize<OmniVoiceSettings>(JsonSerializer.Serialize(v.OmniVoice))!;
+                    if (D("speed") is { } sp) os.Speed = Math.Clamp(sp, 0.5, 2);
+                    audio = await local.OmniVoiceAsync(text, os);
+                    settings = $"OmniVoice · {os.Voice} · speed {os.Speed:0.##}{(sendTags ? "" : " · tags left out")}";
+                }
+                format = "wav";
+                break;
+            }
+            default:
+            {
+                if (string.IsNullOrWhiteSpace(rt.ElevenLabsApiKey)) throw new InvalidOperationException("Text-to-speech needs your ElevenLabs API key (Global Settings → General & tools → ElevenLabs).");
+                var es = v.Eleven;
+                if (es.VoiceId.Length == 0) throw new InvalidOperationException("The voice pack has no ElevenLabs voice.");
+                double stability = D("stability") ?? es.Stability, speed = D("speed") ?? es.Speed;
+                // A fixed seed gives the same take every time; trial and error wants a new one per try unless asked.
+                long? seed = B(p, "keepSeed") ? es.Seed : null;
+                var text = Phase2Service.ApplyPronunciations(sendTags ? spoken : Core.Naming.SpokenText.StripTags(spoken), prons, es.ModelId);
+                var req = new TtsRequest
+                {
+                    VoiceId = es.VoiceId, ModelId = es.ModelId, Text = text, OutputFormat = es.OutputFormat, Seed = seed,
+                    LanguageCode = string.IsNullOrWhiteSpace(es.LanguageCode) ? null : es.LanguageCode,
+                    ApplyTextNormalization = es.TextNormalization == "auto" ? null : es.TextNormalization,
+                    VoiceSettings = ModelCapabilities.Build(es.ModelId, stability, es.Similarity, es.Style, es.SpeakerBoost, speed),
+                    PronunciationDictionaries = es.PronunciationDictionaryIds.Count == 0 ? null : es.PronunciationDictionaryIds.Take(3).Select(id => new PronunciationLocator { DictionaryId = id }).ToList(),
+                };
+                using var client = new ElevenLabsClient(rt.ElevenLabsApiKey);
+                audio = await client.TextToSpeechAsync(req, CancellationToken.None);
+                format = es.OutputFormat;
+                settings = $"{es.ModelId} · stability {req.VoiceSettings?.Stability ?? stability:0.##} · speed {speed:0.##}{(seed is { } sd ? " · seed " + sd : "")}";
+                break;
+            }
+        }
+        var wav = await GrDecode(tools, work, audio, format);
         var w = Core.Audio.WavFile.Read(wav);
         w.TrimTailAndFade(v.TrimTailMs, v.FadeOutMs);
-        w.Write(wav);
-        var spoken = Core.Naming.SpokenText.StripTags(text);
-        var line = await Locked(() => GrSaveTake(proj, ev, slot, wav, "generated", spoken.Length > 0 ? spoken : text));
-        return new { line, project = await Locked(() => GrDto(proj)) };
+        var keep = Path.Combine(workRoot, "try-" + Guid.NewGuid().ToString("N")[..10] + ".wav");
+        w.Write(keep);
+        return (keep, w.DurationSeconds, settings);
     }
 }

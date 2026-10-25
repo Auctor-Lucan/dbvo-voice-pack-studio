@@ -855,3 +855,12 @@ mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: in
 .gr-cat.small .gr-cat-bar { flex-basis: 60px; }
 .gr-dur { font-size: 11px; white-space: nowrap; }
 .gr-issues details summary { cursor: pointer; padding: 4px; font-size: 12.5px; }
+.gr-spoken { width: 100%; font-size: 14px; }
+.gr-tagbar { gap: 6px; margin-top: 6px; }
+.gr-tagbar .tag-chip { cursor: pointer; }
+.gr-tries { display: flex; flex-direction: column; gap: 4px; max-height: 230px; overflow: auto; }
+.gr-try { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; background: var(--bg); }
+.gr-try:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.gr-try.sel { border-color: var(--accent); background: var(--accent-soft); }
+.gr-try input[type=radio] { margin: 0; }
+.gr-draft { align-self: flex-start; color: var(--warn); }
