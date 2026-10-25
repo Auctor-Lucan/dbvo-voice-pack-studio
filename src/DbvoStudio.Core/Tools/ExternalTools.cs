@@ -101,7 +101,7 @@ public sealed class ExternalTools
     /// </summary>
     public async Task<(double? Lufs, double? TruePeak)> PrepareForCheckAsync(string input, string? wav16, CancellationToken ct = default)
     {
-        var args = new List<string> { "-y", "-hide_banner", "-nostats", "-i", input, "-af", "ebur128=peak=true" };
+        var args = new List<string> { "-y", "-hide_banner", "-nostats", "-i", input, "-af", "apad=whole_dur=0.45,ebur128=peak=true" };
         if (wav16 == null) args.AddRange(new[] { "-f", "null", "-" });
         else args.AddRange(new[] { "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le", "-map_metadata", "-1", wav16 });
         var r = await RunAsync(FfmpegPath, args, ct);
@@ -109,9 +109,11 @@ public sealed class ExternalTools
         return ParseEbur128(r.StdErr);
     }
 
+    // Clips shorter than one 400 ms gating block (many grunts) have no integrated loudness and read as -70 LUFS ("silent"),
+    // so they are padded with silence to 0.45 s first: one block then holds the whole clip.
     public async Task<(double? Lufs, double? TruePeak)> MeasureAsync(string input, CancellationToken ct = default)
     {
-        var r = await RunAsync(FfmpegPath, new[] { "-hide_banner", "-nostats", "-i", input, "-af", "ebur128=peak=true", "-f", "null", "-" }, ct);
+        var r = await RunAsync(FfmpegPath, new[] { "-hide_banner", "-nostats", "-i", input, "-af", "apad=whole_dur=0.45,ebur128=peak=true", "-f", "null", "-" }, ct);
         return ParseEbur128(r.StdErr);
     }
 
