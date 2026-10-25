@@ -773,7 +773,7 @@ public sealed partial class Backend
         var fx = fxId.Length > 0 ? Core.Audio.Effects.Find(GruntService.EffectsOf(proj), fxId) ?? throw new InvalidOperationException("Unknown effect.") : null;
         var cache = Path.Combine(folder, "cache", "fx");
         Directory.CreateDirectory(cache);
-        var key = GruntService.Hash(GruntService.Stamp(dry) + "|" + dry + "|" + (fx == null ? "" : JsonSerializer.Serialize(fx, JsonOptions)));
+        var key = GruntService.Hash("fx2|" + GruntService.Stamp(dry) + "|" + dry + "|" + (fx == null ? "" : JsonSerializer.Serialize(fx, JsonOptions)));
         var outPath = Path.Combine(cache, key + ".wav");
         if (!File.Exists(outPath))
         {
