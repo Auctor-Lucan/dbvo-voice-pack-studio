@@ -932,7 +932,7 @@ export async function revoiceView(id) {
         original: (l) => `${l.text} ${l.notes || ''} ${l.emo || ''}`,
         originalLabel: 'in SUBTITLE, ACTOR NOTES or EMOTION', originalPlaceholder: 'Anger, whisper',
         originalNote: 'Searches the in-game subtitle, the actor notes from the plugin and the emotion name (Anger, Fear, Happy…). Separate several with commas.',
-        apply: applyTags,
+        tags: proj.voice.tags || [], apply: applyTags,
       }) }, 'Add a [tag] to all shown…'),
       h('button.btn.sm.ghost', { title: 'Find text in the spoken text of every line shown and replace it, with [tags] if you like', onclick: findReplace }, 'Find and replace in all shown…'),
       engines.size && !engines.has('elevenlabs') ? h('span.dim', 'Your speakers use local engines, which ignore audio tags.') : null,

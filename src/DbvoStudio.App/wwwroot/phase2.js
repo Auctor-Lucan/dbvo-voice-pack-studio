@@ -626,7 +626,7 @@ export async function patchView(id) {
       pool, idOf: (l) => l.lineId, original: (l) => l.originalLine,
       originalLabel: `in ORIGINAL MOD LINE (${plugins.join(', ') || 'plugin'})`,
       originalNote: '(Parenthesis) cues such as (Intimidate) are removed from topic files, so look for them here. Separate several with commas.',
-      apply: applyTags,
+      tags: voice.tags || [], apply: applyTags,
     });
   }
 

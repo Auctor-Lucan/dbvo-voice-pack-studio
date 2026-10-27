@@ -19,7 +19,7 @@ export function insertTagAtCaret(el, t) {
  * pool: the lines shown (each with .spoken); idOf(l); original(l): the text searched by the second condition;
  * originalLabel / originalNote: how that condition is described; apply(tags, mode, ids, placement).
  */
-export async function bulkTagDialog({ pool, idOf, original, originalLabel, originalNote, originalPlaceholder = '(Intimidate), (Brawl)', apply }) {
+export async function bulkTagDialog({ pool, idOf, original, originalLabel, originalNote, originalPlaceholder = '(Intimidate), (Brawl)', tags: voiceTags = [], apply }) {
   let mode = 'add';
   const tagsIn = h('input', { type: 'text', placeholder: '[whispers]' });
   const list = (v) => v.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
@@ -63,7 +63,24 @@ export async function bulkTagDialog({ pool, idOf, original, originalLabel, origi
   const modeSel = segmented([['add', 'Add'], ['remove', 'Remove']], mode, (v) => { mode = v; labels(); update(); });
   modeSel.classList.add('accent');
   labels(); update();
+  // the voice pack's tags, as in the grid's tags row: click one to put it in the box
+  let tagRow = null;
+  if (voiceTags.length) {
+    const put = (t) => insertTagAtCaret(tagsIn, t);
+    const custom = h('input', { type: 'text', placeholder: '[custom tag]', title: 'Type any [tag] and press Enter to put it in the box', style: { width: '140px' } });
+    custom.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !custom.value.trim()) return;
+      e.preventDefault();
+      let t = custom.value.trim();
+      if (!t.startsWith('[')) t = `[${t.replace(/[\[\]]/g, '')}]`;
+      custom.value = ''; put(t);
+    });
+    tagRow = h('div.row.wrap', { style: { gap: '6px' } },
+      voiceTags.map((t) => { const c = h('span.chip.tag-chip', { title: 'Put this tag in the box' }, t); c.addEventListener('mousedown', (e) => e.preventDefault()); c.addEventListener('click', () => put(t)); return c; }),
+      custom);
+  }
   const ok = await modal(h('span.row', modeSel, h('span', 'a tag to every line shown')), [
+    tagRow,
     h('div.col', h('div.field-label', 'Tags'), tagsIn), count,
     h('div.tag-opts', o1.el, o2.el, o3.el, o4.el, o5.el),
   ], [{ label: 'Cancel', value: false }, { label: 'OK', primary: true, value: true }], { wide: true });
