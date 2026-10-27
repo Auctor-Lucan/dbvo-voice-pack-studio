@@ -1,7 +1,7 @@
 // Global Settings: tools, voice packs, pronunciation, omit references, categories, library. Saved as you change them.
 import { VOICE_COLORS, voiceChip } from './phase2.js';
 import { THEMES, applyTheme } from './themes.js';
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, switchEl, segmented, popupMenu, needInfo, helpButton } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, switchEl, segmented, popupMenu, needInfo, helpButton, pathText, pathRows, pathList } from './lib.js';
 import { app, go, refreshState, applyBackground, noteNav } from './app.js';
 
 const TABS = [
@@ -362,7 +362,7 @@ const NEW_VOICE = () => ({
   sts: { voiceId: '', voiceName: '', modelId: 'eleven_multilingual_sts_v2', stability: 0.5, similarity: 0.75, style: 0, speakerBoost: false, seed: null, removeBackgroundNoise: false, outputFormat: 'mp3_44100_128', concurrency: 5 },
   tags: ['[whispers]', '[sighs]', '[laughs]', '[sarcastic]', '[curious]', '[excited]'],
   pronunciations: [], destinations: { wavLipFolder: '', finalRoot: '', fixFolder: '', fuzTemplate: 'Sound\\DBVO\\{packId}', releaseFolder: '' },
-  defaultReferenceIds: [], settingsLocked: false, loudnorm: false, gainDb: 0, overwriteWavLip: false, overwriteFuz: false, trimTailMs: 15, fadeOutMs: 10,
+  defaultReferenceIds: [], settingsLocked: false, loudnorm: false, gainDb: 0, overwriteWavLip: false, overwriteFuz: false, trimTailMs: 15, fadeOutMs: 10, softenPeaks: '',
 });
 
 async function voices(selectedId, rerender, onSelect) {
@@ -425,16 +425,15 @@ async function voices(selectedId, rerender, onSelect) {
         } }, '+ Add'));
     };
     renderTags();
-    const preview = h('div.box.mono', { style: { fontSize: '12px', whiteSpace: 'pre-wrap' } });
+    const preview = h('div.col', { style: { gap: '6px' } });
     const renderPreview = () => {
       const ex = (t) => (t || '').replaceAll('{mod}', 'Example Mod').replaceAll('{packId}', v.packId || 'packid').replaceAll('{voicePack}', v.name || 'Voice');
-      preview.textContent = [
-        'For a mod called "Example Mod", a new DBVO Patch gets:',
-        `  WAV + LIP folder   ${ex(d.wavLipFolder) || '(not set)'}`,
-        `  DBVO Fix folder    ${ex(d.fixFolder) || '(not set)'}`,
-        `  Final folder       ${ex(d.finalRoot) || '(not set)'}`,
-        `  .fuz files in      ${d.finalRoot ? ex(d.finalRoot) + '\\' : ''}${ex(d.fuzTemplate || 'Sound\\DBVO\\{packId}')}`,
-      ].join('\n');
+      clear(preview).append(h('div.faint', 'For a mod called "Example Mod", a new DBVO Patch gets:'), pathRows([
+        ['WAV + LIP folder', ex(d.wavLipFolder)],
+        ['DBVO Fix folder', ex(d.fixFolder)],
+        ['Final folder', ex(d.finalRoot)],
+        ['.fuz files in', `${d.finalRoot ? ex(d.finalRoot) + '\\' : ''}${ex(d.fuzTemplate || 'Sound\\DBVO\\{packId}')}`],
+      ]));
     };
     renderPreview();
     const colorIn = h('div.swatches');
@@ -472,6 +471,8 @@ async function voices(selectedId, rerender, onSelect) {
         pronTable(v.pronunciations, persistSoon)),
       section('Audio', null,
         srow('Tail trim', 'Removes the end-of-clip artefact before the LIP is made.', h('div.row', txt(v, 'trimTailMs', { type: 'number', width: '80px' }), h('span.dim', 'ms cut, then'), txt(v, 'fadeOutMs', { type: 'number', width: '80px' }), h('span.dim', 'ms fade-out'))),
+        srow('Soften peaks', 'On every new take: hard consonants (t, d, g, k) that spike far above the voice are turned down, so they don\'t distort at a high in-game gain. Standard limits peaks to 8 dB above the speech level, Strong to 6 dB. Existing takes: Phase 2 → Post-processing ▾.',
+          segmented([['', 'Off'], ['standard', 'Standard'], ['strong', 'Strong']], v.softenPeaks || '', (x) => { v.softenPeaks = x; persistSoon(); })),
         srow('Loudness normalization', 'EBU R128, −16 LUFS. Off keeps the original DBVO Voice Pack Maker level.', switchEl(v.loudnorm, (x) => { v.loudnorm = x; persistSoon(); })),
         srow('Gain', null, h('div.row', txt(v, 'gainDb', { type: 'number', width: '80px' }), h('span.dim', 'dB')))),
       section('Behaviour', null,

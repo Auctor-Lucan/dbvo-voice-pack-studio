@@ -45,21 +45,23 @@ public static partial class GruntService
     /// opened), or takes it off by putting the original back (effectId null). Changing to another effect starts again from the
     /// original. Every line of the project that uses the same file follows. Returns the new length.
     /// </summary>
-    public static async Task<double> SetEffectAsync(GruntProject p, GruntLine line, string projectFolder, string? effectId, ExternalTools? tools, bool force = false, CancellationToken ct = default)
+    public static async Task<double> SetEffectAsync(GruntProject p, GruntLine line, string projectFolder, string? effectId, ExternalTools? tools, bool force = false, CancellationToken ct = default, bool? soften = null)
     {
+        bool newSoften = soften ?? line.Soften;
         var src = SourcePath(line, projectFolder);
         if (!File.Exists(src)) throw new FileNotFoundException($"The audio file is missing: {src}");
         var same = p.Events.Values.SelectMany(s => s.Lines).Where(l => string.Equals(SourcePath(l, projectFolder), src, StringComparison.OrdinalIgnoreCase)).ToList();
         var original = ReverbOriginal(projectFolder, src);
         var current = line.Reverb ? (line.EffectId.Length > 0 ? line.EffectId : "inner") : null;
-        if (effectId == current && (effectId == null || File.Exists(original))) return line.DurationSeconds;
+        bool processed = current != null || line.Soften;
+        if (effectId == current && newSoften == line.Soften && (!processed || File.Exists(original))) return line.DurationSeconds;
         double seconds = 0;
-        if (current != null)
+        if (processed)
         {
             // Back to the original first (also when switching to another effect).
             if (!File.Exists(original))
             {
-                foreach (var l in same) { l.Reverb = false; l.ReverbStamp = ""; l.EffectId = ""; }
+                foreach (var l in same) { l.Reverb = false; l.ReverbStamp = ""; l.EffectId = ""; l.Soften = false; }
                 throw new InvalidOperationException("The original (without the effect) isn't in the project folder any more, so the effect can't be taken off. Replace the file with your original instead.");
             }
             if (!force && line.ReverbStamp.Length > 0 && Stamp(src) != line.ReverbStamp)
@@ -67,19 +69,23 @@ public static partial class GruntService
             File.Copy(original, src, true);
             File.Delete(original);
             try { seconds = WavFile.Read(src).DurationSeconds; } catch { seconds = ProbeWavHeader(src)?.Seconds ?? 0; }
-            foreach (var l in same) { l.Reverb = false; l.ReverbStamp = ""; l.EffectId = ""; if (seconds > 0) l.DurationSeconds = seconds; l.Lufs = null; l.PeakDb = null; }
+            foreach (var l in same) { l.Reverb = false; l.ReverbStamp = ""; l.EffectId = ""; l.Soften = false; if (seconds > 0) l.DurationSeconds = seconds; l.Lufs = null; l.PeakDb = null; }
         }
-        if (effectId == null) return seconds;
-        var fx = Effects.Find(EffectsOf(p), effectId) ?? throw new InvalidOperationException("That effect preset doesn't exist any more.");
+        if (effectId == null && !newSoften) return seconds;
+        var fx = effectId == null ? null : Effects.Find(EffectsOf(p), effectId) ?? throw new InvalidOperationException("That effect preset doesn't exist any more.");
         if (!src.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"Effects work on WAV files; this line is {Path.GetExtension(src).TrimStart('.').ToUpperInvariant()}. Replace it with a WAV (⋯ → Replace the file) first.");
+            throw new InvalidOperationException($"Effects and Soften peaks work on WAV files; this line is {Path.GetExtension(src).TrimStart('.').ToUpperInvariant()}. Replace it with a WAV (⋯ → Replace the file) first.");
         Directory.CreateDirectory(Path.GetDirectoryName(original)!);
         File.Copy(src, original, true);
-        try { await Effects.ApplyAsync(original, src, fx, tools, ct); }
+        try
+        {
+            if (fx != null) await Effects.ApplyAsync(original, src, fx, tools, ct);
+            if (newSoften) await PeakSoftener.ApplyAsync(fx != null ? src : original, src, PeakSoftener.Standard, tools, ct);
+        }
         catch { File.Copy(original, src, true); File.Delete(original); throw; }
         seconds = ProbeWavHeader(src)?.Seconds ?? 0;
         var stamp = Stamp(src);
-        foreach (var l in same) { l.Reverb = true; l.EffectId = fx.Id; l.ReverbStamp = stamp; l.DurationSeconds = seconds; l.Lufs = null; l.PeakDb = null; }
+        foreach (var l in same) { l.Reverb = fx != null; l.EffectId = fx?.Id ?? ""; l.Soften = newSoften; l.ReverbStamp = stamp; l.DurationSeconds = seconds; l.Lufs = null; l.PeakDb = null; }
         return seconds;
     }
 
@@ -93,7 +99,7 @@ public static partial class GruntService
     /// </summary>
     public static void ReleaseReverb(GruntProject p, GruntLine line, string projectFolder)
     {
-        if (!line.Reverb) return;
+        if (!line.Reverb && !line.Soften) return;
         try
         {
             var src = SourcePath(line, projectFolder);
@@ -106,7 +112,7 @@ public static partial class GruntService
             }
         }
         catch { /* the file stays as it is */ }
-        line.Reverb = false; line.ReverbStamp = ""; line.EffectId = "";
+        line.Reverb = false; line.ReverbStamp = ""; line.EffectId = ""; line.Soften = false;
     }
 
     // ------------------------------------------------------------------ trim and fades (not destructive)

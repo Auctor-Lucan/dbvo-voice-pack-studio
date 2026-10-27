@@ -1,6 +1,6 @@
 // The effect picker for takes (Phase 2, NPC Revoice): reverbs, filters and voice effects, put on every take of the line(s)
 // and on new takes as they are made. The dry originals are kept, so None takes it off again.
-import { rpc, h, popupMenu } from './lib.js';
+import { rpc, h, popupMenu, modal, segmented } from './lib.js';
 
 let cache = null;
 const names = new Map();
@@ -43,5 +43,59 @@ export function effectRow(current, ticked, onPick, title, { compact = false } = 
   sel.addEventListener('change', () => onPick(sel.value));
   if (compact) return sel; // a toolbar that has no room for the label (the options say what it is)
   return h('div.row', { style: { gap: '8px', alignItems: 'center', flexWrap: 'nowrap' } }, h('span.field-label', { style: { margin: 0 } }, 'Effect'), sel,
+    ticked > 1 ? h('span.faint', `applies to the ${ticked} ticked lines`) : null);
+}
+
+/**
+ * "Post-processing ▾": Effects (on the ticked lines) and Soften peaks (on the ticked lines or on all shown).
+ * o: { ticked, shown, applyFx(fx), soften(mode, which) } where which is 'ticked' | 'shown' and mode '' | 'standard' | 'strong'.
+ */
+export function postButton({ ticked: tf, shown: sf, applyFx, soften }) {
+  const b = h('button.btn.sm', { title: 'Effects and Soften peaks for the takes of the ticked lines, or of all lines shown' }, 'Post-processing ▾');
+  b.addEventListener('click', () => { const ticked = tf(), shown = sf(); popupMenu(b, [
+    { label: 'Effects…', sub: ticked ? `Reverb, filter or voice on the takes of the ${ticked} ticked line(s)` : 'Tick the lines to put an effect on first', disabled: !ticked, onclick: async () => {
+      const list = (await effectsList()).filter((x) => !x.isEmpty);
+      popupMenu(b, [...list.map((fx) => ({ label: fx.name, sub: `${fx.group} · ${fx.description}`, onclick: () => applyFx(fx.id) })),
+        { label: 'No effect', sub: 'Take the effect off: the dry takes come back', onclick: () => applyFx('') }]);
+    } },
+    { label: 'Soften peaks…', sub: 'Tame hard consonants (t, d, g, k) that distort at a high in-game gain: ticked lines or all shown', onclick: () => softenDialog({ ticked, shown, soften }) },
+  ]); });
+  return b;
+}
+
+/** Which lines and how strong; then soften(mode, which). */
+export async function softenDialog({ ticked, shown, soften }) {
+  let which = ticked ? 'ticked' : 'shown', mode = 'standard';
+  const warn = h('div.banner.warn', { style: { margin: 0 } });
+  const renderWarn = () => {
+    const n = which === 'ticked' ? ticked : shown;
+    warn.textContent = mode === '' ? `Takes Soften peaks off the takes of ${n.toLocaleString()} line(s): their originals come back.`
+      : `Changes the WAV of every take of ${n.toLocaleString()} line(s)${n > 200 ? ', which can take a while' : ''}. The originals are kept: Soften peaks → Off puts them back. Runs on your PC, no credits. New takes of these lines get it too; export again afterwards.`;
+  };
+  renderWarn();
+  const ok = await modal('Soften peaks', [
+    h('div', 'Turns down only the sharp peaks of hard consonants, over a few milliseconds, then matches the line back to its own loudness. Timing doesn\'t change, so the LIP files stay as they are.'),
+    h('div.row', { style: { gap: '10px', alignItems: 'center' } }, h('span.faint', 'Lines'),
+      segmented([['ticked', `Ticked (${ticked})`], ['shown', `All shown (${shown.toLocaleString()})`]], which, (v) => { which = v; renderWarn(); }, { disabled: false })),
+    h('div.row', { style: { gap: '10px', alignItems: 'center' } }, h('span.faint', 'Strength'),
+      segmented([['standard', 'Standard', 'Peaks limited to 8 dB above the speech level (recommended)'], ['strong', 'Strong', 'Peaks limited to 6 dB above the speech level, for lines Standard doesn\'t fix'], ['', 'Off', 'Take Soften peaks off: the original takes come back']], mode, (v) => { mode = v; renderWarn(); })),
+    warn,
+  ], [{ label: 'Cancel', value: false }, { label: 'Apply', primary: true, value: true }]);
+  if (!ok) return;
+  if (which === 'ticked' && !ticked) return;
+  await soften(mode, which);
+}
+
+/** The small S on a line with Soften peaks: click takes it off. */
+export function softenIcon(mode, onRemove) {
+  if (!mode) return null;
+  return h('button.fx-e.fx-s', { title: `Soften peaks${mode === 'strong' ? ' (strong)' : ''} on every take. Click to take it off.`, onclick: (e) => { e.stopPropagation(); onRemove(); } }, 'S');
+}
+
+/** The inspector's Soften peaks row for a line (or the ticked lines when it is one of them). */
+export function softenRow(current, ticked, onPick) {
+  return h('div.row', { style: { gap: '8px', alignItems: 'center', flexWrap: 'nowrap' }, title: 'Soften peaks on every take of the line (and new takes): hard consonants turned down so they don\'t distort at a high in-game gain. The originals are kept, so Off puts them back.' },
+    h('span.field-label', { style: { margin: 0 } }, 'Soften peaks'),
+    segmented([['', 'Off'], ['standard', 'Standard'], ['strong', 'Strong']], current || '', onPick),
     ticked > 1 ? h('span.faint', `applies to the ${ticked} ticked lines`) : null);
 }

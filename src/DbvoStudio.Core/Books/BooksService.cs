@@ -409,10 +409,11 @@ public sealed class BooksService
     /// <summary>The loudness level and gender of a voice (for the audio chain preset).</summary>
     public static BookAudioSettings AudioFor(BooksProject p, string voice, Book? book = null)
     {
-        string level = "loud"; bool female = false;
-        if (voice.StartsWith("n:") && p.Narrators.FirstOrDefault(x => "n:" + x.Id == voice) is { } n) { level = n.Level; female = n.Female; }
-        else if (voice.StartsWith("vt:") && p.VoiceTypes.TryGetValue(voice[3..], out var vt)) { level = vt.Level; female = vt.Female; }
+        string level = "loud", soften = ""; bool female = false;
+        if (voice.StartsWith("n:") && p.Narrators.FirstOrDefault(x => "n:" + x.Id == voice) is { } n) { level = n.Level; female = n.Female; soften = n.SoftenPeaks; }
+        else if (voice.StartsWith("vt:") && p.VoiceTypes.TryGetValue(voice[3..], out var vt)) { level = vt.Level; female = vt.Female; soften = vt.SoftenPeaks; }
         var s = p.Audio.Clone();
+        s.SoftenPeaks = Audio.PeakSoftener.IsMode(soften) ? soften : "";
         if (string.Equals(level, "normal", StringComparison.OrdinalIgnoreCase))
         {
             var preset = BookAudioSettings.Preset("normal", female);

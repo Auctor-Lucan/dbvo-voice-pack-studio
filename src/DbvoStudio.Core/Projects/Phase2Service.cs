@@ -653,11 +653,12 @@ public sealed partial class Phase2Service
             }
             finally
             {
-                // The line's effect (reverb, filter, voice) goes on the new take too.
-                if (newTake != null && line.Effect.Length > 0)
+                // The line's effect (reverb, filter, voice) and Soften peaks (the line's, else the voice pack's) go on the new take too.
+                var soften = line.Soften.Length > 0 ? line.Soften : voice.SoftenPeaks ?? "";
+                if (newTake != null && (line.Effect.Length > 0 || PeakSoftener.IsMode(soften)))
                 {
-                    try { await TakeEffects.ApplyAsync(root, newTake, line.Effect, null, tools, CancellationToken.None); }
-                    catch (Exception ex) { line.LastError = "The take was made, but its effect couldn't be added: " + FriendlyError.From(ex); }
+                    try { await TakeEffects.RenderAsync(root, newTake, line.Effect, soften, null, tools, CancellationToken.None); }
+                    catch (Exception ex) { line.LastError = "The take was made, but its effect or Soften peaks couldn't be added: " + FriendlyError.From(ex); }
                 }
                 int d = Interlocked.Increment(ref done);
                 progress?.Report(new GenerationProgress(d, total, failed, line.FinalLine, line.LastError));
@@ -898,6 +899,8 @@ public sealed partial class Phase2Service
                     if (!ShouldWrite(patch, target, t, patch.OverwriteWavLip)) continue;
                     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                     FileLinks.LinkOrCopy(Path.Combine(_lib.PatchFolder(patch.Id), srcRel), target, true);
+                    // A hard link keeps the take's own date; dated now, an export sorts to the top in Explorer.
+                    try { File.SetLastWriteTimeUtc(target, DateTime.UtcNow); } catch (IOException) { } catch (UnauthorizedAccessException) { }
                     patch.Exported[ExportKey(target)] = t.Id;
                     any = true;
                 }

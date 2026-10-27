@@ -105,7 +105,7 @@ public static class Effects
     }
 
     /// <summary>Gain so the output's speech level matches the dry line, plus extraDb; peaks above -1 dBFS are rounded off softly.</summary>
-    private static void Level(short[] o, short[]? dry, int perSecond, double extraDb)
+    internal static void Level(short[] o, short[]? dry, int perSecond, double extraDb)
     {
         double g = Math.Pow(10, Math.Clamp(extraDb, -24, 18) / 20);
         if (dry != null)

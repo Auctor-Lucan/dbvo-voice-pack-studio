@@ -1,11 +1,11 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
-import { effectRow, effectsButton, effectIcon } from './fx.js';
+import { effectRow, effectIcon, postButton, softenIcon, softenRow } from './fx.js';
 import { qaDialog } from './qa.js';
 
 const CERT = { Exact: 'Speaker known', Probable: 'Probable speakers', Unknown: 'Speaker unknown' };
@@ -137,7 +137,7 @@ export async function revoiceView(id) {
       if (stale.length) {
         const v = await modal('Files from an earlier export', [
           h('div', `${stale.length} .fuz file(s) in the output folder were written by an earlier export but are no longer exported: their lines are excluded, their speaker is skipped, their take was deleted, or the mod changed so the game looks for them elsewhere. Left in place the game still plays them.`),
-          h('div.box.mono', { style: { maxHeight: '180px', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: '12px' } }, stale.slice(0, 200).join('\n') + (stale.length > 200 ? `\n… ${stale.length - 200} more` : '')),
+          pathList(stale.slice(0, 200), { more: stale.length - 200 }),
           h('div.faint', 'Only files this tool wrote are listed; nothing else in the folder is touched.'),
         ], [{ label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' }, { label: 'Delete them', primary: true, value: 'delete' }]);
         if (v == null) return;
@@ -148,7 +148,7 @@ export async function revoiceView(id) {
   }
 
   async function writePack() {
-    try { const files = await rpc('revoice.writePack', { id }); await modal('New voice type pack written', [h('div.box.mono', { style: { whiteSpace: 'pre-wrap' } }, files.join('\n'))]); } catch (e) { fail(e); }
+    try { const files = await rpc('revoice.writePack', { id }); await modal('New voice type pack written', [pathList(files)]); } catch (e) { fail(e); }
   }
 
   // ---------------------------------------------------------------- setup
@@ -382,13 +382,13 @@ export async function revoiceView(id) {
 
   function voicePick(sp) {
     const eng = sp.engine || 'elevenlabs';
-    const engSel = h('select', { title: proj.voiceChanger ? 'The Voice Changer only works with ElevenLabs voices' : 'Engine for this speaker' },
+    const engSel = h('select', { style: { width: '118px' }, title: proj.voiceChanger ? 'The Voice Changer only works with ElevenLabs voices' : 'Engine for this speaker' },
       Object.entries(ENGINE_NAMES).map(([k, t]) => h('option', { value: k, selected: k === eng, disabled: proj.voiceChanger && k !== 'elevenlabs' }, t)));
     engSel.addEventListener('change', async () => {
       try { proj.speakers = await rpc('revoice.speaker', { id, key: sp.key, engine: engSel.value, voiceId: '' }); renderAll(); loadVoices(); } catch (e) { fail(e); }
     });
     const list = voiceLists[eng];
-    const vSel = h('select', { title: 'The voice that speaks this speaker\'s lines', style: { maxWidth: '220px' } },
+    const vSel = h('select', { title: 'The voice that speaks this speaker\'s lines', style: { maxWidth: '180px' } },
       h('option', { value: '' }, list == null ? 'Loading voices…' : list.length ? '— pick a voice —' : eng === 'elevenlabs' ? 'No voices (API key?)' : 'Server offline?'),
       (list || []).map((v) => h('option', { value: v.id, selected: v.id === sp.voiceId }, v.name + (v.sub && v.sub !== 'premade' ? '' : v.sub ? ' · premade' : ''))));
     if (sp.voiceId && !(list || []).some((v) => v.id === sp.voiceId)) {
@@ -495,7 +495,7 @@ export async function revoiceView(id) {
         sort: (l) => { const t = l.takes.find((x) => x.id === l.sel); return !t || !t.qa ? 2 : t.qa.flags.length ? 0 : 1; }, render: (l) => qaBadgeRv(l) },
       { id: 'take', title: 'Take', width: 84, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s). Click to play, switch or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } }, l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—'),
-        effectIcon(l.effect, () => applyFx([l.id], ''))) },
+        effectIcon(l.effect, () => applyFx([l.id], '')), softenIcon(l.soften, () => applySoften([l.id], ''))) },
       { id: 'act', title: '', width: 146, resizable: false, render: (l) => h('span.row.icon-bar', { style: { gap: '2px' } },
         h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: inFlight.has(l.id) ? 'Making a new take…' : genBlock(l) || 'Regenerate (a new take; older takes stay)', disabled: !!genBlock(l), onmousedown: keepEditing, onclick: (e) => { e.stopPropagation(); regen(l); } }, icon('regen')),
         h('button.act-btn', { title: l.takes.length ? 'Open this line\'s takes folder' : 'No takes yet', disabled: !l.takes.length, onclick: (e) => { e.stopPropagation(); rpc('revoice.openTakeFolder', { id, lineId: l.id }).catch(fail); } }, icon('folder')),
@@ -568,7 +568,11 @@ export async function revoiceView(id) {
       chip('failed', 'Failed', 'The last attempt failed'), chip('orig', 'Has current file', 'The game plays a file for this line now (▶ in the Now column)'),
       chip('silent', 'Silent now', 'No voice file yet: subtitles only in game'), chip('unsure', 'Speaker unsure', 'The speaker was worked out as probable or unknown — check before generating'),
       chip('marked', 'Flagged', 'Flagged to revisit'), chip('qa', 'QA flagged', 'Check takes flagged the take in use: words differ, too quiet or clipping'), chip('approved', 'Approved', 'Approved in Review'), chip('excl', 'Excluded', 'Left out of generation and export'),
-      h('div.spacer'), folderButton());
+      h('div.spacer'),
+      postButton({ ticked: () => grid.selected.size, shown: () => grid.rows.filter((l) => !l.gone && l.takes && l.takes.length).length,
+        applyFx: (fx) => applyFx([...grid.selected], fx),
+        soften: (mode, which) => applySoften(which === 'ticked' ? [...grid.selected] : grid.rows.filter((l) => !l.gone && l.takes && l.takes.length).map((l) => l.id), mode) }),
+      folderButton());
   }
   // Search, Columns and Hide panel sit on the tag row (as in Phase 2); Open folder sits on the filter row.
   function viewTools() {
@@ -636,7 +640,7 @@ export async function revoiceView(id) {
       h('div', h('div.field-label', 'Subtitle (in game)'), h('div.box.ellipsis', { title: l.text }, l.text)),
       (() => {
         const ids = grid.selected.has(l.id) && grid.selected.size > 1 ? [...grid.selected] : [l.id];
-        return effectRow(l.effect || '', ids.length, (fx) => applyFx(ids, fx));
+        return h('div.col', { style: { gap: '6px' } }, effectRow(l.effect || '', ids.length, (fx) => applyFx(ids, fx)), softenRow(l.soften || '', ids.length, (m) => applySoften(ids, m)));
       })(),
       h('div', h('div.field-label', 'Spoken text (tags allowed)'), spoken,
         h('div.row', { style: { marginTop: '6px', gap: '6px' } },
@@ -703,7 +707,6 @@ export async function revoiceView(id) {
       h('span.stat', h('b', String(c.done)), ` / ${c.all} generated`, c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', ` · ${c.silent} silent now`, who ? h('span.faint', ` · ${who} only`) : ''),
       h('div.spacer'),
       sel.length ? bulkBtn : null,
-      effectsButton(sel.length, (fx) => applyFx([...sel], fx)),
       h('button.btn' + (review ? '.review-on' : ''), { title: review ? 'End Review (Esc)' : 'Listen through the lines with the keyboard: Space plays, A approves and moves on, R makes a new take, F flags', onclick: () => setReview(!review) }, review ? '■ End review' : '▶ Review'),
       h('button.btn', { title: `Check takes${sel.length ? ` of the ${sel.length} ticked line(s)` : ' of every line shown'}: Whisper compares what is said with the line, plus loudness and clipping. Flags only, deletes nothing.`, onclick: () => qaRun(sel.length ? sel : grid.rows.filter((l) => l.takes.length && !l.excl).map((l) => l.id)) }, 'Check takes'),
       genBtn);
@@ -711,8 +714,8 @@ export async function revoiceView(id) {
 
   // ---- Review, Check takes and recording (as in Phase 2)
   function qaText(q) { return q ? [q.score != null ? `Words match ${(q.score * 100).toFixed(0)}%` : null, q.heard ? `Heard: "${q.heard}"` : null,
-    q.lufs != null ? `Loudness ${q.lufs.toFixed(1)} LUFS` : null, q.truePeak != null ? `Peak ${q.truePeak.toFixed(1)} dBTP` : null, q.onsetMs != null ? `Start: a ${Math.round(q.onsetMs)} ms burst, then ${Math.round(q.onsetGapMs)} ms of silence before the line` : null].filter(Boolean).join('\n') : ''; }
-  var QA_WHY = { words: 'words differ', quiet: 'too quiet', clipping: 'clipping', onset: 'burst at the start', error: 'not checked' };
+    q.lufs != null ? `Loudness ${q.lufs.toFixed(1)} LUFS` : null, q.truePeak != null ? `Peak ${q.truePeak.toFixed(1)} dBTP` : null, q.peakAboveDb != null ? `Peaks ${q.peakAboveDb.toFixed(1)} dB above the voice` : null, q.onsetMs != null ? `Start: a ${Math.round(q.onsetMs)} ms burst, then ${Math.round(q.onsetGapMs)} ms of silence before the line` : null].filter(Boolean).join('\n') : ''; }
+  var QA_WHY = { words: 'words differ', quiet: 'too quiet', clipping: 'clipping', onset: 'burst at the start', peaks: 'sharp peaks', error: 'not checked' };
   function qaBadgeRv(l) {
     const t = l.takes.find((x) => x.id === l.sel);
     if (!t || !t.qa) return null;
@@ -789,7 +792,7 @@ export async function revoiceView(id) {
     const grp = (label, ...kids) => h('div.tgroup', { title: TOOL_TIPS[label] || '' }, h('label', label), h('div.row', ...kids));
     const slider = (obj, k, min, max, step, label) => {
       const val = h('span.mono.dim', { style: { width: '34px' } }, Number(obj[k]).toFixed(2));
-      const r = h('input', { type: 'range', min, max, step, value: obj[k], style: { width: '80px' } });
+      const r = h('input', { type: 'range', min, max, step, value: obj[k], style: { width: '72px' } });
       r.addEventListener('input', () => { val.textContent = Number(r.value).toFixed(2); });
       r.addEventListener('change', () => set(obj, k, Number(r.value)));
       return grp(label, r, val);
@@ -800,7 +803,7 @@ export async function revoiceView(id) {
       return grp(label, i);
     };
     // Speaker: filters the lines; with one speaker picked, its engine and voice can be changed right here.
-    const spSel = h('select', { title: 'Show one speaker\'s lines (and pick its voice here)', style: { maxWidth: '200px' } }, h('option', { value: '' }, `All speakers (${proj.speakers.length})`),
+    const spSel = h('select', { title: 'Show one speaker\'s lines (and pick its voice here)', style: { maxWidth: '170px' } }, h('option', { value: '' }, `All speakers (${proj.speakers.length})`),
       proj.speakers.map((sp) => h('option', { value: sp.key, selected: sp.key === speakerFilter }, `${sp.name} (${sp.lines})`)));
     spSel.addEventListener('change', () => { setSpeaker(spSel.value); renderVbar(); renderFilters(); grid.setRows(visible()); renderActions(); });
     const sp = speakerFilter && proj.speakers.find((x) => x.key === speakerFilter);
@@ -837,7 +840,7 @@ export async function revoiceView(id) {
         const style = mi.canUseStyle != null ? mi.canUseStyle && !tag : !tag;
         const boost = mi.canUseSpeakerBoost != null ? mi.canUseSpeakerBoost && !tag : !tag;
         const langOk = !/multilingual_v2|monolingual_v1|english_v1/.test(e.modelId || '');
-        const ms = h('select', { onchange: (ev) => set(e, 'modelId', ev.target.value) }, (elevenModels && elevenModels.length ? elevenModels : [{ modelId: e.modelId }]).map((x) => h('option', { value: x.modelId, selected: x.modelId === e.modelId }, x.modelId + (/^eleven_v[34]/i.test(x.modelId) ? ' · tags' : ''))));
+        const ms = h('select', { style: { maxWidth: '160px' }, onchange: (ev) => set(e, 'modelId', ev.target.value) }, (elevenModels && elevenModels.length ? elevenModels : [{ modelId: e.modelId }]).map((x) => h('option', { value: x.modelId, selected: x.modelId === e.modelId }, x.modelId + (/^eleven_v[34]/i.test(x.modelId) ? ' · tags' : ''))));
         const stabVal = e.stability < 0.25 ? 0 : e.stability < 0.75 ? 0.5 : 1;
         const lang = h('select', { disabled: !langOk, title: langOk ? 'Force the language (ISO 639-1). Auto lets the model detect it.' : 'This model does not accept a language code.', onchange: (ev) => set(e, 'languageCode', ev.target.value) },
           LANGS.map(([k, t]) => h('option', { value: k, selected: k === (e.languageCode || '') }, t)));
@@ -978,6 +981,14 @@ export async function revoiceView(id) {
   async function applyFx(ids, fx) {
     try {
       const r = await withBusy(rpc('takes.effect', { kind: 'revoice', id, lineIds: ids, effect: fx }), fx ? 'Adding the effect' : 'Taking the effect off', `${ids.length} line(s)…`);
+      for (const nl of r.lines) replaceLine(nl, false);
+      grid.setRows(visible()); renderInspector(); renderActions();
+      toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
+    } catch (e) { fail(e); renderInspector(); }
+  }
+  async function applySoften(ids, mode) {
+    try {
+      const r = await withBusy(rpc('takes.effect', { kind: 'revoice', id, lineIds: ids, soften: mode }), mode ? 'Softening peaks' : 'Taking Soften peaks off', `${ids.length.toLocaleString()} line(s)…`);
       for (const nl of r.lines) replaceLine(nl, false);
       grid.setRows(visible()); renderInspector(); renderActions();
       toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
@@ -1212,9 +1223,9 @@ export async function revoiceView(id) {
       if (d.kind === 'revoice-scan' && d.ok) { if (proj.lines.length && tab === 'setup') { tab = 'speakers'; store.set('rv-tab:' + id, tab); } toast(`Scan done: ${d.report.lines.toLocaleString()} voice files to make, ${d.report.withOriginal.toLocaleString()} with a current file.`); }
       if (d.kind === 'revoice-export' && d.ok !== undefined && d.report) {
         const folders = Object.entries(d.report.folders || {}).sort((a, b) => a[0].localeCompare(b[0]));
-        await modal('Exported', [h('div.kv', h('div', 'Written'), h('div', String(d.report.written)), h('div', 'Kept (already there)'), h('div', String(d.report.skipped || 0)), d.report.removed ? h('div', 'Old files deleted') : null, d.report.removed ? h('div', String(d.report.removed)) : null, h('div', 'Failed'), h('div', String(d.report.failed)), h('div', 'Folder'), h('div.mono', d.folder)),
-          folders.length ? h('div', h('div.field-label', 'Written to'), h('div.box.mono', { style: { maxHeight: '180px', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: '12px' } }, folders.map(([f, n]) => `${f}\\  ${n}`).join('\n'))) : null,
-          d.report.files.length ? h('div', h('div.field-label', 'New voice type pack'), h('div.box.mono', { style: { whiteSpace: 'pre-wrap' } }, d.report.files.join('\n'))) : null,
+        await modal('Exported', [h('div.kv', h('div', 'Written'), h('div', String(d.report.written)), h('div', 'Kept (already there)'), h('div', String(d.report.skipped || 0)), d.report.removed ? h('div', 'Old files deleted') : null, d.report.removed ? h('div', String(d.report.removed)) : null, h('div', 'Failed'), h('div', String(d.report.failed)), h('div', 'Folder'), h('div', pathText(d.folder))),
+          folders.length ? h('div', h('div.field-label', 'Written to'), pathList(folders.map(([f]) => f + '\\'), { suffix: (_, i) => h('span.faint', `  ${folders[i][1]}`) })) : null,
+          d.report.files.length ? h('div', h('div.field-label', 'New voice type pack'), pathList(d.report.files)) : null,
           d.report.errors.length ? h('div.box.mono', { style: { maxHeight: '160px', overflow: 'auto' } }, d.report.errors.slice(0, 50).join('\n')) : null],
         [{ label: 'Open folder', value: 'open' }, { label: 'OK', primary: true, value: true }]).then((v) => { if (v === 'open') rpc('open.path', { path: d.folder }); });
       }

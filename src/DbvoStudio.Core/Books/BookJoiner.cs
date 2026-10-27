@@ -54,6 +54,7 @@ public static class BookJoiner
         {
             var x = ReadMono(wav, out int rate);
             if (rate != Rate) throw new InvalidDataException($"{Path.GetFileName(wav)} is {rate} Hz; takes are expected at 44.1 kHz.");
+            if (Audio.PeakSoftener.IsMode(s.SoftenPeaks)) x = Audio.PeakSoftener.Process(x, Rate, s.SoftenPeaks);
             clips.Add(x);
         }
         int pauseP = s.ParagraphPauseMs * Rate / 1000, pauseS = s.SentencePauseMs * Rate / 1000, end = s.EndSilenceMs * Rate / 1000;

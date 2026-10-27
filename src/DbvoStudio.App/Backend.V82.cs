@@ -284,13 +284,16 @@ public sealed partial class Backend
     /// <summary>An effect on lines' takes (Phase 2 or NPC Revoice): every take now, and new takes as they are made.</summary>
     private async Task<object?> TakesEffect(JsonElement p)
     {
-        if (_jobCts != null) throw new InvalidOperationException("Effects wait until the running task (top bar) has finished: it may be writing these takes.");
+        if (_jobCts != null) throw new InvalidOperationException("Post-processing waits until the running task (top bar) has finished: it may be writing these takes.");
         var kind = S(p, "kind", "patch");
         var id = S(p, "id");
         var ids = Strings(p, "lineIds").ToHashSet();
-        var fx = S(p, "effect");
+        // effect and soften are each optional: a key that isn't sent leaves that part of the line as it is
+        string? fx = p.TryGetProperty("effect", out var fe) && fe.ValueKind == JsonValueKind.String ? fe.GetString() ?? "" : null;
+        string? soften = p.TryGetProperty("soften", out var se) && se.ValueKind == JsonValueKind.String ? se.GetString() ?? "" : null;
         var tools = File.Exists(_settings.FfmpegPath) ? GrExternal() : null;
-        if (fx.Length > 0 && Effects.Find(null, fx) == null) throw new InvalidOperationException("Unknown effect.");
+        if (fx is { Length: > 0 } && Effects.Find(null, fx) == null) throw new InvalidOperationException("Unknown effect.");
+        if (soften is { Length: > 0 } && !PeakSoftener.IsMode(soften)) throw new InvalidOperationException("Unknown Soften peaks setting.");
         await _gate.WaitAsync();
         try
         {
@@ -303,7 +306,7 @@ public sealed partial class Backend
                 save = () => _lib.Save(proj);
                 // An effect on a book's parts turns the project's reverb off for that book (two reverbs sound muddy); off again turns it back on.
                 foreach (var stem in proj.Lines.Where(l => ids.Contains(l.LineId)).Select(l => l.Stem).Distinct())
-                    if (proj.Books.FirstOrDefault(b => b.Stem == stem) is { } bk) bk.Reverb = fx.Length > 0 ? false : null;
+                    if (fx != null && proj.Books.FirstOrDefault(b => b.Stem == stem) is { } bk) bk.Reverb = fx.Length > 0 ? false : null;
             }
             else if (kind == "revoice")
             {
@@ -324,7 +327,7 @@ public sealed partial class Backend
             await Task.WhenAll(lines.Select(async l =>
             {
                 await sem.WaitAsync();
-                try { Interlocked.Add(ref takes, await TakeEffects.SetAsync(root, l, fx.Length == 0 ? null : fx, null, tools)); }
+                try { Interlocked.Add(ref takes, await TakeEffects.SetAsync(root, l, fx, null, tools, default, soften)); }
                 catch (Exception ex) { lock (problems) problems.Add(l.FinalLine + ": " + FriendlyError.From(ex)); }
                 finally { sem.Release(); }
             }));

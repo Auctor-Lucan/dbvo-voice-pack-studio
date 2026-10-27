@@ -943,3 +943,29 @@ mark.ins { background: color-mix(in srgb, var(--ok) 35%, transparent); color: in
 /* NPC Revoice: the Language · output button (opens the language, numbers, format, seed and concurrency settings) */
 .out-btn { display: inline-flex; align-items: center; gap: 6px; }
 .out-btn .out-open { margin-left: 2px; padding: 1px 6px; border-radius: 8px; background: var(--accent-soft); color: var(--text); font-size: 11px; font-weight: 700; }
+
+/* Path boxes: file paths in Segoe UI, folders dimmed and the last part bright; wraps after a backslash or a space. */
+.path-box { background: var(--deep); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; font: 400 12.5px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; line-height: 1.5; color: var(--text); }
+.path-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 14px; row-gap: 3px; align-items: baseline; }
+.path-key { color: var(--dim); }
+.path { overflow-wrap: anywhere; }
+.path-head { color: var(--dim); }
+.path-last { color: var(--text); font-weight: 600; }
+.kv .path { font-size: 12.5px; }
+
+/* Voiced Books → Narrators & authors: compact */
+.compact-voices .compact-help p { margin: 0; font-size: 13px; line-height: 1.45; }
+.compact-voices .compact-help { padding: 8px 12px; }
+.compact-voices .section-head { padding: 4px 0; }
+.compact-voices .section-head h2 { font-size: 15px; }
+.compact-voices .voices-tbl th { padding: 4px 8px; }
+.compact-voices .voices-tbl td { padding: 3px 8px; }
+.compact-voices .voices-tbl input[type=text], .compact-voices .voices-tbl select { height: 30px; padding-top: 2px; padding-bottom: 2px; }
+.compact-voices .voices-tbl .seg button { padding-top: 3px; padding-bottom: 3px; }
+.compact-voices details.voice-settings { margin-bottom: 4px; }
+.compact-voices details.voice-settings > summary { padding-top: 6px; padding-bottom: 6px; }
+
+/* Folders & options: shorter rows (the help texts stay) */
+.opt-row { padding: 5px 0; gap: 10px; }
+.opt-label { padding-top: 4px; }
+.opt-hint { font-size: 12px; line-height: 1.35; }

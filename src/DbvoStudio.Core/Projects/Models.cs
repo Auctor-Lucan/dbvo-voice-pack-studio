@@ -215,6 +215,8 @@ public sealed class VoicePack
     public string Color { get; set; } = "";
     public double TrimTailMs { get; set; } = 15;
     public double FadeOutMs { get; set; } = 10;
+    /// <summary>Soften peaks on every new take: "" (off), "standard" or "strong".</summary>
+    public string SoftenPeaks { get; set; } = "";
 }
 
 public enum Phase1Status { Active, ChangedInMod, Removed }
@@ -412,6 +414,8 @@ public sealed class Take
     public string Effect { get; set; } = "";
     /// <summary>OriginalFuz while an effect is on (the imported .fuz doesn't have the effect, so it isn't reused meanwhile).</summary>
     public string? DryOriginalFuz { get; set; }
+    /// <summary>Soften peaks on this take's WAV: "" (off), "standard" or "strong" (applied after the effect; the dry original is kept).</summary>
+    public string Soften { get; set; } = "";
 }
 
 /// <summary>Quality check of one take: what Whisper heard against the line, plus loudness and peak.</summary>
@@ -427,6 +431,8 @@ public sealed class TakeQa
     /// <summary>Start of take: length of the stray burst before the line and the silence after it (ms), when one was found.</summary>
     public double? OnsetMs { get; set; }
     public double? OnsetGapMs { get; set; }
+    /// <summary>How far the take's loudest peak stands above its speech level (dB), when Sharp peaks was checked.</summary>
+    public double? PeakAboveDb { get; set; }
     /// <summary>Short reasons the take was flagged: "words", "quiet", "clipping", "onset". Empty: passed.</summary>
     public List<string> Flags { get; set; } = new();
 }
@@ -486,6 +492,8 @@ public class Phase2Line
     public bool NoAdopt { get; set; }
     /// <summary>Effect preset for this line (reverb, filter, voice): put on every take, also new ones. Empty = none.</summary>
     public string Effect { get; set; } = "";
+    /// <summary>Soften peaks for this line: put on every take, also new ones. "" = none (the voice pack's setting decides for new takes).</summary>
+    public string Soften { get; set; } = "";
 
     [JsonIgnore] public Take? SelectedTake => Takes.FirstOrDefault(t => t.Id == SelectedTakeId);
 

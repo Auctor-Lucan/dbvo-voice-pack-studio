@@ -126,6 +126,8 @@ public sealed class BookNarrator
     public bool Female { get; set; }
     /// <summary>loud (the IVBOS release chain) or normal.</summary>
     public string Level { get; set; } = "loud";
+    /// <summary>Soften peaks on this narrator's parts when the books are joined: "" (off), "standard" or "strong".</summary>
+    public string SoftenPeaks { get; set; } = "";
 }
 
 /// <summary>The voice for books written by NPCs of one vanilla voice type.</summary>
@@ -137,6 +139,8 @@ public sealed class VoiceTypeVoice
     public string? VoiceName { get; set; }
     public bool Female { get; set; }
     public string Level { get; set; } = "loud";
+    /// <summary>Soften peaks on this voice type's parts when the books are joined.</summary>
+    public string SoftenPeaks { get; set; } = "";
     /// <summary>Leave these books to the narrator(s) instead.</summary>
     public bool UseNarrator { get; set; }
     /// <summary>Added by the user (Narrators &amp; authors → Add a voice type): listed and selectable for every book even before a book uses it.</summary>

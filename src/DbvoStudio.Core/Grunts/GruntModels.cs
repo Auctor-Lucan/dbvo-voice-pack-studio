@@ -189,6 +189,8 @@ public sealed class GruntLine
     public bool Reverb { get; set; }
     /// <summary>The effect preset on the file (with <see cref="Reverb"/> on); empty = "inner" (files from 8.2.0).</summary>
     public string EffectId { get; set; } = "";
+    /// <summary>Soften peaks on the file (after its effect, if any); the original is kept in the project, as for effects.</summary>
+    public bool Soften { get; set; }
     /// <summary>Non-destructive trim and fades, applied when listening and exporting (seconds / milliseconds; 0 = none).</summary>
     public double TrimStart { get; set; }
     public double TrimEnd { get; set; }
@@ -240,4 +242,6 @@ public sealed class GruntAudioSettings
     /// <summary>Extra gain after normalizing, e.g. to sit grunts under dialogue.</summary>
     public double GainDb { get; set; }
     public int SampleRate { get; set; } = 44100;
+    /// <summary>Soften peaks on every file at export, before the loudness: "" (off), "standard" or "strong".</summary>
+    public string SoftenPeaks { get; set; } = "";
 }

@@ -135,7 +135,7 @@ public class EffectsTests
         Assert.Equal("radio", t.Effect); Assert.Null(t.OriginalFuz);
         Assert.NotEqual(orig, File.ReadAllBytes(Path.Combine(root, "takes", "t.wav")));
         await DbvoStudio.Core.Projects.TakeEffects.SetAsync(root, line, "automaton", null, Tools()); // switch: from the dry one
-        await DbvoStudio.Core.Projects.TakeEffects.SetAsync(root, line, null, null, Tools());
+        await DbvoStudio.Core.Projects.TakeEffects.SetAsync(root, line, "", null, Tools()); // "" = off (null leaves it as it is)
         Assert.Equal("", t.Effect); Assert.Equal("old.fuz", t.OriginalFuz);
         Assert.Equal(orig, File.ReadAllBytes(Path.Combine(root, "takes", "t.wav")));
         Directory.Delete(root, true);

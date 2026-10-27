@@ -29,6 +29,8 @@ public sealed class BookAudioSettings
     public double LimiterReleaseMs { get; set; } = 50;
     /// <summary>Extra gain after everything else (Normal female preset: +1.8 dB).</summary>
     public double ExtraGainDb { get; set; } = 0;
+    /// <summary>Soften peaks on every part before it is joined: "" (off), "standard" or "strong".</summary>
+    public string SoftenPeaks { get; set; } = "";
     /// <summary>xWMA bit rate in bits per second.</summary>
     public int XwmBitrate { get; set; } = 48000;
 
@@ -51,7 +53,7 @@ public sealed class BookAudioSettings
     /// <summary>Text that changes whenever a setting that affects the sound changes (joins are rebuilt when it does).</summary>
     public string Fingerprint() => string.Join("|", Reverb, ReverbPreDelayMs, ReverbRoomSize, ReverbReverberance, ReverbHfDamping, ReverbToneLow, ReverbToneHigh,
         ReverbWetGainDb, ReverbDryGainDb, ParagraphPauseMs, SentencePauseMs, EndSilenceMs, LoudnessLufs, Limiter, LimiterThresholdDb, LimiterOutputDb, LimiterLookaheadMs,
-        LimiterReleaseMs, ExtraGainDb, XwmBitrate);
+        LimiterReleaseMs, ExtraGainDb, XwmBitrate) + (SoftenPeaks.Length > 0 ? "|soften:" + SoftenPeaks : "");
 }
 
 /// <summary>

@@ -1,7 +1,7 @@
 // Other Tools → Player Grunts Tool: player voice packs for PC Head Tracking (with or without Multi Voice Packs) and
 // Smart Player Voice System. Events are shown as blocks by category; the panel on the right holds the selected event's
 // lines. Event definitions are data (built in, read from the installed mods, or the user's own custom events).
-import { rpc, h, clear, toast, fail, modal, confirmBox, store, debounce, switchEl, segmented, popupMenu, droppedPaths, icon, helpButton, withBusy } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, store, debounce, switchEl, segmented, popupMenu, droppedPaths, icon, helpButton, withBusy, pathText, pathRows, pathList } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { setPaletteExtra } from './nav.js';
 import { recordTake } from './recorder.js';
@@ -540,10 +540,10 @@ export async function gruntProjectView(id) {
     return h('span.gr-lufs' + cls, { title: `Loudness ${l.lufs.toFixed(1)} LUFS${l.peakDb != null ? ` · peak ${l.peakDb.toFixed(1)} dBTP` : ''}${mid != null ? ` · the pack's middle is ${mid.toFixed(1)} LUFS (${off >= 0 ? '+' : ''}${off.toFixed(1)} LU)` : ''}${Math.abs(off) > 4 ? (off > 0 ? ' · too loud compared with the pack' : ' · too quiet compared with the pack') : ''}` },
       h('i', h('b', { style: { width: w + '%' } })), `${l.lufs.toFixed(1)} LUFS`);
   }
-  async function effectLines(lines, fid, force = false) {
+  async function effectLines(lines, fid, force = false, soften = undefined) {
     try {
-      const r = await withBusy(call('grunts.effect', { lineIds: lines.map((x) => x.id), effect: fid, force }), fid ? 'Adding the effect' : 'Taking the effect off', `${lines.length} line(s)…`);
-      if (r.changed) { if (await confirmBox('Put the original back?', r.message, 'Put the original back', true)) return effectLines(lines, fid, true); return; }
+      const r = await withBusy(call('grunts.effect', { lineIds: lines.map((x) => x.id), effect: fid, force, ...(soften === undefined ? {} : { soften }) }), fid || soften ? 'Post-processing' : 'Taking the effect off', `${lines.length} line(s)…`);
+      if (r.changed) { if (await confirmBox('Put the original back?', r.message, 'Put the original back', true)) return effectLines(lines, fid, true, soften); return; }
       if (r.problems && r.problems.length) toast(r.problems.slice(0, 3).join(' · '), true);
       audio.pause(); playing = null;
       renderAll();
@@ -552,6 +552,7 @@ export async function gruntProjectView(id) {
   async function effectDialog(e, l) {
     // A click picks an effect and plays the line with it (the file isn't changed until Apply); Normal is the line as it is.
     let pick = l.reverb ? l.effectId : '';
+    let soft = !!l.soften;
     const groups = {};
     for (const fx of fxList()) (groups[fx.group] = groups[fx.group] || []).push(fx);
     const tiles = [];
@@ -563,7 +564,7 @@ export async function gruntProjectView(id) {
       const ticket = ++playTicket;
       status.textContent = `Making ${name}…`;
       try {
-        const r = await rpc('grunts.fxPreview', { id, lineId: l.id, effect: fid });
+        const r = await rpc('grunts.fxPreview', { id, lineId: l.id, effect: fid, soften: soft });
         if (ticket !== playTicket) return;
         pa.src = r.url; await pa.play();
         status.textContent = `▶ ${name}`;
@@ -585,13 +586,16 @@ export async function gruntProjectView(id) {
         badge: l.reverb && fx.id === l.effectId ? h('span.fx-badge', 'now') : fx.id === P().defaultEffect ? h('span.fx-badge.dim', 'toggle') : null,
       })))));
     paint();
-    const v = await modal(`Effect · ${l.file}`, [cols,
-      h('div.row.fx-foot', status, h('div.spacer'), h('span.fx-note', 'Click an effect to hear the line with it. Apply changes the WAV file itself; the original is kept, so Normal puts it back.'))],
+    const v = await modal(`Post-processing · ${l.file}`, [cols,
+      h('div.row.fx-foot', status, h('div.spacer'),
+        h('div.fx-soften', { title: 'Soften peaks after the effect: sharp peaks (hard consonants, clicks) turned down to 8 dB above the voice, so they don\'t distort at a high in-game gain. Works with Normal too.' },
+          switchEl(soft, (x) => { soft = x; const t = tiles.find(([, fid]) => fid === pick); listen(pick, (t && t[0].querySelector('.fx-name').firstChild.textContent) || 'Normal'); }, 'Soften peaks'))),
+      h('div.row.fx-foot', h('span.fx-note', 'Click an effect to hear the line with it. Apply changes the WAV file itself; the original is kept, so Normal (with Soften peaks off) puts it back.'))],
       [{ label: 'Cancel', value: false }, { label: 'Apply', primary: true, value: 'on' }], { wide: true, help: 'grunt-events' });
     pa.pause(); playTicket++;
     if (v !== 'on') return;
-    if (!pick) { if (l.reverb) effectLines([l], ''); }
-    else if (!(l.reverb && pick === l.effectId)) effectLines([l], pick);
+    const sameFx = pick ? l.reverb && pick === l.effectId : !l.reverb;
+    if (!sameFx || soft !== !!l.soften) effectLines([l], pick, false, soft);
   }
   async function trimDialog(e, l) {
     const dur = l.durationSeconds || 0;
@@ -674,7 +678,8 @@ export async function gruntProjectView(id) {
   function lineMenu(anchor, e, l) {
     popupMenu(anchor, [
       { label: 'Apply subtitles…', sub: l.text ? `“${l.text}”` : 'Write the subtitle, or let Whisper suggest it from the audio', onclick: () => subtitleDialog(e, l) },
-      l.exists && l.wav ? { label: 'Effect…', sub: l.reverb ? `On: ${fxName(l.effectId)}` : 'Reverb, cave, hall, radio, telepathy, robotic, demon…', onclick: () => effectDialog(e, l) } : null,
+      l.exists && l.wav ? { label: 'Post-processing…', sub: [l.reverb ? `On: ${fxName(l.effectId)}` : null, l.soften ? 'Soften peaks' : null].filter(Boolean).join(' · ') || 'Effects (reverb, cave, radio, telepathy…) and Soften peaks', onclick: () => effectDialog(e, l) }
+        : l.exists ? { label: 'Post-processing…', sub: `Effects and Soften peaks change the WAV file itself, and this line is a .${(l.file.split('.').pop() || '').toLowerCase()}. Replace the file with a WAV first.`, disabled: true, onclick: () => {} } : null,
       l.exists ? { label: 'Trim and fade…', sub: hasTrim(l) ? 'Trimmed (click to change or reset)' : 'Cut the start or end, fade in or out (the file isn\'t changed)', onclick: () => trimDialog(e, l) } : null,
       l.exists && e.kind === 'pool' ? { label: 'Make variants…', sub: 'Pitch and speed variants of this line to fill the pool', onclick: () => variantsDialog(e, l) } : null,
       { label: 'Replace the file…', sub: 'Keep the line (its place, name and text), use another audio file', onclick: async () => { const f = await rpc('pick.file', { title: 'Replacement audio', filter: 'Audio|*.wav;*.xwm;*.fuz;*.mp3;*.ogg;*.flac;*.m4a;*.opus' }); if (f) line(e, l, { replace: f }); } },
@@ -797,7 +802,7 @@ export async function gruntProjectView(id) {
         const c = r.check;
         const ok = await modal('Replace files in the output folder?', [
           h('div', `${c.overwriteCount} file(s) in ${c.output} weren't written by this project and would be replaced:`),
-          h('div.box.mono', { style: { maxHeight: '180px', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: '12px' } }, c.overwrite.join('\n') + (c.overwriteCount > c.overwrite.length ? `\n… ${c.overwriteCount - c.overwrite.length} more` : '')),
+          pathList(c.overwrite, { more: c.overwriteCount - c.overwrite.length }),
           h('div.faint', 'Pick an empty folder (a new mod folder) to keep them, or replace them.'),
         ], [{ label: 'Cancel', value: false }, { label: 'Replace them', danger: true, value: true }]);
         if (ok) doExport(true);
@@ -923,6 +928,8 @@ export async function gruntProjectView(id) {
     wrap.append(sec('Audio', 'loudness-and-format', null,
       srow('Format', a.format === 'wav' ? 'WAV works everywhere (PCHT, SPVS lip sync without .lip files)' : a.format === 'xwm' ? 'Smaller; needs xWMAEncode. SPVS plays XWM without lip sync.' : 'FUZ for dialogue files (shouts, vanilla-based); pool folders get XWM. Needs xWMAEncode.',
         segmented([['wav', 'WAV'], ['xwm', 'XWM'], ['fuz', 'FUZ']], a.format, (v) => saveProject({ audio: { format: v } }))),
+      srow('Soften peaks', 'On every file at export, before the loudness: sharp peaks (hard consonants, clicks) turned down so they don\'t distort at a high in-game gain. Your files aren\'t changed. Standard limits peaks to 8 dB above the voice, Strong to 6 dB. Lines with Soften peaks on in their effect are left as they are.',
+        segmented([['', 'Off'], ['standard', 'Standard'], ['strong', 'Strong']], a.softenPeaks || '', (v) => saveProject({ audio: { softenPeaks: v } }))),
       srow('Loudness', 'Every file brought to the same loudness, without peaks above the ceiling', h('div.row', { style: { gap: '10px' } },
         switchEl(a.normalize, (v) => saveProject({ audio: { normalize: v } }), ''),
         h('span.faint', 'Target'), num(a.targetLufs, (v) => saveProject({ audio: { targetLufs: v } }), { min: -40, max: -6, step: 0.5, title: 'Integrated loudness (LUFS). Vanilla grunts sit around -18 to -16.' }), h('span.faint', 'LUFS'),

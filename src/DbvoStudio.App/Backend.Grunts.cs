@@ -336,7 +336,7 @@ public sealed partial class Backend
     private static object GrLineDto(GruntLine l, string folder)
     {
         var path = GruntService.SourcePath(l, folder);
-        return new { l.Id, l.Source, path, file = Path.GetFileName(path), exists = File.Exists(path), l.Origin, l.Text, l.Spoken, l.FileName, l.Slot, l.DurationSeconds, l.SampleRate, l.Channels, l.Lufs, l.AddedUtc, l.Reverb, effectId = l.Reverb ? (l.EffectId.Length > 0 ? l.EffectId : "inner") : "", l.PeakDb, l.TrimStart, l.TrimEnd, l.FadeInMs, l.FadeOutMs, wav = path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) };
+        return new { l.Id, l.Source, path, file = Path.GetFileName(path), exists = File.Exists(path), l.Origin, l.Text, l.Spoken, l.FileName, l.Slot, l.DurationSeconds, l.SampleRate, l.Channels, l.Lufs, l.AddedUtc, l.Reverb, effectId = l.Reverb ? (l.EffectId.Length > 0 ? l.EffectId : "inner") : "", soften = l.Soften, l.PeakDb, l.TrimStart, l.TrimEnd, l.FadeInMs, l.FadeOutMs, wav = path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) };
     }
 
     /// <summary>Reads length, rate and channels of new lines (outside the page lock; quick per file).</summary>
@@ -739,6 +739,7 @@ public sealed partial class Backend
             return null;
         });
         var fx = S(p, "effect");
+        bool? soften = NB(p, "soften");
         var tools = File.Exists(_settings.FfmpegPath) ? GrExternal() : null;
         var folder = GrFolder(proj);
         int done = 0; var problems = new List<string>();
@@ -748,7 +749,7 @@ public sealed partial class Backend
             // Lines sharing a file follow the first one; each file once.
             foreach (var l in lines.GroupBy(x => GruntService.SourcePath(x, folder), StringComparer.OrdinalIgnoreCase).Select(g => g.First()))
             {
-                try { await GruntService.SetEffectAsync(proj, l, folder, fx.Length == 0 ? null : fx, tools, B(p, "force")); done++; }
+                try { await GruntService.SetEffectAsync(proj, l, folder, fx.Length == 0 ? null : fx, tools, B(p, "force"), default, soften); done++; }
                 catch (GruntService.FileChangedException ex) { if (lines.Count == 1) return new { changed = true, message = ex.Message }; problems.Add(ex.Message); }
                 catch (Exception ex) { problems.Add(Path.GetFileName(GruntService.SourcePath(l, folder)) + ": " + FriendlyError.From(ex)); }
             }
@@ -767,19 +768,21 @@ public sealed partial class Backend
         var folder = GrFolder(proj);
         var src = GruntService.SourcePath(line, folder);
         // Always from the dry file: the original when an effect is on.
-        var dry = line.Reverb && File.Exists(GruntService.ReverbOriginal(folder, src)) ? GruntService.ReverbOriginal(folder, src) : src;
+        var dry = (line.Reverb || line.Soften) && File.Exists(GruntService.ReverbOriginal(folder, src)) ? GruntService.ReverbOriginal(folder, src) : src;
         if (!File.Exists(dry)) throw new InvalidOperationException("The audio file is missing.");
         var fxId = S(p, "effect");
         var fx = fxId.Length > 0 ? Core.Audio.Effects.Find(GruntService.EffectsOf(proj), fxId) ?? throw new InvalidOperationException("Unknown effect.") : null;
         var cache = Path.Combine(folder, "cache", "fx");
         Directory.CreateDirectory(cache);
-        var key = GruntService.Hash("fx2|" + GruntService.Stamp(dry) + "|" + dry + "|" + (fx == null ? "" : JsonSerializer.Serialize(fx, JsonOptions)));
+        bool soften = B(p, "soften");
+        var key = GruntService.Hash("fx2|" + (soften ? "sp|" : "") + GruntService.Stamp(dry) + "|" + dry + "|" + (fx == null ? "" : JsonSerializer.Serialize(fx, JsonOptions)));
         var outPath = Path.Combine(cache, key + ".wav");
         if (!File.Exists(outPath))
         {
             var tools = File.Exists(_settings.FfmpegPath) ? GrExternal() : null;
             if (fx != null) await Core.Audio.Effects.ApplyAsync(dry, outPath, fx, tools);
-            else
+            if (soften && dry.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)) await Core.Audio.PeakSoftener.ApplyAsync(fx != null ? outPath : dry, outPath, Core.Audio.PeakSoftener.Standard, tools);
+            else if (fx == null)
             {
                 // the line as it is, in a format the page plays
                 var tmp = new GruntLine { Id = line.Id, Source = dry };

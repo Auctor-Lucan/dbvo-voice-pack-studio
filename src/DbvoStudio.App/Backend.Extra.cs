@@ -384,6 +384,13 @@ public sealed partial class Backend
                     var mods = _lib.LoadMods();
                     var voices = _lib.LoadVoicePacks();
                     int added = 0, updated = 0;
+                    // Above or below a picked option, in its group (in the order given), instead of on the category's page.
+                    var anchorId = S(p, "anchorId");
+                    FomodGroup? anchorGroup = null;
+                    if (anchorId.Length > 0)
+                        foreach (var st in proj.Steps) foreach (var g in st.Groups) if (g.Options.Any(o => o.Id == anchorId)) anchorGroup = g;
+                    bool below = S(p, "where", "below") != "above";
+                    int insertAt = anchorGroup == null ? -1 : anchorGroup.Options.FindIndex(o => o.Id == anchorId) + (below ? 1 : 0);
                     foreach (var pid in Strings(p, "patchIds"))
                     {
                         var patch = LoadPatch(pid);
@@ -397,7 +404,9 @@ public sealed partial class Backend
                                 updated++;
                                 continue;
                             }
-                            FomodService.GroupFor(proj, mod.Category).Options.Add(svc.OptionFor(proj, patch, voice, mod));
+                            var opt = svc.OptionFor(proj, patch, voice, mod);
+                            if (anchorGroup != null) anchorGroup.Options.Insert(Math.Clamp(insertAt++, 0, anchorGroup.Options.Count), opt);
+                            else FomodService.GroupFor(proj, mod.Category).Options.Add(opt);
                             added++;
                         }
                     }

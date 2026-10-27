@@ -1,6 +1,6 @@
 // Phase 1: Mods list and the per-plugin workspace.
 import { findReplaceDialog } from './tagtools.js';
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton, segmented } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton, segmented, pathText, pathRows, pathList } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const KIND_LABEL = {
@@ -919,7 +919,7 @@ export async function modView(id) {
       plugin = mod.plugins.find((p) => p.fileName === plugin.fileName);
       renderAll();
       await modal('Player-name lines exported', [
-        h('div', `${r.count} line(s) saved to:`), h('div.box.mono', r.file),
+        h('div', `${r.count} line(s) saved to:`), pathList([r.file]),
         h('div.help', 'Add these lines to your master player-name topic file. More player-name lines to patch are collected on the DBVO Repository mod page on Nexus Mods.'),
       ], [{ label: 'Open folder', value: 'open' }, { label: 'OK', primary: true, value: true }]).then((v) => { if (v === 'open') rpc('open.path', { path: r.file }); });
     } catch (e) { fail(e); }
@@ -957,7 +957,7 @@ export async function modView(id) {
       const ow = await askFixOverwrite(await rpc('mod.fixConflicts', { id, folder }).catch(() => []));
       if (ow == null) return;
       const written = await rpc('mod.writeOutputs', { id, fixFolders: [folder], topicFolder: folder, keepFix: !ow });
-      await modal('Files written', [h('div.box.mono', { style: { whiteSpace: 'pre-wrap' } }, written.join('\n'))]);
+      await modal('Files written', [pathList(written)]);
     } catch (e) { fail(e); }
   }
 

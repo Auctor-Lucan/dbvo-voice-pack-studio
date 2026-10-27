@@ -1,5 +1,5 @@
 import { applyTheme } from './themes.js';
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, popupMenu } from './lib.js';
+import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, popupMenu, pathText, pathRows, pathList } from './lib.js';
 import { modsView, modView } from './phase1.js';
 import { patchesView, patchView } from './phase2.js';
 import { fomodsView, fomodView } from './phase3.js';
@@ -176,7 +176,7 @@ on('jobDone', async (d) => {
       r.cached ? [h('div', 'From the .fuz cache (unchanged since an earlier build)'), h('div', r.cached)] : null,
       h('div', 'Skipped (already there)'), h('div', r.skipped), h('div', 'Failed'), h('div', r.failed))];
     if (r.errors && r.errors.length) body.push(h('div.box.mono', { style: { maxHeight: '160px', overflow: 'auto' } }, r.errors.slice(0, 50).join('\n')));
-    if (d.files && d.files.length) body.push(h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), h('div.box.mono', { style: { whiteSpace: 'pre-wrap', maxHeight: '140px', overflow: 'auto' } }, d.files.join('\n'))));
+    if (d.files && d.files.length) body.push(h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), pathList(d.files, { maxHeight: '160px' })));
     if (d.reminders && d.reminders.length) body.push(h('div.banner.warn', { style: { margin: 0 } }, h('div', h('b', 'Before you release: '), h('ul', d.reminders.map((x) => h('li', x))))));
     await modal('.fuz files built', body);
   } else if (d.kind === 'import' || d.kind === 'qa' || d.kind === 'revoice-qa') {
@@ -187,7 +187,7 @@ on('jobDone', async (d) => {
     if (!d.ok) { toast(d.message || 'FOMOD build failed.', true); return; }
     const r = d.report;
     const v = await modal('FOMOD built', [
-      h('div.kv', h('div', 'Files staged'), h('div', r.files), r.bsas ? [h('div', 'BSA archives packed'), h('div', r.bsas)] : null, h('div', 'Staging folder'), h('div.mono', r.staging), h('div', 'Archive'), h('div.mono', r.archive || '— (staged only)')),
+      h('div.kv', h('div', 'Files staged'), h('div', r.files), r.bsas ? [h('div', 'BSA archives packed'), h('div', r.bsas)] : null, h('div', 'Staging folder'), h('div', pathText(r.staging)), h('div', 'Archive'), h('div', r.archive && pathText(r.archive) || '— (staged only)')),
       r.warnings && r.warnings.length ? h('div.banner.warn', { style: { margin: 0 } }, h('ul', r.warnings.slice(0, 20).map((x) => h('li', x)))) : null,
     ], [{ label: 'Open folder', value: 'open' }, { label: 'OK', primary: true, value: true }]);
     if (v === 'open') rpc('open.path', { path: r.archive || r.staging });

@@ -488,14 +488,24 @@ export async function fomodView(id) {
     const linked = new Set(proj.steps.flatMap((s) => s.groups.flatMap((g) => g.options.map((o) => o.patchId))).filter(Boolean));
     const boxes = patches.map((p) => ({ p, box: h('input', { type: 'checkbox', checked: !linked.has(p.id) }) }));
     let sort = true;
+    // With an option picked in the tree, the new ones can go right above or below it (in its group) instead of on their category's page.
+    const anchor = (() => { const f = find(selKey); return f && f.kind === 'option' ? f : null; })();
+    let place = anchor ? 'below' : 'category';
+    const sortRow = h('div', switchEl(sort, (x) => { sort = x; }, 'Sort each group A–Z afterwards'));
+    const placeRow = anchor ? h('div.col', { style: { gap: '6px' } }, h('div.field-label', 'Where'),
+      segmented([['above', `Above “${anchor.option.name}”`], ['below', `Below “${anchor.option.name}”`], ['category', 'On their category\'s page']], place, (v) => { place = v; sortRow.classList.toggle('hidden', v !== 'category'); }),
+      h('div.faint', `Above or below: in the group “${anchor.group.name}”, in the order listed here; no category page is added.`)) : null;
+    if (anchor) sortRow.classList.add('hidden');
     const ok = await modal('Add DBVO Patches', [
       h('div', 'Each mod becomes an option on the page of its category (made if missing), detecting the mod\'s plugins and installing its Sound folder and DBVO Fix plugins from the patch\'s final folder. Patches already in this FOMOD only get their files updated.'),
       h('div.box', { style: { maxHeight: '320px', overflow: 'auto' } }, boxes.map(({ p, box }) => h('label.row', box, h('span.grow', p.name), h('span.faint', p.category), linked.has(p.id) ? h('span.badge.b-skip', 'already in') : null))),
-      switchEl(sort, (x) => { sort = x; }, 'Sort each group A–Z afterwards'),
+      placeRow,
+      sortRow,
     ], [{ label: 'Cancel', value: false }, { label: 'Add', primary: true, value: true }], { help: '2-add-your-patches' });
     if (!ok) return;
     try {
-      const r = await rpc('fomod.addPatches', { project: proj, patchIds: boxes.filter((x) => x.box.checked).map((x) => x.p.id), sort: sort ? 'az' : '' });
+      const r = await rpc('fomod.addPatches', { project: proj, patchIds: boxes.filter((x) => x.box.checked).map((x) => x.p.id), sort: sort && place === 'category' ? 'az' : '',
+        ...(anchor && place !== 'category' ? { anchorId: anchor.option.id, where: place } : {}) });
       dto = r.project; proj = dto.project;
       toast(`${r.added} option(s) added, ${r.updated} updated.`);
       renderAll();

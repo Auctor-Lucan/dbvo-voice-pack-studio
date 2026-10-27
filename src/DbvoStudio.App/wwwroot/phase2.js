@@ -1,9 +1,9 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats, withBusy } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats, withBusy, pathText, pathRows, pathList } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
-import { effectRow, effectsButton, effectIcon } from './fx.js';
+import { effectRow, effectIcon, postButton, softenIcon, softenRow } from './fx.js';
 import { qaDialog } from './qa.js';
 
 const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Edited since take' };
@@ -285,8 +285,8 @@ export async function patchView(id) {
 
   const selTake = (l) => l.takes.find((t) => t.id === l.selectedTakeId);
   const qaText = (q) => q ? [q.score != null ? `Words match ${(q.score * 100).toFixed(0)}%` : null, q.heard ? `Heard: "${q.heard}"` : null,
-    q.lufs != null ? `Loudness ${q.lufs.toFixed(1)} LUFS` : null, q.truePeak != null ? `Peak ${q.truePeak.toFixed(1)} dBTP` : null, q.onsetMs != null ? `Start: a ${Math.round(q.onsetMs)} ms burst, then ${Math.round(q.onsetGapMs)} ms of silence before the line` : null].filter(Boolean).join('\n') : '';
-  const QA_WHY = { words: 'words differ', quiet: 'too quiet', clipping: 'clipping', onset: 'burst at the start', error: 'not checked' };
+    q.lufs != null ? `Loudness ${q.lufs.toFixed(1)} LUFS` : null, q.truePeak != null ? `Peak ${q.truePeak.toFixed(1)} dBTP` : null, q.peakAboveDb != null ? `Peaks ${q.peakAboveDb.toFixed(1)} dB above the voice` : null, q.onsetMs != null ? `Start: a ${Math.round(q.onsetMs)} ms burst, then ${Math.round(q.onsetGapMs)} ms of silence before the line` : null].filter(Boolean).join('\n') : '';
+  const QA_WHY = { words: 'words differ', quiet: 'too quiet', clipping: 'clipping', onset: 'burst at the start', peaks: 'sharp peaks', error: 'not checked' };
   // A line is flagged when its take in use, or a kept ★ variant, was flagged by Check takes.
   const flaggedTake = (l) => { const s = selTake(l); return [s, ...l.takes.filter((t) => t.kept && t !== s)].find((t) => t && t.qa && t.qa.flags.length); };
   const qaFlagged = (l) => !!flaggedTake(l);
@@ -317,7 +317,7 @@ export async function patchView(id) {
       { id: 'take', title: 'Take', width: 84, resizable: false, render: (l) => h('span.row', { style: { gap: '5px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s); #${(l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot} is used. Click to play, switch, keep or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } },
           l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—'),
-        effectIcon(l.effect, () => applyFx([l.lineId], ''))) },
+        effectIcon(l.effect, () => applyFx([l.lineId], '')), softenIcon(l.soften, () => applySoften([l.lineId], ''))) },
       { id: 'act', title: '', width: 176, resizable: false, render: (l) => rowIcons(l) },
     ].filter(Boolean),
   });
@@ -437,9 +437,16 @@ export async function patchView(id) {
       toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
     } catch (e) { fail(e); renderInspector(); }
   }
+  async function applySoften(ids, mode) {
+    try {
+      const r = await withBusy(rpc('takes.effect', { kind: 'patch', id, lineIds: ids, soften: mode }), mode ? 'Softening peaks' : 'Taking Soften peaks off', `${ids.length.toLocaleString()} line(s)…`);
+      patch = r.patch; reindex(); grid.setRows(visible()); renderInspector(); renderActions();
+      toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
+    } catch (e) { fail(e); renderInspector(); }
+  }
   function fxRow(l) {
     const ids = grid.selected.has(l.lineId) && grid.selected.size > 1 ? [...grid.selected] : [l.lineId];
-    return effectRow(l.effect || '', ids.length, (fx) => applyFx(ids, fx));
+    return h('div.col', { style: { gap: '6px' } }, effectRow(l.effect || '', ids.length, (fx) => applyFx(ids, fx)), softenRow(l.soften || '', ids.length, (m) => applySoften(ids, m)));
   }
   async function upd(l, action, value) {
     try {
@@ -680,7 +687,9 @@ export async function patchView(id) {
         pool: grid.rows.filter((l) => !l.omitted), idOf: (l) => l.lineId, textOf: (l) => l.spoken, tags: voice.tags || [],
         apply: async (items) => { try { patch = await rpc('line2.replaceTexts', { id, items }); reindex(); grid.setRows(visible()); renderCounts(); renderActions(); renderInspector(); } catch (e) { fail(e); } } }) }, 'Find and replace in all shown…'),
       h('div.spacer'),
-      null);
+      postButton({ ticked: () => grid.selected.size, shown: () => grid.rows.filter((l) => !l.omitted && l.takes && l.takes.length).length,
+        applyFx: (fx) => applyFx([...grid.selected], fx),
+        soften: (mode, which) => applySoften(which === 'ticked' ? [...grid.selected] : grid.rows.filter((l) => !l.omitted && l.takes && l.takes.length).map((l) => l.lineId), mode) }));
   }
 
   async function autotag(ids) {
@@ -886,7 +895,6 @@ export async function patchView(id) {
       h('span.stat', h('b', c.generated), ` / ${c.active} ${vc ? 'converted' : 'generated'}`, c.approved ? ` · ${c.approved} approved` : '', patch.exportApprovedOnly ? h('span', { title: 'Folders & options → Export: only approved lines are exported' }, ' · exporting approved only') : '', c.omitted ? ` · ${c.omitted} omitted` : '', c.excluded ? ` · ${c.excluded} excluded` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} edited since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
       h('div.spacer'),
       sel.length || c.marked ? tickedMenu(sel, c) : null,
-      effectsButton(sel.length, (fx) => applyFx(sel, fx)),
       reviewBtn,
       checkBtn,
       imp,
@@ -1177,7 +1185,7 @@ export async function patchView(id) {
     } catch (e) { markInFlight(null); fail(e); }
   }
 
-  const filesModal = (title, summary, files) => modal(title, [summary, files && files.length ? h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), h('div.box.mono', { style: { whiteSpace: 'pre-wrap', maxHeight: '180px', overflow: 'auto' } }, files.join('\n'))) : null]);
+  const filesModal = (title, summary, files) => modal(title, [summary, files && files.length ? h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), pathList(files)) : null]);
 
   // DBVO Fix plugins in the final folder: ask first when the patch says so (Folders & options → Overwrite).
   async function fixChoice() {
@@ -1198,7 +1206,7 @@ export async function patchView(id) {
       patch.exportApprovedOnly ? h('div.banner.warn', { style: { margin: 0 } }, 'Export is set to approved lines only (Folders & options), so lines you haven\'t approved count as not exported. Turn that off to export every line; approving is optional.') : null,
       h('div.stale-groups', [...groups].map(([why, paths]) => h('details', { open: groups.size === 1 },
         h('summary', h('b', `${paths.length} file(s)`), `: ${why}`),
-        h('div.box.mono', { style: { whiteSpace: 'pre', maxHeight: '180px', overflow: 'auto', fontSize: '12px' } }, paths.slice(0, 300).join('\n') + (paths.length > 300 ? `\n… +${paths.length - 300} more` : ''))))),
+        pathList(paths.slice(0, 300), { more: paths.length - 300 })))),
     ], [{ label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' }, { label: `Delete these ${stale.length} file(s)`, primary: true, value: 'delete' }], { wide: true, help: 'exporting' });
     return v == null ? null : { removeStale: v === 'delete' };
   }
@@ -1231,7 +1239,7 @@ export async function patchView(id) {
     try {
       const fc = await fixChoice(); if (!fc) return;
       const written = await rpc('patch.writeFixPlugins', { id, ...fc });
-      await modal('Files written', [h('div.box.mono', { style: { whiteSpace: 'pre-wrap' } }, written.length ? written.join('\n') : 'Nothing to write: no plugin needs a DBVO Fix.')]);
+      await modal('Files written', [written.length ? pathList(written) : h('div.box', 'Nothing to write: no plugin needs a DBVO Fix.')]);
     } catch (e) { fail(e); }
   }
 
@@ -1338,12 +1346,34 @@ export async function patchView(id) {
     // patch kept aside for its lines come back.
     const modOn = new Set(patch.modIds.filter((m) => s.mods.some((x) => x.id === m)));
     const goneMods = patch.modIds.length - modOn.size;
+    // One mod: a dropdown with it picked. Several (rare): a chip each, and a dropdown to add another.
+    const modsSorted = s.mods.slice().sort((a, b) => a.name.localeCompare(b.name));
+    const modBox = h('div.col', { style: { gap: '6px' } });
+    const modSelect = (value, placeholder, onPick) => {
+      const sel = h('select', { style: { maxWidth: '520px' }, title: 'Type to jump to a mod' },
+        placeholder ? h('option', { value: '' }, placeholder) : null,
+        modsSorted.filter((m) => m.id === value || !modOn.has(m.id)).map((m) => h('option', { value: m.id, selected: m.id === value }, `${m.name} · ${m.category}`)));
+      sel.addEventListener('change', () => { if (sel.value) onPick(sel.value); });
+      return sel;
+    };
+    const renderMods = () => {
+      clear(modBox);
+      if (modOn.size <= 1) {
+        const cur = [...modOn][0] || '';
+        modBox.append(h('div.row', { style: { gap: '8px' } }, modSelect(cur, cur ? null : '— pick the mod —', (v) => { modOn.clear(); modOn.add(v); renderMods(); }),
+          cur ? h('button.btn.sm.ghost', { title: 'Voice another mod in this same patch (rare)', onclick: () => { modBox.append(modSelect('', '— add a mod —', (v) => { modOn.add(v); renderMods(); })); } }, '+ Add another mod…') : null));
+      } else {
+        modBox.append(h('div.row.wrap', { style: { gap: '6px' } }, [...modOn].map((mid) => { const m = s.mods.find((x) => x.id === mid); return h('span.chip', m ? `${m.name} · ${m.category}` : mid, h('button.icon-btn', { title: 'Take this mod out of the patch', onclick: () => { modOn.delete(mid); renderMods(); } }, '×')); })),
+          modSelect('', '— add another mod —', (v) => { modOn.add(v); renderMods(); }));
+      }
+    };
+    renderMods();
     const sources = [...(patch.sourceFolders || [])];
     let owWav = patch.overwriteWavLip, owFuz = patch.overwriteFuz, owFix = patch.overwriteFix !== false;
     let apprOnly = !!patch.exportApprovedOnly;
     const modName = Object.values(patch.modNames || {})[0] || patch.name;
     const expand = (t) => (t || '').replace(/\{mod\}/gi, modName).replace(/\{packId\}/gi, voice.packId || 'packId').replace(/\{voicePack\}/gi, voice.name).replace(/\{patch\}/gi, name.value || patch.name);
-    const preview = h('div.opt-preview.mono');
+    const preview = h('div');
     const folder = (val, title, ph) => {
       const i = h('input', { type: 'text', value: val || '', placeholder: ph });
       i.addEventListener('input', renderPreview);
@@ -1372,11 +1402,12 @@ export async function patchView(id) {
       const sub = expand(normTpl(tpl.value));
       const i = sub.toLowerCase().indexOf('sound\\');
       const modFolder = i > 0 ? root + '\\' + sub.slice(0, i).replace(/\\$/, '') : root;
-      clear(preview).append(
-        h('div', h('span.faint', 'WAV + LIP → '), `${wl.i.value.trim() || '<WAV + LIP folder>'}\\`),
-        h('div', h('span.faint', 'Phase 2 DBVO Fix + Topic File → '), `${fx.i.value.trim() || '<DBVO Fix folder>'}\\`),
-        h('div', h('span.faint', 'Final DBVO Fix + Topic File → '), `${modFolder}\\`),
-        h('div', h('span.faint', '.fuz files → '), `${root}\\${sub}\\`));
+      clear(preview).append(pathRows([
+        ['WAV + LIP', wl.i.value.trim() ? wl.i.value.trim() + '\\' : ''],
+        ['Phase 2 DBVO Fix + Topic File', fx.i.value.trim() ? fx.i.value.trim() + '\\' : ''],
+        ['Final DBVO Fix + Topic File', fr.i.value.trim() ? modFolder + '\\' : ''],
+        ['.fuz files', fr.i.value.trim() ? `${root}\\${sub}\\` : ''],
+      ]));
     }
     const srcList = h('div.col');
     const renderSrc = () => clear(srcList).append(sources.length ? sources.map((f, i) => h('div.row', h('span.mono.grow.ellipsis', f), h('button.icon-btn', { title: 'Remove this source folder', onclick: () => { sources.splice(i, 1); renderSrc(); } }, '×'))) : h('div.faint', 'No folder yet.'));
@@ -1398,10 +1429,10 @@ export async function patchView(id) {
             switchEl(owFix, (v) => { owFix = v; }, 'DBVO Fix', { title: 'DBVO Fix plugins in the final folder. Off: you are asked before one with the same name is replaced. The working copy in the DBVO Fix folder is always replaced.' }))),
         row('Export', 'Off (the usual): every line with a take is exported; approving is optional. On: only lines approved in Review (▶ Review, then A). Files of lines not approved that earlier exports wrote are listed before anything is deleted.',
           switchEl(apprOnly, (v) => { apprOnly = v; }, 'Only lines approved in Review', { title: 'Export and build .fuz for approved lines only. Approving never changes anything else.' })),
-        row('Mods', 'The Phase 1 mods this patch voices. Lines of a mod you untick leave the patch, but their takes are kept and come back if you tick it again.',
+        row('Mod', 'The Phase 1 mod this patch voices. Rarely, one patch voices several mods: add them below. Lines of a mod you remove leave the patch, but their takes are kept and come back if you add it again.',
           h('div.col', { style: { gap: '4px' } },
-            goneMods ? h('div', { style: { color: 'var(--warn)', fontSize: '12.5px' } }, `${goneMods} mod(s) of this patch were deleted in Phase 1. Imported again, they are new mods: tick them here to bring their lines (and the kept takes) back.`) : null,
-            h('div.box', { style: { maxHeight: '170px', overflow: 'auto', padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } }, s.mods.map((m) => switchEl(modOn.has(m.id), (v) => { if (v) modOn.add(m.id); else modOn.delete(m.id); }, `${m.name}  ·  ${m.category || ''}`))))),
+            goneMods ? h('div', { style: { color: 'var(--warn)', fontSize: '12.5px' } }, `${goneMods} mod(s) of this patch were deleted in Phase 1. Imported again, they are new mods: add them here to bring their lines (and the kept takes) back.`) : null,
+            modBox)),
         row('Omit lines users have', 'Only packs every user installs',
           s.references.length ? h('div.col', { style: { gap: '4px' } }, s.references.map((r) => switchEl(refOn.has(r.id), (v) => { if (v) refOn.add(r.id); else refOn.delete(r.id); }, `${r.name}  ·  ${r.lineCount} lines`)))
             : h('div.faint', 'None yet: Global Settings → Omit references.'))),

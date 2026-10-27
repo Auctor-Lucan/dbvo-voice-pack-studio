@@ -527,6 +527,25 @@ export function mergeInto(target, src) {
   return target;
 }
 
+/** A file path in path boxes: the folders dimmed, the last part bright, line breaks only after a backslash or a space. */
+export function pathText(p) {
+  const s = String(p ?? '');
+  const trail = /[\\/]$/.test(s) ? s.slice(-1) : '';
+  const body = trail ? s.slice(0, -1) : s;
+  const i = Math.max(body.lastIndexOf('\\'), body.lastIndexOf('/'));
+  const head = i >= 0 ? body.slice(0, i + 1) : '';
+  const last = i >= 0 ? body.slice(i + 1) : body;
+  return h('span.path', { title: s }, head ? h('span.path-head', head.split(/(?<=[\\/])/).map((x) => [x, h('wbr')])) : null, h('b.path-last', last), trail);
+}
+/** Labelled paths in a box: [[label, path], …]; an empty path shows as "(not set)". */
+export function pathRows(rows, attrs = {}) {
+  return h('div.path-box.path-rows', attrs, rows.filter(Boolean).map(([k, v]) => [h('div.path-key', k), h('div.path-val', v == null || v === '' ? h('span.faint', '(not set)') : pathText(v))]));
+}
+/** A list of paths in a box (one per row), scrolling past maxHeight; "more" adds a last faint row. */
+export function pathList(paths, { maxHeight = '180px', more = 0, suffix = null } = {}) {
+  return h('div.path-box', { style: { maxHeight, overflow: 'auto' } }, paths.map((p, i) => h('div', pathText(p), suffix ? suffix(p, i) : null)), more > 0 ? h('div.faint', `… ${more} more`) : null);
+}
+
 /**
  * Ask before replacing DBVO Fix plugins that are already in a folder. Resolves to null (cancel),
  * false (keep the existing ones) or true (overwrite). With no conflicts it resolves to true at once.
@@ -535,7 +554,7 @@ export async function askFixOverwrite(paths) {
   if (!paths || !paths.length) return true;
   const v = await modal('Overwrite DBVO Fix plugins?', [
     h('div', `${paths.length} DBVO Fix plugin(s) with the same name are already in the destination:`),
-    h('div.box.mono', { style: { maxHeight: '180px', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: '12px' } }, paths.join('\n')),
+    pathList(paths),
     h('div.faint', 'Keep existing writes everything else and leaves these files as they are.'),
   ], [{ label: 'Cancel', value: null }, { label: 'Keep existing', value: 'keep' }, { label: 'Overwrite', primary: true, value: 'overwrite' }]);
   return v == null ? null : v === 'overwrite';
@@ -547,17 +566,18 @@ export function popupMenu(anchor, items) {
   if (anchor && anchor.__menuClosed && Date.now() - anchor.__menuClosed < 600) { anchor.__menuClosed = 0; return null; }
   document.querySelectorAll('.menu').forEach((m) => m.remove());
   const r = anchor.getBoundingClientRect();
-  const m = h('div.menu', items.map((it) => h('button', { title: it.title || it.sub || '', disabled: !!it.disabled, onclick: () => { m.remove(); it.onclick(); } }, h('div', it.label), it.sub ? h('div.menu-sub', it.sub) : null)));
+  const m = h('div.menu', items.map((it) => h('button', { title: it.title || it.sub || '', disabled: !!it.disabled, onclick: () => { m.remove(); if (m.__close) document.removeEventListener('mousedown', m.__close); it.onclick(); } }, h('div', it.label), it.sub ? h('div.menu-sub', it.sub) : null)));
   document.body.append(m);
   const { height: mh, width: mw } = m.getBoundingClientRect();
   // keep the whole menu on screen (a button at the right edge opens it leftwards)
   m.style.left = Math.max(8, Math.min(r.left, window.innerWidth - mw - 8)) + 'px';
   m.style.top = (r.bottom + mh + 6 > window.innerHeight ? r.top - mh - 6 : r.bottom + 6) + 'px';
-  setTimeout(() => document.addEventListener('mousedown', function close(e) {
+  m.__close = function close(e) {
     if (m.contains(e.target)) return;
-    if (anchor && anchor.contains && anchor.contains(e.target)) anchor.__menuClosed = Date.now();
+    if (anchor && anchor.contains && anchor.contains(e.target) && m.isConnected) anchor.__menuClosed = Date.now();
     m.remove(); document.removeEventListener('mousedown', close);
-  }), 0);
+  };
+  setTimeout(() => document.addEventListener('mousedown', m.__close), 0);
   return m;
 }
 

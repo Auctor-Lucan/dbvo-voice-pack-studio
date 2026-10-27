@@ -9,7 +9,7 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>DBVO Studio</AssemblyName>
     <RootNamespace>DbvoStudio.App</RootNamespace>
-    <Version>8.4.0</Version>
+    <Version>8.5.0</Version>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>

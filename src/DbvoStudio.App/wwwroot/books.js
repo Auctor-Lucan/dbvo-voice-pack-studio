@@ -1,7 +1,7 @@
 // Other Tools → Voiced Books Tool: narrate Skyrim's books, letters and journals (or a mod's) for Voiced Books of Skyrim.
 // Books are split into parts the engine can read, each part gets takes, and export joins them, adds the IVBOS
 // reverb and loudness chain, encodes xWMA and packs archives, the VBoS .ini and a FOMOD.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { creditsButton, LANGS } from './phase2.js';
@@ -328,11 +328,14 @@ export async function bookProjectView(id) {
       const lang = h('select', { title: 'Force the language (ISO 639-1). Auto lets the model detect it.', onchange: (ev) => set(e, 'languageCode', ev.target.value) }, LANGS.map(([k, t]) => h('option', { value: k, selected: k === (e.languageCode || '') }, t)));
       const norm = h('select', { title: 'Whether ElevenLabs writes out numbers, dates and abbreviations before speaking', onchange: (ev) => set(e, 'textNormalization', ev.target.value) }, [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']].map(([k, t]) => h('option', { value: k, selected: k === (e.textNormalization || 'auto') }, t)));
       const fmt = h('select', { onchange: (ev) => set(e, 'outputFormat', ev.target.value) }, outputFormats(e.outputFormat).map(([k, t]) => h('option', { value: k, selected: k === e.outputFormat }, t)));
-      const out = h('button.btn.sm', { title: 'Format, seed and how many parts are requested at once' }, `${({ mp3_44100_128: 'MP3 128', mp3_44100_192: 'MP3 192', pcm_44100: 'PCM 44.1k' })[e.outputFormat] || 'Output'} ▾`);
-      out.onclick = () => popover(out, () => [grp('Format', fmt), num(e, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px' }), num(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'Match your ElevenLabs plan\'s concurrency limit' })]);
+      // Language, Read numbers and the output format behind one button, as in NPC Revoice.
+      const fmtName = ({ mp3_44100_128: 'MP3 128', mp3_44100_192: 'MP3 192', pcm_44100: 'PCM 44.1k', pcm_48000: 'PCM 48k', pcm_22050: 'PCM 22k' })[e.outputFormat] || e.outputFormat || '';
+      const out = h('button.btn.sm.out-btn', { title: `Language: ${e.languageCode || 'Auto'} · Read numbers: ${e.textNormalization || 'auto'} · Format: ${e.outputFormat || '—'} · Seed: ${e.seed == null || e.seed === '' ? 'random' : e.seed} · ${e.concurrency || 1} at once. Click to change.` },
+        icon('gear', { size: 13 }), h('span', [e.languageCode ? e.languageCode.toUpperCase() : 'Auto', fmtName, `${e.concurrency || 1}×`].filter(Boolean).join(' · ')), h('span.out-open', 'Open ▾'));
+      out.onclick = () => popover(out, () => [grp('Language', lang), grp('Read numbers', norm), grp('Format', fmt), num(e, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px' }), num(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'Match your ElevenLabs plan\'s concurrency limit' })]);
       kids.push(grp('Model', ms), tag ? grp('Stability', segmented([[0, 'Creative'], [0.5, 'Natural'], [1, 'Robust']], stabVal, (x) => set(e, 'stability', Number(x)))) : slider(e, 'stability', 0, 1, 0.01, 'Stability'),
         slider(e, 'similarity', 0, 1, 0.01, 'Similarity'), style ? slider(e, 'style', 0, 1, 0.01, 'Style') : null, slider(e, 'speed', 0.7, 1.2, 0.01, 'Speed'),
-        grp('Language', lang), grp('Read numbers', norm), grp('Output', out));
+        grp('Language · output', out));
     } else if (eng === 'voxcpm') {
       const o = v.voxCpm;
       kids.push(num(o, 'cfgValue', 'CFG', { step: 0.1 }), num(o, 'inferenceTimesteps', 'Timesteps', { min: 1 }), num(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
@@ -340,7 +343,8 @@ export async function bookProjectView(id) {
       const o = v.omniVoice;
       kids.push(num(o, 'numStep', 'Steps', { min: 1 }), num(o, 'speed', 'Speed', { step: 0.05 }), num(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
     }
-    return h('div.toolbar', ...kids.filter(Boolean));
+    const needs = () => proj.narrators.concat(proj.voiceTypes).reduce((a, x) => a + ((x.stats && x.stats.charactersLeft) || 0), 0);
+    return h('div.toolbar', ...kids.filter(Boolean), h('div.spacer'), grp('Credits', creditsButton(needs, 'This project')));
   }
 
   function progressCell(st) {
@@ -352,9 +356,10 @@ export async function bookProjectView(id) {
   }
 
   function renderVoices() {
-    const wrap = h('div.view-body.reading');
+    const wrap = h('div.view-body.reading.compact-voices');
     if (Object.values(voiceLists).every((x) => x == null)) loadVoices();
     const level = (row, kind) => segmented([['loud', 'Loud', 'The IVBOS release chain: −12 LUFS and the limiter'], ['normal', 'Normal', 'Limiter only; female voices get +1.8 dB']], row.level || 'loud', (v) => setVoice(row, kind, { level: v }));
+    const soften = (row, kind) => switchEl(row.softenPeaks === 'standard' || row.softenPeaks === 'strong', (x) => setVoice(row, kind, { softenPeaks: x ? 'standard' : '' }), '', { title: 'Soften peaks when the books are joined: hard consonants that spike far above the voice are turned down (peaks limited to 8 dB above the speech level), so they don\'t distort at a high in-game volume. Takes are not changed.' });
     const gender = (row, kind) => segmented([[false, 'Male'], [true, 'Female']], !!row.female, (v) => setVoice(row, kind, { female: v === true || v === 'true' }));
     const state = (st, hasVoice) => !hasVoice ? 1 : st && st.lines && st.generated >= st.lines && !st.stale ? 2 : 0;
     // Narrators
@@ -362,28 +367,29 @@ export async function bookProjectView(id) {
     const total = (rows) => rows.reduce((t, r) => ({ books: t.books + ((r.stats && r.stats.books) || 0), left: t.left + ((r.stats && r.stats.charactersLeft) || 0) }), { books: 0, left: 0 });
     const nt = total(proj.narrators), vtt = total(proj.voiceTypes);
     wrap.append(
-      h('div.help', { style: { maxWidth: '1200px', marginBottom: '12px' } },
+      h('div.help.compact-help', { style: { maxWidth: '1200px', marginBottom: '8px' } },
         h('p', h('b', 'Who reads. '), 'Every narrated book is read by each narrator (players pick one in the installer). Letters, notes and journals written by an NPC with a vanilla voice type are read in that voice type\'s voice — one shared archive for all narrators. Authors without an NPC record, long-dead writers and custom-voiced mod NPCs stay with the narrator.')),
       h('details.voice-settings', { open: store.get('bk-vs-open', false), ontoggle: (e) => store.set('bk-vs-open', e.target.open) },
         h('summary', { title: 'Engine settings shared by every voice' }, h('b', 'Voice settings'), h('span.faint', `  ${proj.voice.eleven.modelId} · stability ${Number(proj.voice.eleven.stability).toFixed(2)} · speed ${Number(proj.voice.eleven.speed).toFixed(2)} · shared by every voice`), h('span.spacer'),
           h('button.btn.sm.ghost', { title: 'Reload voices from your accounts and local servers', onclick: (e) => { e.preventDefault(); loadVoices(true); } }, '⟳ Reload voices')),
         settingsRow()),
-      h('div.section-head', { style: { marginTop: '10px', maxWidth: '1200px' } }, h('h2', 'Narrators'), helpButton('narrators-and-authors'), h('span.faint', `${proj.narrators.length} · ${nt.books.toLocaleString()} books · ${nt.left.toLocaleString()} characters left`), h('div.spacer'),
+      h('div.section-head', { style: { marginTop: '4px', maxWidth: '1200px' } }, h('h2', 'Narrators'), helpButton('narrators-and-authors'), h('span.faint', `${proj.narrators.length} · ${nt.books.toLocaleString()} books · ${nt.left.toLocaleString()} characters left`), h('div.spacer'),
         h('button.btn.sm', { title: 'Add another narrator: each gets its own archive and installer option', onclick: async () => { const r = await prompt('Add a narrator', [{ name: 'n', label: 'Name (in the archive name)', value: `Narrator ${proj.narrators.length + 1}`, placeholder: 'e.g. Male Narrator - Vampire' }]); if (r && r.n.trim()) { try { proj = await rpc('books.voice', { id, kind: 'narrator', add: true, name: r.n.trim() }); reindex(); renderAll(); } catch (e) { fail(e); } } } }, '+ Add narrator')),
-      h('table.tbl.voices-tbl', h('thead', h('tr', h('th', 'Narrator'), h('th', 'Engine · voice'), h('th', { title: 'Loud: the IVBOS release chain. Normal: limiter only.' }, 'Level'), h('th', { title: 'Female Normal voices get +1.8 dB, as in the IVBOS macros' }, 'Voice'), h('th', 'Progress'), h('th', ''))),
+      h('table.tbl.voices-tbl', h('thead', h('tr', h('th', 'Narrator'), h('th', 'Engine · voice'), h('th', { title: 'Loud: the IVBOS release chain. Normal: limiter only.' }, 'Level'), h('th', { title: 'Soften peaks when the books are joined' }, 'Soften peaks'), h('th', { title: 'Female Normal voices get +1.8 dB, as in the IVBOS macros' }, 'Voice'), h('th', 'Progress'), h('th', ''))),
         h('tbody', narr.map((n) => h('tr' + (n.voiceId ? '' : '.needs-voice'),
           h('td', (() => { const i = h('input', { type: 'text', value: n.name, title: 'Shown in the archive name and the installer', style: { width: '200px' } }); i.addEventListener('change', () => setVoice(n, 'narrator', { name: i.value.trim() || n.name })); return i; })()),
-          h('td', voicePick(n, 'narrator')), h('td', level(n, 'narrator')), h('td', gender(n, 'narrator')), h('td', progressCell(n.stats)),
+          h('td', voicePick(n, 'narrator')), h('td', level(n, 'narrator')), h('td', soften(n, 'narrator')), h('td', gender(n, 'narrator')), h('td', progressCell(n.stats)),
           h('td', proj.narrators.length > 1 ? h('button.icon-btn', { title: 'Remove this narrator', onclick: async () => { if (await confirmBox('Remove narrator?', `${n.name}'s takes stay on disk but leave the project.`, 'Remove', true)) { try { proj = await rpc('books.voice', { id, kind: 'narrator', narratorId: n.id, remove: true, force: true }); reindex(); renderAll(); } catch (e) { fail(e); } } } }, '×') : null))))),
-      h('div.section-head', { style: { marginTop: '16px', maxWidth: '1200px' } }, h('h2', 'NPC voice types'), h('span.faint', proj.npcVoices ? `${proj.voiceTypes.length} · ${vtt.books.toLocaleString()} books · ${vtt.left.toLocaleString()} characters left` : 'off: narrated books only (Setup)')),
+      h('div.section-head', { style: { marginTop: '8px', maxWidth: '1200px' } }, h('h2', 'NPC voice types'), h('span.faint', proj.npcVoices ? `${proj.voiceTypes.length} · ${vtt.books.toLocaleString()} books · ${vtt.left.toLocaleString()} characters left` : 'off: narrated books only (Setup)')),
       !proj.npcVoices ? h('div.faint', { style: { padding: '8px 0' } }, 'NPC voices are off, so books written by NPCs are left out. Turn them on in Setup → Names and output.')
         : !proj.voiceTypes.length ? [h('div.faint', { style: { padding: '8px 0' } }, 'No book is read by an NPC voice yet. Set a book\'s reader to an NPC voice type in the Books tab, or add voice types below.'), addVtRow()]
-          : [h('table.tbl.voices-tbl', h('thead', h('tr', h('th', 'Voice type'), h('th', { title: 'Books this voice type reads' }, 'Books'), h('th', 'Engine · voice'), h('th', 'Level'), h('th', { title: 'Let the narrator(s) read these books instead' }, 'Narrator instead'), h('th', 'Progress'), h('th', ''))),
+          : [h('table.tbl.voices-tbl', h('thead', h('tr', h('th', 'Voice type'), h('th', { title: 'Books this voice type reads' }, 'Books'), h('th', 'Engine · voice'), h('th', 'Level'), h('th', { title: 'Soften peaks when the books are joined' }, 'Soften peaks'), h('th', { title: 'Let the narrator(s) read these books instead' }, 'Narrator instead'), h('th', 'Progress'), h('th', ''))),
             h('tbody', proj.voiceTypes.slice().sort((a, b) => (a.useNarrator - b.useNarrator) || (state(a.stats, a.voiceId) - state(b.stats, b.voiceId)) || a.voiceType.localeCompare(b.voiceType)).map((v) => h('tr' + (v.useNarrator ? '.muted' : v.voiceId ? '' : '.needs-voice'),
               h('td', h('b.mono', v.voiceType), h('div.faint.ellipsis', { title: v.titles.join('\n'), style: { maxWidth: '240px', fontSize: '12px' } }, v.titles.slice(0, 3).join(' · '))),
               h('td', h('button.btn.sm.ghost', { title: 'Show these books', onclick: () => { voiceFilter = v.key; tab = 'books'; store.set('bk-tab:' + id, tab); renderAll(); } }, String(v.books))),
               h('td', v.useNarrator ? h('span.faint', 'read by the narrator(s)') : voicePick(v, 'vt')),
               h('td', v.useNarrator ? null : level(v, 'vt')),
+              h('td', v.useNarrator ? null : soften(v, 'vt')),
               h('td', switchEl(v.useNarrator, (x) => setVoice(v, 'vt', { useNarrator: x }), '', { title: 'The narrator(s) read these books' })),
               h('td', v.useNarrator ? null : progressCell(v.stats)),
               h('td', v.custom && !v.books ? h('button.icon-btn', { title: 'Remove this voice type you added (no book uses it)', onclick: () => setVoice(v, 'vt', { remove: true }).then(() => { vtCache = null; }) }, '×') : null))))), addVtRow()]);
@@ -1004,11 +1010,11 @@ export async function bookProjectView(id) {
       h('div.kv',
         h('div', 'Books with audio'), h('div', String(r.books)),
         h('div', 'Audio files'), h('div', `${r.files} (${r.joined} joined now, ${r.reused} unchanged)`),
-        h('div', '.ini'), h('div.mono', r.ini ? `${r.ini} · ${r.iniLines} lines` : 'not written'),
-        h('div', 'Archives'), h('div.mono', { style: { whiteSpace: 'pre-wrap' } }, r.archives.join('\n') || (proj.packaging === 'loose' ? 'loose files' : '—')),
-        h('div', 'Installer'), h('div.mono', r.fomod ? 'fomod\\ModuleConfig.xml' : '—'),
-        h('div', 'Report'), h('div.mono', r.report || '—'),
-        h('div', 'Folder'), h('div.mono', d.folder)),
+        h('div', '.ini'), h('div', r.ini ? [pathText(r.ini), h('span.faint', ` · ${r.iniLines} lines`)] : 'not written'),
+        h('div', 'Archives'), r.archives.length ? h('div', r.archives.map((a) => h('div', pathText(a)))) : h('div', proj.packaging === 'loose' ? 'loose files' : '—'),
+        h('div', 'Installer'), h('div', r.fomod ? pathText('fomod\\ModuleConfig.xml') : '—'),
+        h('div', 'Report'), h('div', r.report ? pathText(r.report) : '—'),
+        h('div', 'Folder'), h('div', pathText(d.folder))),
       r.missing.length ? h('div', h('div.field-label', `${r.missing.length} book(s) without complete takes were left out`), h('div.box.mono', { style: { maxHeight: '160px', overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: '12px' } }, r.missing.slice(0, 200).join('\n'))) : null,
       r.errors.length ? h('div.box.mono', { style: { maxHeight: '160px', overflow: 'auto' } }, r.errors.slice(0, 50).join('\n')) : null,
     ], [{ label: 'Open the report', value: 'report' }, { label: 'Open folder', value: 'open' }, { label: 'OK', primary: true, value: true }], { help: 'export-and-the-installer' });

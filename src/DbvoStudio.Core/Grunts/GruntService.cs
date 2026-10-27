@@ -726,12 +726,16 @@ public static partial class GruntService
         catch { }
     }
 
+    /// <summary>The project's Soften peaks for a line at export, unless the line's own file is softened already.</summary>
+    private static string SoftenAtExport(GruntProject p, GruntLine l) =>
+        Audio.PeakSoftener.IsMode(p.Audio.SoftenPeaks) && !l.Soften ? p.Audio.SoftenPeaks : "";
+
     /// <summary>One line converted to the export format, with the loudness settings (cached by source, settings and format).</summary>
     private static async Task<string> ConvertAsync(GruntProject p, GruntLine l, string format, string projectFolder, string cache, ExternalTools tools, CancellationToken ct)
     {
         var src = SourcePath(l, projectFolder);
         var a = p.Audio;
-        var key = Hash(string.Join("|", src, File.GetLastWriteTimeUtc(src).Ticks, new FileInfo(src).Length, format, a.Normalize, a.TargetLufs, a.PeakDb, a.GainDb, a.SampleRate, format == "fuz" ? l.Text : "", TrimKey(l), "v1"));
+        var key = Hash(string.Join("|", src, File.GetLastWriteTimeUtc(src).Ticks, new FileInfo(src).Length, format, a.Normalize, a.TargetLufs, a.PeakDb, a.GainDb, a.SampleRate, format == "fuz" ? l.Text : "", TrimKey(l), "v1") + (SoftenAtExport(p, l) is { Length: > 0 } sk ? "|sp:" + sk : ""));
         var outPath = Path.Combine(cache, key + "." + format);
         if (File.Exists(outPath)) return outPath;
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
@@ -742,6 +746,11 @@ public static partial class GruntService
         var plain = work.File("a.wav");
         if (HasTrim(l)) await TrimmedAsync(tools, input, l, plain, a.SampleRate, ct);
         else await tools.ToWavAsync(input, plain, a.SampleRate, false, 0, ct);
+        if (SoftenAtExport(p, l) is { Length: > 0 } soften)
+        {
+            try { await Audio.PeakSoftener.ApplyAsync(plain, plain, soften, tools, ct); }
+            catch (InvalidDataException) { /* not 16-bit PCM: exported as it is */ }
+        }
         double gain = a.GainDb;
         if (a.Normalize)
         {

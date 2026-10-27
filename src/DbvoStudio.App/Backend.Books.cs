@@ -206,7 +206,7 @@ public sealed partial class Backend
             baseGameFolder = RevoiceService.DataFolder(_settings.BaseGameFolder),
             xwma = !string.IsNullOrWhiteSpace(_settings.XwmaEncodePath) && File.Exists(_settings.XwmaEncodePath),
             proj.LastScan, proj.LastExportUtc,
-            narrators = proj.Narrators.Select(n => new { n.Id, n.Name, n.Engine, n.VoiceId, n.VoiceName, n.Female, n.Level, key = BooksProject.NarratorKey(n.Id), stats = voiceStats.GetValueOrDefault(BooksProject.NarratorKey(n.Id)) }),
+            narrators = proj.Narrators.Select(n => new { n.Id, n.Name, n.Engine, n.VoiceId, n.VoiceName, n.Female, n.Level, n.SoftenPeaks, key = BooksProject.NarratorKey(n.Id), stats = voiceStats.GetValueOrDefault(BooksProject.NarratorKey(n.Id)) }),
             voiceTypes = BkVoiceTypeRows(proj, voiceStats),
             mediaBase = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, _lib.BooksFolder(proj.Id)).Replace('\\', '/') + "/",
             books = proj.Books.Select(b => BkBookDto(proj, b)).ToList(),
@@ -246,7 +246,7 @@ public sealed partial class Backend
             rows.Add(new
             {
                 voiceType = g.Key, key, books = g.Books.Count, custom = a?.Custom ?? false, engine = a?.Engine ?? "elevenlabs", voiceId = a?.VoiceId, voiceName = a?.VoiceName,
-                female = a?.Female ?? IsFemaleVt(g.Key), level = a?.Level ?? "loud", useNarrator = a?.UseNarrator ?? false,
+                female = a?.Female ?? IsFemaleVt(g.Key), level = a?.Level ?? "loud", softenPeaks = a?.SoftenPeaks ?? "", useNarrator = a?.UseNarrator ?? false,
                 titles = g.Books.Select(b => b.Title).Take(6).ToList(), stats = stats.GetValueOrDefault(key),
             });
         }
@@ -302,7 +302,7 @@ public sealed partial class Backend
     private static object BkLineDto(BookLine l) => new
     {
         id = l.LineId, part = l.Part, voice = l.Voice, variant = l.Variant, spoken = l.Spoken, start = l.Start, end = l.End, para = l.ParagraphEnd,
-        status = l.Status.ToString(), err = l.LastError, sel = l.SelectedTakeId, marked = l.Marked, effect = l.Effect,
+        status = l.Status.ToString(), err = l.LastError, sel = l.SelectedTakeId, marked = l.Marked, effect = l.Effect, soften = l.Soften,
         takes = l.Takes.Select(t => new { t.Id, t.Slot, t.CreatedUtc, t.SpokenText, engine = t.Settings.Engine, model = t.Settings.ModelId, wav = t.WavPath.Replace('\\', '/'), t.DurationSeconds }),
     };
 
@@ -460,6 +460,7 @@ public sealed partial class Backend
                     if (p.TryGetProperty("voiceId", out var vi)) { n.VoiceId = vi.ValueKind == JsonValueKind.String && vi.GetString()!.Length > 0 ? vi.GetString() : null; n.VoiceName = n.VoiceId == null ? null : S(p, "voiceName", n.VoiceId); }
                     if (NB(p, "female") is { } f) n.Female = f;
                     if (S(p, "level") is { Length: > 0 } lv) n.Level = lv;
+                    if (p.TryGetProperty("softenPeaks", out var spn) && spn.ValueKind == JsonValueKind.String) n.SoftenPeaks = spn.GetString() ?? "";
                 }
             }
         }
@@ -475,6 +476,7 @@ public sealed partial class Backend
                 if (NB(p, "female") is { } f) a.Female = f;
                 if (NB(p, "useNarrator") is { } un) a.UseNarrator = un;
                 if (S(p, "level") is { Length: > 0 } lv) a.Level = lv;
+                if (p.TryGetProperty("softenPeaks", out var spv) && spv.ValueKind == JsonValueKind.String) a.SoftenPeaks = spv.GetString() ?? "";
             }
         }
         BooksService.RebuildLines(proj);
