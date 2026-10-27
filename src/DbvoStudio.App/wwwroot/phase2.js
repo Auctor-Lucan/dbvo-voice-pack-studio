@@ -716,6 +716,7 @@ export async function patchView(id) {
       failed: L.filter((l) => l.status === 'Failed' && !l.omitted && !l.excluded).length,
       stale: L.filter((l) => isEdited(l) && !l.omitted && !l.excluded).length,
       omitted: L.filter((l) => l.omitted).length,
+      nonomitted: L.filter((l) => !l.omitted).length,
       marked: L.filter((l) => l.marked).length,
       excluded: L.filter((l) => l.excluded).length,
       active: L.filter((l) => !l.omitted && !l.excluded).length,
@@ -734,7 +735,8 @@ export async function patchView(id) {
     return patch.lines.filter((l) => {
       switch (filter) {
         case 'pending': if (!pendingLine(l)) return false; break;
-        case 'current': if (!(l.takes.length && !isEdited(l))) return false; break;
+        case 'current': if (!(l.takes.length && !isEdited(l) && !l.omitted && !l.excluded)) return false; break;
+        case 'nonomitted': if (l.omitted) return false; break;
         case 'stale': if (!(isEdited(l) && !l.omitted && !l.excluded)) return false; break;
         case 'failed': if (l.status !== 'Failed') return false; break;
         case 'omitted': if (!l.omitted) return false; break;
@@ -759,7 +761,8 @@ export async function patchView(id) {
     if (!had) q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 150));
     // Only filters that match at least one line (the open one always stays).
     const opt = (key, label, title) => (key === 'all' || filter === key || c[key] ? chip(key, label, title) : null);
-    clear(filters).append(opt('all', 'All', 'Every line of this patch'), opt('pending', 'Missing', 'Lines without any take yet'), opt('current', vc ? 'Converted' : 'Generated', 'Lines with a take that matches their spoken text'),
+    clear(filters).append(opt('all', 'All', 'Every line of this patch'),
+      c.omitted || filter === 'nonomitted' ? chip('nonomitted', 'All non-omitted', 'Every line except those a ticked reference topic file already has') : null, opt('pending', 'Missing', 'Lines without any take yet'), opt('current', vc ? 'Converted' : 'Generated', 'Lines with a take that matches their spoken text'),
       opt('stale', 'Edited since take', 'Lines with a take whose spoken text changed since (tags added, words edited), or whose last attempt failed'),
       opt('failed', 'Failed', 'The last attempt made no usable take (engine error, credits, offline local engine, LIP or WAV step). The error is shown at the top of the line\'s panel; Generate options ▾ → Missing (no take yet) or Edited (has a take) retries these.'),
       opt('marked', 'Flagged', 'Flagged to revisit'), opt('excluded', 'Excluded', 'Won\'t generate or export'),
