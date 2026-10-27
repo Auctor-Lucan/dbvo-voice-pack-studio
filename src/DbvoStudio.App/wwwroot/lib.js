@@ -173,6 +173,23 @@ export async function prompt(title, fields) {
   return out;
 }
 
+/** Wraps a search box with a magnifying glass that lights up while a search is active (lines are hidden), click to clear. */
+export function searchLamp(q) {
+  if (q.__lamp) return q.__lamp;
+  const g = h('button.search-lamp-ico', { type: 'button' }, icon('search', { size: 15 }));
+  const w = h('span.search-lamp', g, q);
+  const paint = () => {
+    const v = q.value.trim();
+    w.classList.toggle('on', v.length > 0);
+    g.title = v ? `Search is on: "${v}". Only matching rows are shown. Click to clear it.` : 'Search';
+  };
+  q.addEventListener('input', paint);
+  g.addEventListener('click', () => { if (q.value) { q.value = ''; q.dispatchEvent(new Event('input')); } q.focus(); });
+  paint();
+  q.__lamp = w;
+  return w;
+}
+
 export function debounce(fn, ms = 400) {
   let t;
   return (...a) => {

@@ -1,5 +1,5 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats, withBusy, pathText, pathRows, pathList } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats, withBusy, pathText, pathRows, pathList, searchLamp } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
@@ -179,7 +179,7 @@ export async function patchesView(kind = 'tts') {
     q.addEventListener('input', render);
     voiceFilter.addEventListener('change', () => { store.set('patches-voice:' + key, voiceFilter.value); render(); });
     render();
-    return h('div.pane', h('div.row', { style: { marginBottom: '12px' } }, q, voiceFilter), listEl);
+    return h('div.pane', h('div.row', { style: { marginBottom: '12px' } }, searchLamp(q), voiceFilter), listEl);
   }
 
   const first = s.settings.lastVoicePackId || s.voicePacks[0].id;
@@ -774,7 +774,7 @@ export async function patchView(id) {
       opt('suggestions', 'AI suggestions', 'AI tag suggestions waiting for Accept or Undo'),
       opt('qa', 'QA flagged', 'Check takes flagged the take in use: the words differ from the line, it is too quiet, or it clips'),
       opt('approved', 'Approved', 'Approved in Review'), review || filter === 'unapproved' ? opt('unapproved', 'Not approved', 'Lines with a take that are not approved yet') : null,
-      h('div.spacer'), q, columnsMenu(grid),
+      h('div.spacer'), searchLamp(q), columnsMenu(grid),
       h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp2', showInsp); split.classList.toggle('no-insp', !showInsp); renderCounts(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel'));
   }
 

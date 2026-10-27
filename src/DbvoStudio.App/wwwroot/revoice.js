@@ -1,6 +1,6 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
@@ -578,7 +578,7 @@ export async function revoiceView(id) {
   function viewTools() {
     const q = h('input', { type: 'text', placeholder: 'Search text, file, speaker, quest…', value: search, title: 'Filter the list' });
     q.addEventListener('input', debounce(() => { search = q.value; grid.setRows(visible()); }, 200));
-    return [q, columnsMenu(grid),
+    return [searchLamp(q), columnsMenu(grid),
       h('button.btn.sm', { title: 'Show or hide the line panel', onclick: () => { showInsp = !showInsp; store.set('rv-insp', showInsp); renderAll(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel')];
   }
   function findReplace() {

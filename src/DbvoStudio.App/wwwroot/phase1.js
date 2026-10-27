@@ -1,6 +1,6 @@
 // Phase 1: Mods list and the per-plugin workspace.
 import { findReplaceDialog } from './tagtools.js';
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton, segmented, pathText, pathRows, pathList } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton, segmented, pathText, pathRows, pathList, searchLamp } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const KIND_LABEL = {
@@ -645,7 +645,7 @@ export async function modView(id) {
         h('span.legend-note', 'Review ', h('b', 'BROKEN'), ' and ', h('b', 'TOO LONG WILL CTD'), ' lines before Phase 2.'),
         h('div.spacer'), helpButton('review-the-lines'),
         h('button.btn.sm.ghost', { title: 'Find text in the in-game text of every line shown and replace it (goes into the DBVO Fix plugin like any edit)', onclick: findReplace }, 'Find and replace in all shown…'),
-        q, columnsMenu(grid),
+        searchLamp(q), columnsMenu(grid),
         h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp1', showInsp); split.classList.toggle('no-insp', !showInsp); renderFilters(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel')));
   }
   function findReplace() {

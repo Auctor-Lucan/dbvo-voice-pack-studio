@@ -1,7 +1,7 @@
 // Other Tools → Player Grunts Tool: player voice packs for PC Head Tracking (with or without Multi Voice Packs) and
 // Smart Player Voice System. Events are shown as blocks by category; the panel on the right holds the selected event's
 // lines. Event definitions are data (built in, read from the installed mods, or the user's own custom events).
-import { rpc, h, clear, toast, fail, modal, confirmBox, store, debounce, switchEl, segmented, popupMenu, droppedPaths, icon, helpButton, withBusy, pathText, pathRows, pathList } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, store, debounce, switchEl, segmented, popupMenu, droppedPaths, icon, helpButton, withBusy, pathText, pathRows, pathList, searchLamp } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { setPaletteExtra } from './nav.js';
 import { recordTake } from './recorder.js';
@@ -234,7 +234,7 @@ export async function gruntProjectView(id) {
       chip('partial', 'Shouts in part', 'Shouts with some parts still missing'), chip('broken', 'Missing files', 'A line\'s audio file isn\'t on disk any more'),
       chip('extra', 'More than PCHT\'s own', 'PCHT events with more lines than the base plugin lists (the export adds them)'),
       chip('skipped', 'Skipped', 'Left out on purpose'), chip('custom', 'Custom', 'Events you added'),
-      h('div.spacer'), q, cs, imp,
+      h('div.spacer'), searchLamp(q), cs, imp,
       h('button.btn.sm', { title: 'Open every line\'s subtitle in one .toml file in your text editor; save it and come back, and the changes are read in', onclick: openSubtitles }, 'Subtitles .toml'),
       h('button.btn.sm', { title: 'Add, edit, import or export your own event definitions', onclick: customEventsDialog }, 'Custom events…'),
       h('button.btn.sm', { title: 'Show or hide the event panel', onclick: () => { showInsp = !showInsp; store.set('gr-insp', showInsp); renderAll(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel'));

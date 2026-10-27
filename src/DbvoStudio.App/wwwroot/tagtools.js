@@ -1,5 +1,5 @@
 // Shared ElevenLabs tag tools for Phase 2 and NPC Revoice: the "Add a [tag] to all shown…" dialog and caret insertion.
-import { h, clear, toast, modal, segmented } from './lib.js';
+import { h, clear, toast, modal, segmented, debounce } from './lib.js';
 
 /** Insert a tag at the caret of a text box (spaces added as needed); returns the new value. */
 export function insertTagAtCaret(el, t) {
@@ -56,10 +56,24 @@ export async function bulkTagDialog({ pool, idOf, original, originalLabel, origi
     if (o4.cb.checked && shortIn.value !== '' && !(strip(l.spoken).length < Number(shortIn.value))) return false;
     return true;
   });
-  function update() {
-    const n = matches().length;
-    count.textContent = mode === 'add' ? `Added to ${n} of ${pool.length} line(s) in the current filter.` : `Removed from ${n} of ${pool.length} line(s) in the current filter (where they have it).`;
+  // the side panel: the lines that the tag will go to (or be taken from), live
+  const side = h('div.tagdlg-list');
+  const sideHead = h('div.field-label');
+  function paintSide(m) {
+    const typed = (tagsIn.value.match(/\[[^\]]+\]/g) || []).map((t) => t.toLowerCase());
+    const shown = mode === 'remove' && typed.length ? m.filter((l) => typed.some((t) => l.spoken.toLowerCase().includes(t))) : m;
+    sideHead.textContent = `${mode === 'add' ? 'Lines that get the tag' : 'Lines it is removed from'} (${shown.length.toLocaleString()})`;
+    clear(side);
+    for (const l of shown.slice(0, 300)) side.append(h('div.tagdlg-line', { title: l.spoken }, l.spoken || '(empty)'));
+    if (shown.length > 300) side.append(h('div.faint', `…and ${(shown.length - 300).toLocaleString()} more.`));
+    if (!shown.length) side.append(h('div.faint', 'No line matches.'));
   }
+  function update() {
+    const m = matches(), n = m.length;
+    count.textContent = mode === 'add' ? `Will be added to ${n} of ${pool.length} line(s) in the current filter.` : `Will be removed from ${n} of ${pool.length} line(s) in the current filter (where they have it).`;
+    paintSide(m);
+  }
+  tagsIn.addEventListener('input', debounce(() => update(), 150));
   const modeSel = segmented([['add', 'Add'], ['remove', 'Remove']], mode, (v) => { mode = v; labels(); update(); });
   modeSel.classList.add('accent');
   labels(); update();
@@ -80,9 +94,11 @@ export async function bulkTagDialog({ pool, idOf, original, originalLabel, origi
       custom);
   }
   const ok = await modal(h('span.row', modeSel, h('span', 'a tag to every line shown')), [
-    tagRow,
-    h('div.col', h('div.field-label', 'Tags'), tagsIn), count,
-    h('div.tag-opts', o1.el, o2.el, o3.el, o4.el, o5.el),
+    h('div.tagdlg-split',
+      h('div.col.tagdlg-main', tagRow,
+        h('div.col', h('div.field-label', 'Tags'), tagsIn), count,
+        h('div.tag-opts', o1.el, o2.el, o3.el, o4.el, o5.el)),
+      h('div.col.tagdlg-side', sideHead, side)),
   ], [{ label: 'Cancel', value: false }, { label: 'OK', primary: true, value: true }], { wide: true });
   if (!ok) return;
   const tags = (tagsIn.value.match(/\[[^\]]+\]|[^\s\[\],]+/g) || []);

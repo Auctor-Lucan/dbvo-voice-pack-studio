@@ -1,7 +1,7 @@
 // Other Tools → Voiced Books Tool: narrate Skyrim's books, letters and journals (or a mod's) for Voiced Books of Skyrim.
 // Books are split into parts the engine can read, each part gets takes, and export joins them, adds the IVBOS
 // reverb and loudness chain, encodes xWMA and packs archives, the VBoS .ini and a FOMOD.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { creditsButton, LANGS } from './phase2.js';
@@ -524,7 +524,7 @@ export async function bookProjectView(id) {
       chip('unconfirmed', 'Author unconfirmed', 'NPC voice from an automatic match: check, then Confirm'), chip('problems', 'Check found problems', 'Alias markup, leftover markup or short ALL-CAPS words'),
       chip('updated', 'Updated text', 'The built-in set has a newer text for a book you edited'), chip('suggest', 'Suggested', 'Spell tomes or recipes with real text: left out, but worth voicing'),
       chip('marked', 'Flagged', 'Flagged to revisit'), chip('excl', 'Left out', 'Not generated or exported'),
-      h('div.spacer'), h('button.btn.sm.ghost', { title: 'Find text in the spoken text of every book shown and replace it, with [tags] if you like', onclick: findReplace }, 'Find and replace…'), q, columnsMenu(grid),
+      h('div.spacer'), h('button.btn.sm.ghost', { title: 'Find text in the spoken text of every book shown and replace it, with [tags] if you like', onclick: findReplace }, 'Find and replace…'), searchLamp(q), columnsMenu(grid),
       h('button.btn.sm', { title: 'Show or hide the book panel', onclick: () => { showInsp = !showInsp; store.set('bk-insp', showInsp); renderAll(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel'));
   }
 
