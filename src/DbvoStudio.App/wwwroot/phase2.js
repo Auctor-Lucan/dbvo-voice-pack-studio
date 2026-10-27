@@ -1,5 +1,5 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats, withBusy, pathText, pathRows, pathList, searchLamp } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats, withBusy, pathText, pathRows, pathList, searchLamp, dragSource, dragTarget } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
@@ -119,7 +119,7 @@ export async function patchesView(kind = 'tts') {
     const vc = p.kind === 'vc';
     const warn = p.warnings && p.warnings.length;
     // Two compact lines: name + labels, then progress and what is left.
-    const el = h('div.prow', { draggable: true, onclick: () => go('patch', { id: p.id }), title: 'Open this patch' },
+    const el = h('div.prow', { onclick: () => go('patch', { id: p.id }), title: 'Open this patch' },
       h('div.row',
         h('span.title.ellipsis.grow', p.name),
         warn ? h('span.badge.b-toolong', { title: p.warnings.join('\n') }, '⚠ ' + (p.warnings.length === 1 ? p.warnings[0] : p.warnings.length + ' warnings')) : null,
@@ -135,8 +135,7 @@ export async function patchesView(kind = 'tts') {
         vc ? h('span.left', { title: 'Voice Changer: ElevenLabs bills speech-to-speech by audio length.' + (p.noSource ? ` ${p.noSource} line(s) have no source file; they can be generated with text-to-speech (see the patch).` : '') }, h('b', String(p.secondsLeft || 0)), ' to convert', p.noSource ? ` · ${p.noSource} no source` : '')
           : h('span.left', { title: 'Characters of spoken text still to generate; ElevenLabs bills about one credit per character' }, h('b', (p.charsLeft || 0).toLocaleString()), ' chars left')));
     {
-      el.addEventListener('dragstart', (e) => { dragId = p.id; el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
-      el.addEventListener('dragend', () => { dragId = null; el.classList.remove('dragging'); });
+      dragSource(el, { data: () => p, label: () => p.name });
     }
     return el;
   };
@@ -160,18 +159,13 @@ export async function patchesView(kind = 'tts') {
           h('div.cat-head', { title: isOpen ? 'Click to fold' : 'Click to unfold', onclick: () => { collapsed[cat] = isOpen; store.set('cats-collapsed:' + key, collapsed); render(); } },
             h('span.caret', isOpen ? '▾' : '▸'), h('h3', cat), h('span.faint', list.length || (none ? '' : 'empty · drop a patch here'))),
           isOpen && list.length ? h('div.rows1', list.map(card)) : null);
-        sec.addEventListener('dragover', (e) => { if (dragId) { e.preventDefault(); sec.classList.add('drop-over'); } });
-        sec.addEventListener('dragleave', (e) => { if (!sec.contains(e.relatedTarget)) sec.classList.remove('drop-over'); });
-        sec.addEventListener('drop', async (e) => {
-          e.preventDefault();
-          sec.classList.remove('drop-over');
-          const p = patches.find((x) => x.id === dragId);
-          if (!p || p.category === cat) return;
-          try {
+        dragTarget(sec, {
+          accepts: (p) => (p && p.modIds && p.category !== cat ? `Move to ${cat}` : null),
+          onDrop: async (p) => {
             for (const mid of p.modIds) await rpc('mod.setCategory', { id: mid, category: cat });
-            go(vcPage ? 'vc' : 'patches');
+            await go(vcPage ? 'vc' : 'patches');
             toast(`Moved to ${cat}. The mod's category changed too (it is shared by all its patches).`);
-          } catch (err) { fail(err); }
+          },
         });
         listEl.append(sec);
       }

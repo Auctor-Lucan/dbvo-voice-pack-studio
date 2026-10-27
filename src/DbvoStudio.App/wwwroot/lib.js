@@ -173,6 +173,79 @@ export async function prompt(title, fields) {
   return out;
 }
 
+// ------------------------------------------------------------------ dragging things around inside the app
+// Pointer-based, not HTML drag and drop: WebView2 shows no drag image for that, so a drag was invisible. Here a label
+// follows the pointer, the pointer turns into a grabbing hand, the place it will land lights up and says what happens,
+// and the target shows "Moving…" until the work is done. File drops from Explorer still use HTML drag and drop.
+const dropTargets = new WeakMap();
+let dragNow = null;
+
+/** Lets el be a drop target: accepts(data) → a short text of what a drop does (or null/false: not here); onDrop(data) may be async. */
+export function dragTarget(el, { accepts, onDrop }) {
+  el.dataset.dragTarget = '1';
+  dropTargets.set(el, { accepts, onDrop });
+}
+
+/** Makes el draggable: data() gives what is dragged, label() the text that follows the pointer. */
+export function dragSource(el, { data, label }) {
+  el.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || e.target.closest('input,textarea,select,button,a')) return;
+    const x0 = e.clientX, y0 = e.clientY;
+    let started = false, over = null, overEl = null, ghost = null, note = null;
+    const find = (x, y) => {
+      let t = document.elementFromPoint(x, y);
+      while (t && t !== document.body) {
+        if (t.dataset && t.dataset.dragTarget && dropTargets.has(t) && t !== el) {
+          const what = dropTargets.get(t).accepts(dragNow);
+          if (what) return [t, what];
+        }
+        t = t.parentElement;
+      }
+      return [null, null];
+    };
+    const move = (ev) => {
+      if (!started) {
+        if (Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < 6) return;
+        started = true;
+        dragNow = data();
+        note = h('div.drag-note');
+        ghost = h('div.drag-ghost', h('div.drag-what', label()), note);
+        document.body.append(ghost);
+        document.body.classList.add('drag-active');
+        el.classList.add('dragging');
+      }
+      ev.preventDefault();
+      ghost.style.transform = `translate(${ev.clientX + 14}px, ${ev.clientY + 12}px)`;
+      const [t, what] = find(ev.clientX, ev.clientY);
+      if (t !== overEl) { if (overEl) overEl.classList.remove('drop-over'); overEl = t; if (t) t.classList.add('drop-over'); }
+      over = t ? dropTargets.get(t) : null;
+      note.textContent = t ? what : 'Not here';
+      ghost.classList.toggle('no', !t);
+    };
+    const up = async () => {
+      document.removeEventListener('mousemove', move, true);
+      document.removeEventListener('mouseup', up, true);
+      if (!started) return;
+      // the click that follows a drag must not open the row
+      const eat = (ce) => { ce.stopPropagation(); ce.preventDefault(); };
+      document.addEventListener('click', eat, { capture: true, once: true });
+      setTimeout(() => document.removeEventListener('click', eat, true), 50);
+      ghost.remove();
+      document.body.classList.remove('drag-active');
+      el.classList.remove('dragging');
+      const d = dragNow; dragNow = null;
+      if (!overEl || !over) return;
+      const t = overEl;
+      t.classList.remove('drop-over');
+      t.classList.add('drop-busy');
+      document.body.classList.add('drag-busy');
+      try { await over.onDrop(d); } catch (err) { fail(err); } finally { t.classList.remove('drop-busy'); document.body.classList.remove('drag-busy'); }
+    };
+    document.addEventListener('mousemove', move, true);
+    document.addEventListener('mouseup', up, true);
+  });
+}
+
 /** Wraps a search box with a magnifying glass that lights up while a search is active (lines are hidden), click to clear. */
 export function searchLamp(q) {
   if (q.__lamp) return q.__lamp;

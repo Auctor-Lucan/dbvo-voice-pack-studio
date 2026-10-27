@@ -1,5 +1,5 @@
 // Phase 3: FOMOD Creation — import any ModuleConfig.xml, options from DBVO Patches, the DBVO JSON, validate, simulate, build.
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, switchEl, segmented, popupMenu, helpButton, keepScroll } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, switchEl, segmented, popupMenu, helpButton, keepScroll, dragSource, dragTarget } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip } from './phase2.js';
 
@@ -180,26 +180,23 @@ export async function fomodView(id) {
       if (!open) return;
       st.groups.forEach((g) => {
         const gn = node(g.id, 'group', h('span.ellipsis', g.name || '(group)'), h('span.row', { style: { marginLeft: 'auto' } }, h('span.kind', (GROUP_TYPES.find((t) => t[0] === g.type) || [0, g.type])[1]), h('span.n', g.options.length)));
-        gn.addEventListener('dragover', (e) => { if (drag) { e.preventDefault(); gn.classList.add('drop-over'); } });
-        gn.addEventListener('dragleave', () => gn.classList.remove('drop-over'));
-        gn.addEventListener('drop', (e) => { e.preventDefault(); gn.classList.remove('drop-over'); if (!drag) return; drag.fromGroup.options.splice(drag.fromGroup.options.indexOf(drag.option), 1); g.options.push(drag.option); drag = null; changed(true); });
+        dragTarget(gn, {
+          accepts: (d) => (d && d.option ? `Move to the end of ${g.name || 'this group'}` : null),
+          onDrop: (d) => { d.fromGroup.options.splice(d.fromGroup.options.indexOf(d.option), 1); g.options.push(d.option); changed(true); },
+        });
         tree.append(gn);
         g.options.forEach((o) => {
           const badge = o.mode === 'Detect' ? h('span.kind', { title: 'Detects: ' + o.plugins.join(', ') }, 'detect')
             : h('span.kind', o.mode.toLowerCase());
           const on = node(o.id, 'opt', h('span.ellipsis', o.carriesJson ? '{ } ' : '', o.name || '(option)'), h('span.row', { style: { marginLeft: 'auto' } }, o.patchId ? h('span.kind', { title: 'Linked to a DBVO Patch' }, '🔗') : null, badge));
-          on.draggable = true;
-          on.addEventListener('dragstart', () => { drag = { option: o, fromGroup: g }; });
-          on.addEventListener('dragend', () => { drag = null; });
-          on.addEventListener('dragover', (e) => { if (drag && drag.option !== o) { e.preventDefault(); on.classList.add('drop-over'); } });
-          on.addEventListener('dragleave', () => on.classList.remove('drop-over'));
-          on.addEventListener('drop', (e) => {
-            e.preventDefault(); e.stopPropagation(); on.classList.remove('drop-over');
-            if (!drag || drag.option === o) return;
-            drag.fromGroup.options.splice(drag.fromGroup.options.indexOf(drag.option), 1);
-            g.options.splice(g.options.indexOf(o), 0, drag.option);
-            drag = null;
-            changed(true);
+          dragSource(on, { data: () => ({ option: o, fromGroup: g }), label: () => o.name || '(option)' });
+          dragTarget(on, {
+            accepts: (d) => (d && d.option && d.option !== o ? `Put above ${o.name || 'this option'}` : null),
+            onDrop: (d) => {
+              d.fromGroup.options.splice(d.fromGroup.options.indexOf(d.option), 1);
+              g.options.splice(g.options.indexOf(o), 0, d.option);
+              changed(true);
+            },
           });
           tree.append(on);
         });
