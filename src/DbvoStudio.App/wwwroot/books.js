@@ -1,7 +1,7 @@
 // Other Tools → Voiced Books Tool: narrate Skyrim's books, letters and journals (or a mod's) for Voiced Books of Skyrim.
 // Books are split into parts the engine can read, each part gets takes, and export joins them, adds the IVBOS
 // reverb and loudness chain, encodes xWMA and packs archives, the VBoS .ini and a FOMOD.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { creditsButton, LANGS } from './phase2.js';
@@ -43,13 +43,14 @@ export async function booksListView() {
     return view;
   }
   body.append(h('div.cat', h('div.cat-head', h('h3', 'Voiced Books projects'), h('span.faint', list.length)),
-    h('div.rows3', list.map((x) => h('div.prow', { title: 'Open this project', onclick: () => go('book', { id: x.id }) },
+    h('div.rows3', list.filter((x) => !(x.lines && x.generated >= x.lines)).map((x) => h('div.prow', { title: 'Open this project', onclick: () => go('book', { id: x.id }) },
       h('div.row', h('span.title.ellipsis.grow', x.name), x.source !== 'plugins' ? h('span.badge.b-fixed', { title: 'Built-in text set' }, 'built-in set') : null),
       h('div.faint.ellipsis', { title: x.targets.join(', ') }, x.source !== 'plugins' ? 'Skyrim, Dawnguard, Hearthfire, Dragonborn' : (x.targets.join(', ') || 'no plugins yet')),
       h('div.prow-stats',
         h('div.grow', h('div.bar' + (x.lines && x.generated >= x.lines ? '.ok' : ''), h('div.bar-fill', { style: { width: (x.lines ? (100 * x.generated) / x.lines : 0) + '%' } }))),
         h('span.mono', { title: 'Parts with a take / all parts' }, `${x.generated} / ${x.lines}`),
-        h('span.left', h('b', String(x.books)), ' books · ', h('b', String(x.narrators)), ' narrator' + (x.narrators === 1 ? '' : 's'))))))));
+        h('span.left', h('b', String(x.books)), ' books · ', h('b', String(x.narrators)), ' narrator' + (x.narrators === 1 ? '' : 's')))))),
+    pdoneChips(list.filter((x) => x.lines && x.generated >= x.lines), (x) => go('book', { id: x.id }), (x) => `${x.lines}`, 'every part has a take')));
   return view;
 }
 

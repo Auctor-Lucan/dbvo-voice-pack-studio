@@ -1,7 +1,7 @@
 // Other Tools → Player Grunts Tool: player voice packs for PC Head Tracking (with or without Multi Voice Packs) and
 // Smart Player Voice System. Events are shown as blocks by category; the panel on the right holds the selected event's
 // lines. Event definitions are data (built in, read from the installed mods, or the user's own custom events).
-import { rpc, h, clear, toast, fail, modal, confirmBox, store, debounce, switchEl, segmented, popupMenu, droppedPaths, icon, helpButton, withBusy, pathText, pathRows, pathList, searchLamp } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, store, debounce, switchEl, segmented, popupMenu, droppedPaths, icon, helpButton, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { setPaletteExtra } from './nav.js';
 import { recordTake } from './recorder.js';
@@ -67,13 +67,14 @@ export async function gruntsListView() {
     return view;
   }
   body.append(h('div.cat', h('div.cat-head', h('h3', 'Player voice packs'), h('span.faint', list.length)),
-    h('div.rows3', list.map((x) => h('div.prow', { title: 'Open this project', onclick: () => go('grunt', { id: x.id }) },
+    h('div.rows3', list.filter((x) => !(x.total && x.events >= x.total)).map((x) => h('div.prow', { title: 'Open this project', onclick: () => go('grunt', { id: x.id }) },
       h('div.row', h('span.title.ellipsis.grow', x.name), h('span.badge.b-fixed', { title: TARGET_LONG[x.target] + (x.multi ? ' · Multi Voice Packs' : '') }, kindBadge(x))),
       h('div.faint.ellipsis', x.target === 'spvs' ? `Voice slot ${x.slot}` : x.multi ? `Voice set ${x.prefix || '(no prefix yet)'} · ${x.gender}` : `Default PCHT voice · ${x.gender}`),
       h('div.prow-stats',
         h('div.grow', h('div.bar' + (x.total && x.events >= x.total ? '.ok' : ''), h('div.bar-fill', { style: { width: (x.total ? (100 * x.events) / x.total : 0) + '%' } }))),
         h('span.mono', { title: 'Events with audio / all events' }, `${x.events} / ${x.total}`),
-        h('span.left', h('b', String(x.lines)), ' lines')))))));
+        h('span.left', h('b', String(x.lines)), ' lines'))))),
+    pdoneChips(list.filter((x) => x.total && x.events >= x.total), (x) => go('grunt', { id: x.id }), (x) => `${x.events}/${x.total}`, 'every event has audio')));
   return view;
 }
 

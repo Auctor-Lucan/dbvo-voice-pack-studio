@@ -72,8 +72,13 @@ export async function modsView() {
     for (const cat of cats) {
       const mods = s.mods.filter((m) => (m.category || 'Misc') === cat && (!f || m.name.toLowerCase().includes(f)));
       if (!mods.length) continue;
-      listEl.append(h('div.cat', h('div.cat-head', h('h3', cat), h('span.faint', mods.length)),
-        h('div.cards2', mods.map((m) => {
+      // reviewed mods shrink to chips; mods with flagged lines to review stay full cards
+      const unrevOf = (m) => m.plugins.reduce((a, p) => a + p.unreviewed, 0);
+      const linesOfMod = (m) => m.plugins.reduce((a, p) => a + p.topicLines, 0);
+      const work = mods.filter((m) => unrevOf(m) || !m.plugins.length), done = mods.filter((m) => !unrevOf(m) && m.plugins.length);
+      listEl.append(h('div.cat', h('div.cat-head', h('h3', cat), h('span.faint', `${mods.length} mod${mods.length === 1 ? '' : 's'} · ${mods.reduce((a, m) => a + linesOfMod(m), 0).toLocaleString()} topic lines`),
+        h('div.spacer'), work.length ? h('span.cat-work', `${work.length} to review`) : h('span.cat-done', 'all reviewed ✓')),
+        !work.length ? null : h('div.cards2', work.map((m) => {
           const unrev = m.plugins.reduce((a, p) => a + p.unreviewed, 0);
           const lines = m.plugins.reduce((a, p) => a + p.topicLines, 0);
           const fixes = m.plugins.reduce((a, p) => a + p.fixes, 0);
@@ -84,7 +89,9 @@ export async function modsView() {
             h('div.stat-row', h('span', h('b', lines), ' topic lines'),
               fixes ? h('span', h('b', fixes), ' in DBVO Fix') : h('span', 'no DBVO Fix needed'),
               m.plugins.some((p) => p.playerNames) ? h('span', h('b', m.plugins.reduce((a, p) => a + (p.playerNames || 0), 0)), ' player-name') : null));
-        }))));
+        })),
+        done.length ? h('div.pchips', { style: { padding: '8px 0' } }, done.map((m) => h('div.pchip', { onclick: () => go('mod', { id: m.id }), title: `${m.name}${m.version ? ' v' + m.version : ''} · ${m.plugins.map((p) => p.fileName).join(', ')} · reviewed. Click to open.` },
+          h('span.pchip-name', m.name), h('span.mono.faint', linesOfMod(m).toLocaleString())))) : null));
     }
   };
   q.addEventListener('input', render);

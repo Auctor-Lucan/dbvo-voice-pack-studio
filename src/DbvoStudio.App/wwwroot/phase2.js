@@ -140,40 +140,69 @@ export async function patchesView(kind = 'tts') {
     return el;
   };
 
+  // A finished patch (every line has a take, Phase 1 reviewed, no warnings) shrinks to a chip; the rest stay full cards.
+  const linesOf = (p) => p.total - p.omitted - (p.excluded || 0);
+  const isDone = (p) => !p.unreviewed && !(p.warnings && p.warnings.length) && p.generated >= linesOf(p);
+  const chipOf = (p, showVoice) => {
+    const el = h('div.pchip', { onclick: () => go('patch', { id: p.id }), title: `${p.name} · ${p.voicePack} · every line has a take. Click to open.` },
+      showVoice ? h('span.pchip-dot', { style: { background: p.voiceColor || 'var(--accent)' } }) : null,
+      h('span.pchip-name', p.name), p.kind === 'vc' && !vcPage ? h('span.faint', 'VC') : null, h('span.mono.faint', linesOf(p).toLocaleString()));
+    dragSource(el, { data: () => p, label: () => p.name });
+    return el;
+  };
+
   function pane(key, defaultVoice) {
     const collapsed = store.get('cats-collapsed:' + key, {});
+    let show = store.get('patches-show:' + key, 'all');
+    const showEl = h('div.row.pshow');
     const voiceFilter = h('select', { title: 'Show the patches of one voice pack. Default shows the empty categories only.' }, h('option', { value: '-' }, 'Default'), h('option', { value: '' }, 'All voice packs'), s.voicePacks.map((v) => h('option', { value: v.id }, v.name)));
     voiceFilter.value = store.get('patches-voice:' + key, defaultVoice);
     const q = h('input', { type: 'text', placeholder: 'Filter patches…', title: 'Filter by patch or voice pack name', style: { width: '220px' } });
     const listEl = h('div');
+    const dropTo = (el, cat) => dragTarget(el, {
+      accepts: (p) => (p && p.modIds && p.category !== cat ? `Move to ${cat}` : null),
+      onDrop: async (p) => {
+        for (const mid of p.modIds) await rpc('mod.setCategory', { id: mid, category: cat });
+        await go(vcPage ? 'vc' : 'patches');
+        toast(`Moved to ${cat}. The mod's category changed too (it is shared by all its patches).`);
+      },
+    });
     const render = () => {
       clear(listEl);
       const f = q.value.toLowerCase();
+      const none = voiceFilter.value === '-';
+      const shown = none ? [] : patches.filter((p) => (!voiceFilter.value || p.voicePackId === voiceFilter.value) && (!f || p.name.toLowerCase().includes(f) || p.voicePack.toLowerCase().includes(f)));
+      const nDone = shown.filter(isDone).length;
+      const seg = (k, label, n) => h('span.chip' + (show === k ? '.on' : ''), { title: k === 'work' ? 'Patches with lines still to generate, Phase 1 lines to review or warnings' : k === 'done' ? 'Patches where every line has a take' : 'Every patch', onclick: () => { show = k; store.set('patches-show:' + key, k); render(); } }, label, h('span.n', n));
+      clear(showEl).append(none ? null : seg('all', 'All', shown.length), none ? null : seg('work', 'Work left', shown.length - nDone), none ? null : seg('done', 'Complete', nDone));
       const cats = [...s.settings.categories, ...new Set(patches.map((p) => p.category).filter((c) => !s.settings.categories.includes(c)))];
+      const empty = [];
       for (const cat of cats) {
-        const none = voiceFilter.value === '-';
-        const list = none ? [] : patches.filter((p) => p.category === cat && (!voiceFilter.value || p.voicePackId === voiceFilter.value) && (!f || p.name.toLowerCase().includes(f) || p.voicePack.toLowerCase().includes(f)));
-        if (vcPage && !list.length) continue;
+        const inCat = shown.filter((p) => p.category === cat);
+        const list = inCat.filter((p) => show === 'all' || (show === 'done') === isDone(p));
+        if (!inCat.length) { if (!vcPage) empty.push(cat); continue; }
+        if (!list.length) continue;
+        const work = list.filter((p) => !isDone(p)), done = list.filter(isDone);
         const isOpen = !collapsed[cat];
+        const lines = list.reduce((a, p) => a + linesOf(p), 0);
         const sec = h('div.cat',
           h('div.cat-head', { title: isOpen ? 'Click to fold' : 'Click to unfold', onclick: () => { collapsed[cat] = isOpen; store.set('cats-collapsed:' + key, collapsed); render(); } },
-            h('span.caret', isOpen ? '▾' : '▸'), h('h3', cat), h('span.faint', list.length || (none ? '' : 'empty · drop a patch here'))),
-          isOpen && list.length ? h('div.rows1', list.map(card)) : null);
-        dragTarget(sec, {
-          accepts: (p) => (p && p.modIds && p.category !== cat ? `Move to ${cat}` : null),
-          onDrop: async (p) => {
-            for (const mid of p.modIds) await rpc('mod.setCategory', { id: mid, category: cat });
-            await go(vcPage ? 'vc' : 'patches');
-            toast(`Moved to ${cat}. The mod's category changed too (it is shared by all its patches).`);
-          },
-        });
+            h('span.caret', isOpen ? '▾' : '▸'), h('h3', cat), h('span.faint', `${list.length} patch${list.length === 1 ? '' : 'es'} · ${lines.toLocaleString()} lines`),
+            h('div.spacer'), work.length ? h('span.cat-work', `${work.length} with work left`) : h('span.cat-done', 'all complete ✓')),
+          isOpen && work.length ? h('div.rows1', work.map(card)) : null,
+          isOpen && done.length ? h('div.pchips', done.map((p) => chipOf(p, !voiceFilter.value))) : null);
+        dropTo(sec, cat);
         listEl.append(sec);
+      }
+      if (empty.length) {
+        listEl.append(h('div.cat-empty', h('span.faint', none ? 'Categories: ' : 'Empty: '),
+          empty.map((c) => { const e = h('span.cat-empty-name', { title: 'No patches here yet. Drop a patch on it to move it here.' }, c); dropTo(e, c); return e; })));
       }
     };
     q.addEventListener('input', render);
     voiceFilter.addEventListener('change', () => { store.set('patches-voice:' + key, voiceFilter.value); render(); });
     render();
-    return h('div.pane', h('div.row', { style: { marginBottom: '12px' } }, searchLamp(q), voiceFilter), listEl);
+    return h('div.pane', h('div.row', { style: { marginBottom: '8px' } }, searchLamp(q), voiceFilter), showEl, listEl);
   }
 
   const first = s.settings.lastVoicePackId || s.voicePacks[0].id;

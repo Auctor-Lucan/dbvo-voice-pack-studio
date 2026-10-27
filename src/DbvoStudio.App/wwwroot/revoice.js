@@ -1,6 +1,6 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
@@ -35,13 +35,14 @@ export async function revoiceListView() {
     return view;
   }
   body.append(h('div.cat', h('div.cat-head', h('h3', 'Revoice projects'), h('span.faint', list.length)),
-    h('div.rows3', list.map((x) => h('div.prow', { title: 'Open this project', onclick: () => go('revoice', { id: x.id }) },
+    h('div.rows3', list.filter((x) => !(x.lines && x.generated >= x.lines)).map((x) => h('div.prow', { title: 'Open this project', onclick: () => go('revoice', { id: x.id }) },
       h('div.row', h('span.title.ellipsis.grow', x.name), x.newVoiceTypes ? h('span.badge.b-player', { title: 'Has new voice types (SkyPatcher + FLM)' }, `${x.newVoiceTypes} new voice type(s)`) : null),
       h('div.faint.ellipsis', { title: x.targets.join(', ') }, x.targets.join(', ') || 'no plugins yet'),
       h('div.prow-stats',
         h('div.grow', h('div.bar' + (x.lines && x.generated >= x.lines ? '.ok' : ''), h('div.bar-fill', { style: { width: (x.lines ? (100 * x.generated) / x.lines : 0) + '%' } }))),
         h('span.mono', `${x.generated} / ${x.lines}`),
-        h('span.left', h('b', String(x.speakers)), ' speakers')))))));
+        h('span.left', h('b', String(x.speakers)), ' speakers'))))),
+    pdoneChips(list.filter((x) => x.lines && x.generated >= x.lines), (x) => go('revoice', { id: x.id }), (x) => `${x.lines}`, 'every line has a take')));
   return view;
 
   async function create() {

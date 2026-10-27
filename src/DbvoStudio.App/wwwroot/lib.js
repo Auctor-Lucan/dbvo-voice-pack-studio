@@ -246,6 +246,13 @@ export function dragSource(el, { data, label }) {
   });
 }
 
+/** Finished projects in a list page, as small chips after the cards of those with work left. */
+export function pdoneChips(list, open, num, why) {
+  if (!list.length) return null;
+  return h('div.pchips', { style: { padding: '10px 0 2px' } }, list.map((x) => h('div.pchip', { title: `${x.name} · ${why}. Click to open.`, onclick: () => open(x) },
+    h('span.pchip-name', x.name), h('span.mono.faint', num(x)))));
+}
+
 /** Wraps a search box with a magnifying glass that lights up while a search is active (lines are hidden), click to clear. */
 export function searchLamp(q) {
   if (q.__lamp) return q.__lamp;
