@@ -337,9 +337,10 @@ export async function patchView(id) {
       { id: 'spoken', title: vc ? 'Text for the LIP (and TTS without a source)' : 'Spoken text (tags anywhere)', flex: 1.3, width: 320, render: (l) => spokenCell(l) },
       { id: 'qa', title: 'QA', tip: 'Check takes: ⚠ flagged, ✓ passed, empty = not checked. Click to sort the flagged ones to the top.', width: 44, resizable: false, align: 'center',
         sort: (l) => { const t = flaggedTake(l) || selTake(l); return !t || !t.qa ? 2 : t.qa.flags.length ? 0 : 1; }, render: (l) => qaBadge(l) },
-      { id: 'take', title: 'Take', width: 84, resizable: false, render: (l) => h('span.row', { style: { gap: '5px' } }, statusDot(l),
+      { id: 'take', title: 'Take', width: 108, resizable: false, render: (l) => h('span.row', { style: { gap: '5px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s); #${(l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot} is used. Click to play, switch, keep or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } },
           l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—'),
+        (selTake(l) || {}).original ? h('span.imp-mark', { title: 'The take in use is an imported .fuz, kept as it is' }, 'fuz') : null,
         effectIcon(l.effect, () => applyFx([l.lineId], '')), softenIcon(l.soften, () => applySoften([l.lineId], ''))) },
       { id: 'act', title: '', width: 176, resizable: false, render: (l) => rowIcons(l) },
     ].filter(Boolean),
@@ -435,6 +436,18 @@ export async function patchView(id) {
       const r = await rpc('patch.purgeTakes', { id, lineIds: ids });
       patch = r.patch; reindex(); grid.setRows(visible()); renderInspector();
       toast(`${r.removed} take(s) deleted.`);
+    } catch (e) { fail(e); }
+  }
+
+  async function purgeOmitted() {
+    const ls = patch.lines.filter((l) => l.omitted && l.takes.some((t) => !t.kept));
+    if (!ls.length) { toast('No omitted line has a take.'); return; }
+    const n = ls.reduce((a, l) => a + l.takes.filter((t) => !t.kept).length, 0);
+    if (!(await confirmBox('Delete the takes of omitted lines?', `${n.toLocaleString()} take(s) of ${ls.length.toLocaleString()} omitted line(s) are deleted with their files. Takes marked ★ stay. Files you exported earlier stay in your folders until the next export offers to remove them. This can't be undone.`, 'Delete', true))) return;
+    try {
+      const r = await rpc('patch.deleteOmittedTakes', { id });
+      patch = r.patch; reindex(); grid.setRows(visible()); renderCounts(); renderActions(); renderInspector();
+      toast(`${r.removed.toLocaleString()} take(s) deleted.`);
     } catch (e) { fail(e); }
   }
 
@@ -746,6 +759,7 @@ export async function patchView(id) {
       stale: L.filter((l) => isEdited(l) && !l.omitted && !l.excluded).length,
       omitted: L.filter((l) => l.omitted).length,
       nonomitted: L.filter((l) => !l.omitted).length,
+      imported: L.filter((l) => { const t = l.takes.find((x) => x.id === l.selectedTakeId); return t && t.original; }).length,
       marked: L.filter((l) => l.marked).length,
       excluded: L.filter((l) => l.excluded).length,
       active: L.filter((l) => !l.omitted && !l.excluded).length,
@@ -766,6 +780,7 @@ export async function patchView(id) {
         case 'pending': if (!pendingLine(l)) return false; break;
         case 'current': if (!(l.takes.length && !isEdited(l) && !l.omitted && !l.excluded)) return false; break;
         case 'nonomitted': if (l.omitted) return false; break;
+        case 'imported': { const t = l.takes.find((x) => x.id === l.selectedTakeId); if (!(t && t.original)) return false; break; }
         case 'stale': if (!(isEdited(l) && !l.omitted && !l.excluded)) return false; break;
         case 'failed': if (l.status !== 'Failed') return false; break;
         case 'omitted': if (!l.omitted) return false; break;
@@ -797,6 +812,7 @@ export async function patchView(id) {
       opt('marked', 'Flagged', 'Flagged to revisit'), opt('excluded', 'Excluded', 'Won\'t generate or export'),
       opt('omitted', 'Omitted', 'Left out because a ticked reference topic file (e.g. the base game pack) already has the line'),
       vc ? opt('nosource', 'No source file', 'No file of the other voice pack was found for these lines') : null, opt('p1', 'Edited in Phase 1', 'The in-game line was edited in Phase 1'),
+      opt('imported', 'Imported .fuz', 'Lines whose take in use is an imported .fuz (Import ▾ → An earlier voice pack), kept as it is'),
       opt('suggestions', 'AI suggestions', 'AI tag suggestions waiting for Accept or Undo'),
       opt('qa', 'QA flagged', 'Check takes flagged the take in use: the words differ from the line, it is too quiet, or it clips'),
       opt('approved', 'Approved', 'Approved in Review'), review || filter === 'unapproved' ? opt('unapproved', 'Not approved', 'Lines with a take that are not approved yet') : null,
@@ -884,6 +900,7 @@ export async function patchView(id) {
     takesBtn.addEventListener('click', () => popupMenu(takesBtn, [
       { label: `Keep only the used take · ticked lines (${sel.length})`, sub: 'Deletes the other takes and their files (kept ★ takes stay)', onclick: () => sel.length ? purge(sel) : toast('Tick the box of one or more rows first.', true) },
       { label: 'Keep only the used take · all lines', sub: 'Deletes every take that is not in use or kept ★', onclick: () => purge(null) },
+      { label: `Delete all takes · omitted lines (${patch.lines.filter((l) => l.omitted && l.takes.some((t) => !t.kept)).length})`, sub: 'Omitted lines are never exported: their takes and files go, except kept ★ ones', onclick: purgeOmitted },
     ]));
     const imp = h('button.btn', { title: 'Bring in takes or text from elsewhere' }, 'Import ▾');
     imp.addEventListener('click', () => popupMenu(imp, [

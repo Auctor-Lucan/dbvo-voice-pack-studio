@@ -738,6 +738,35 @@ public sealed partial class Phase2Service
         return n;
     }
 
+    /// <summary>
+    /// Deletes the takes (and their files) of every omitted line, keeping takes marked ★. Lines left without a take are
+    /// not filled again from the WAV + LIP folder.
+    /// </summary>
+    public int DeleteOmittedTakes(DbvoPatch patch)
+    {
+        var root = _lib.PatchFolder(patch.Id);
+        int n = 0;
+        foreach (var line in patch.Lines.Where(l => l.IsOmitted))
+        {
+            foreach (var t in line.Takes.Where(t => !t.Kept).ToList())
+            {
+                var dir = Path.GetDirectoryName(Path.Combine(root, t.WavPath));
+                try { if (dir != null && Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
+                try { var dry = Path.Combine(root, "dry", t.Id + ".wav"); if (File.Exists(dry)) File.Delete(dry); } catch { }
+                line.Takes.Remove(t);
+                n++;
+            }
+            if (line.Takes.Count == 0) { line.SelectedTakeId = null; line.Status = Phase2Status.Omitted; line.NoAdopt = true; }
+            else
+            {
+                if (!line.Takes.Any(t => t.Id == line.SelectedTakeId)) line.SelectedTakeId = line.Takes.Last().Id;
+                line.RefreshStale();
+            }
+        }
+        _lib.Save(patch);
+        return n;
+    }
+
     /// <summary>Seconds of audio in a WAV file, from its header (0 if unreadable).</summary>
     public static double WavSeconds(string path)
     {

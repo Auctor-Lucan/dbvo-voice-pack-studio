@@ -280,6 +280,13 @@ public sealed partial class Backend
                     int n = new Phase2Service(_lib, Runtime()).PurgeUnusedTakes(patch, ids);
                     return new { removed = n, patch = PatchDto(patch) };
                 });
+            case "patch.deleteOmittedTakes":
+                return await Locked(() =>
+                {
+                    var patch = LoadPatch(S(p, "id"));
+                    int n = new Phase2Service(_lib, Runtime()).DeleteOmittedTakes(patch);
+                    return new { removed = n, patch = PatchDto(patch) };
+                });
             case "audio.preview":
             {
                 // Any WAV or .fuz as a playable data URL (.fuz audio is decoded with ffmpeg).
