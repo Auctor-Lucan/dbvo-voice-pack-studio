@@ -90,7 +90,7 @@ export async function modsView() {
               fixes ? h('span', h('b', fixes), ' in DBVO Fix') : h('span', 'no DBVO Fix needed'),
               m.plugins.some((p) => p.playerNames) ? h('span', h('b', m.plugins.reduce((a, p) => a + (p.playerNames || 0), 0)), ' player-name') : null));
         })),
-        done.length ? h('div.pchips', { style: { padding: '8px 0' } }, done.map((m) => h('div.pchip', { onclick: () => go('mod', { id: m.id }), title: `${m.name}${m.version ? ' v' + m.version : ''} · ${m.plugins.map((p) => p.fileName).join(', ')} · reviewed. Click to open.` },
+        done.length ? h('div.pchips', { style: { padding: '4px 14px 12px' } }, done.map((m) => h('div.pchip', { onclick: () => go('mod', { id: m.id }), title: `${m.name}${m.version ? ' v' + m.version : ''} · ${m.plugins.map((p) => p.fileName).join(', ')} · reviewed. Click to open.` },
           h('span.pchip-name', m.name), h('span.mono.faint', linesOfMod(m).toLocaleString())))) : null));
     }
   };

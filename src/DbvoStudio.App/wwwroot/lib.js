@@ -249,7 +249,7 @@ export function dragSource(el, { data, label }) {
 /** Finished projects in a list page, as small chips after the cards of those with work left. */
 export function pdoneChips(list, open, num, why) {
   if (!list.length) return null;
-  return h('div.pchips', { style: { padding: '10px 0 2px' } }, list.map((x) => h('div.pchip', { title: `${x.name} · ${why}. Click to open.`, onclick: () => open(x) },
+  return h('div.pchips', { style: { padding: '0 12px 12px' } }, list.map((x) => h('div.pchip', { title: `${x.name} · ${why}. Click to open.`, onclick: () => open(x) },
     h('span.pchip-name', x.name), h('span.mono.faint', num(x)))));
 }
 
