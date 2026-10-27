@@ -1177,6 +1177,7 @@ export async function patchView(id) {
         h('div.kv', rows.flatMap(([k, v]) => [h('div', k), h('div', String(v))])),
         mode === 'all' ? h('div.banner.warn', { style: { margin: 0 } }, 'Every line gets a new take, which becomes the one used. Earlier takes stay in the take list.') : null,
         missingVoice ? h('div.banner.bad', { style: { margin: 0 } }, 'Pick a voice in the toolbar first.') : null,
+        est.standardWarning ? h('div.banner.warn', { style: { margin: 0 } }, est.standardWarning) : null,
       ], [{ label: 'Cancel', value: false }, { label: `${vc ? 'Convert' : 'Generate'} ${est.count} line(s)`, primary: true, value: !missingVoice }], { help: 'generating' });
       if (!ok) { markInFlight(null); return; }
       markInFlight(mode === 'selected' ? lineIds : patch.lines.filter(mode === 'marked' ? (l) => l.marked && canGen(l) : mode === 'all' ? (l) => !l.omitted && !l.excluded && canGen(l) : mode === 'edited' ? editedLine : pendingLine).map((l) => l.lineId));

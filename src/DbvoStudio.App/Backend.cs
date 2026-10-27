@@ -1049,6 +1049,7 @@ public sealed partial class Backend
                 missingSource = patch.Lines.Count(l => !l.IsOmitted && !l.Excluded && l.SourceWav == null),
                 ttsCount = tts.Count, ttsCharacters = tts.Sum(l => l.Spoken.Length), ttsEngine = voice.Engine,
                 ttsVoice = voice.Engine == "voxcpm" ? voice.VoxCpm.Voice : voice.Engine == "omnivoice" ? voice.OmniVoice.Voice : voice.Eleven.VoiceName,
+                standardWarning = voice.StandardVoiceWarning(true),
             };
         }
         if (voice.Engine is "voxcpm" or "omnivoice")
@@ -1058,6 +1059,7 @@ public sealed partial class Backend
                 kind = voice.Engine, count = lines.Count, characters = lines.Sum(l => l.Spoken.Length),
                 voiceId = voice.Engine == "voxcpm" ? voice.VoxCpm.Voice : voice.OmniVoice.Voice,
                 engineSettings = voice.Engine == "voxcpm" ? (object)voice.VoxCpm : voice.OmniVoice,
+                standardWarning = voice.StandardVoiceWarning(false),
                 voice.Loudnorm, voice.GainDb, voice.TrimTailMs, voice.FadeOutMs, naming = voice.Naming.ToString(),
                 pronunciations = Phase2Service.MergePronunciations(_settings.Pronunciations, voice.Pronunciations).Count,
             };
@@ -1072,6 +1074,7 @@ public sealed partial class Backend
             voice.Loudnorm, voice.GainDb, voice.TrimTailMs, voice.FadeOutMs, naming = voice.Naming.ToString(),
             pronunciations = Phase2Service.MergePronunciations(_settings.Pronunciations, voice.Pronunciations).Count,
             dictionaries = e.PronunciationDictionaryIds.Count,
+            standardWarning = voice.StandardVoiceWarning(false),
         };
     }
 

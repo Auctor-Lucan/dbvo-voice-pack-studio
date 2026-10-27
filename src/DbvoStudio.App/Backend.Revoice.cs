@@ -613,7 +613,8 @@ public sealed partial class Backend
         var unassigned = resolved.Where(x => x.Voice == null).Select(x => x.Line.SpeakerName).Distinct().ToList();
         var groups = resolved.Where(x => x.Voice != null).GroupBy(x => x.Voice!.Id)
             .Select(g => { var v = g.First().Voice!; return new { voicePack = v.Name, color = v.Color, engine = proj.VoiceChanger ? "elevenlabs speech-to-speech" : v.Engine, lines = g.Count(), characters = g.Sum(x => x.Line.Spoken.Length),
-                speakers = g.Select(x => x.Line.SpeakerName).Distinct().OrderBy(n => n).ToList(), settings = SettingsRows(v, proj.VoiceChanger) }; })
+                speakers = g.Select(x => x.Line.SpeakerName).Distinct().OrderBy(n => n).ToList(), settings = SettingsRows(v, proj.VoiceChanger),
+                standardWarning = v.Id.StartsWith("rv-") ? null : v.StandardVoiceWarning(proj.VoiceChanger) }; })
             .ToList();
         var speaker = S(p, "speaker");
         var speakerName = speaker.Length > 0 ? proj.Lines.FirstOrDefault(l => l.SpeakerKey == speaker)?.SpeakerName : null;

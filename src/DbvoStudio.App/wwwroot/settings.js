@@ -362,7 +362,7 @@ const NEW_VOICE = () => ({
   sts: { voiceId: '', voiceName: '', modelId: 'eleven_multilingual_sts_v2', stability: 0.5, similarity: 0.75, style: 0, speakerBoost: false, seed: null, removeBackgroundNoise: false, outputFormat: 'mp3_44100_128', concurrency: 5 },
   tags: ['[whispers]', '[sighs]', '[laughs]', '[sarcastic]', '[curious]', '[excited]'],
   pronunciations: [], destinations: { wavLipFolder: '', finalRoot: '', fixFolder: '', fuzTemplate: 'Sound\\DBVO\\{packId}', releaseFolder: '' },
-  defaultReferenceIds: [], settingsLocked: false, loudnorm: false, gainDb: 0, overwriteWavLip: false, overwriteFuz: false, trimTailMs: 15, fadeOutMs: 10, softenPeaks: '',
+  standardVoices: {}, defaultReferenceIds: [], settingsLocked: false, loudnorm: false, gainDb: 0, overwriteWavLip: false, overwriteFuz: false, trimTailMs: 15, fadeOutMs: 10, softenPeaks: '',
 });
 
 async function voices(selectedId, rerender, onSelect) {
@@ -404,6 +404,31 @@ async function voices(selectedId, rerender, onSelect) {
     const i = h('input', { type: opts.type || 'text', value: obj[key] ?? '', placeholder: opts.placeholder || '', style: { width: opts.width || '100%' } });
     i.addEventListener('input', () => { obj[key] = opts.type === 'number' ? Number(i.value) : i.value; persistSoon(); if (opts.after) opts.after(); });
     return i;
+  }
+
+  // The pack's standard voice for its engine: a dropdown of that engine's voices (ElevenLabs, or the local server's)
+  function standardVoicePicker(v) {
+    const key = v.engine || 'elevenlabs';
+    v.standardVoices = v.standardVoices || {};
+    const cur = v.standardVoices[key];
+    const sel = h('select', { title: 'The standard voice for this voice pack and engine' });
+    const fill = (list, note) => {
+      clear(sel).append(h('option', { value: '' }, note || '— none —'),
+        list.map((x) => h('option', { value: x.id, selected: !!cur && x.id === cur.id }, x.name)));
+      if (cur && cur.id && !list.some((x) => x.id === cur.id)) sel.append(h('option', { value: cur.id, selected: true }, cur.name || cur.id));
+    };
+    fill([], 'Loading voices…');
+    sel.addEventListener('change', () => {
+      const o = sel.selectedOptions[0];
+      if (!sel.value) delete v.standardVoices[key]; else v.standardVoices[key] = { id: sel.value, name: o ? o.textContent : sel.value };
+      persistSoon();
+    });
+    (key === 'elevenlabs'
+      ? rpc('eleven.voices', {}).then((l) => l.map((x) => ({ id: x.voiceId, name: x.name })))
+      : rpc('engine.voices', { engine: key }).then((l) => l.map((x) => ({ id: x, name: x }))))
+      .then((l) => fill(l.sort((a, b) => a.name.localeCompare(b.name))))
+      .catch(() => fill([], key === 'elevenlabs' ? '— none (add your API key to list voices) —' : '— none (is the server running?) —'));
+    return sel;
   }
 
   function renderEditor() {
@@ -456,7 +481,8 @@ async function voices(selectedId, rerender, onSelect) {
           segmented([['Legacy', 'Legacy (DBVO 1.0.1)'], ['Dbvo2Hash', 'DBVO 2.0 hash']], v.naming, (x) => { v.naming = x; persistSoon(); renderEditor(); })),
         srow('Engine', 'ElevenLabs, or a local VoxCPM / OmniVoice server (Global Settings → General & tools). Voice, model and the engine\'s settings are picked in the Phase 2 toolbar and remembered here.',
           h('div.col', segmented([['elevenlabs', 'ElevenLabs'], ['voxcpm', 'VoxCPM'], ['omnivoice', 'OmniVoice']], v.engine || 'elevenlabs', (x) => { v.engine = x; persistSoon(); renderEditor(); }),
-            h('span.dim', v.engine === 'voxcpm' ? `VoxCPM · ${v.voxCpm.voice || 'no reference voice yet'}` : v.engine === 'omnivoice' ? `OmniVoice · ${v.omniVoice.voice || 'no reference voice yet'}` : `${v.eleven.voiceName || '— no voice picked yet —'} · ${v.eleven.modelId}`)))),
+            h('span.dim', v.engine === 'voxcpm' ? `VoxCPM · ${v.voxCpm.voice || 'no reference voice yet'}` : v.engine === 'omnivoice' ? `OmniVoice · ${v.omniVoice.voice || 'no reference voice yet'}` : `${v.eleven.voiceName || '— no voice picked yet —'} · ${v.eleven.modelId}`))),
+        srow('Standard voice', 'The voice this pack is meant to use with this engine. Projects keep the voice you last picked in the toolbar, but before any bulk generation the check warns when it isn\'t this one.', standardVoicePicker(v))),
       section('Defaults for new DBVO Patches', null,
         h('div.help', { style: { margin: '10px 0' } }, 'These are only starting points. Each new DBVO Patch copies them, with ', h('b', '{mod}'), ' replaced by the mod name, and from then on the patch\'s own folders count (Phase 2 → Folders & options).'),
         srow('WAV + LIP folder', 'e.g. C:\\DBVO Dev\\MyVoice - {mod}\\RawWav', pathField(d.wavLipFolder, (x) => { d.wavLipFolder = x; persistSoon(); renderPreview(); }, { folder: true, title: 'WAV + LIP folder (then add {mod} where the mod name goes)' })),
@@ -494,6 +520,7 @@ async function voices(selectedId, rerender, onSelect) {
   const def = NEW_VOICE();
   for (const k of ['voxCpm', 'omniVoice', 'sts']) current[k] = { ...def[k], ...(current[k] || {}) };
   current.destinations = { ...def.destinations, ...current.destinations };
+  current.standardVoices = current.standardVoices || {};
   renderEditor();
   return editor;
 }

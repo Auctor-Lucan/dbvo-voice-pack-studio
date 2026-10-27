@@ -188,6 +188,12 @@ public sealed class Destinations
 }
 
 /// <summary>A voice: its ElevenLabs settings, tags, pronunciations, naming mode and destinations.</summary>
+public sealed class VoiceRef
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+}
+
 public sealed class VoicePack
 {
     public string Id { get; set; } = NewId.Short();
@@ -217,6 +223,25 @@ public sealed class VoicePack
     public double FadeOutMs { get; set; } = 10;
     /// <summary>Soften peaks on every new take: "" (off), "standard" or "strong".</summary>
     public string SoftenPeaks { get; set; } = "";
+    /// <summary>The voice this pack is meant to use, per engine ("elevenlabs", "voxcpm", "omnivoice"; speech-to-speech uses
+    /// "elevenlabs"). Projects keep the voice last picked in the toolbar; bulk generation warns when it isn't this one.</summary>
+    public Dictionary<string, VoiceRef> StandardVoices { get; set; } = new();
+
+    /// <summary>The voice a generation uses now: the speech-to-speech target, or the engine's voice.</summary>
+    public (string Id, string Name) CurrentVoice(bool speechToSpeech) =>
+        speechToSpeech ? (Sts.VoiceId, Sts.VoiceName.Length > 0 ? Sts.VoiceName : Sts.VoiceId)
+        : Engine == "voxcpm" ? (VoxCpm.Voice, VoxCpm.Voice)
+        : Engine == "omnivoice" ? (OmniVoice.Voice, OmniVoice.Voice)
+        : (Eleven.VoiceId, Eleven.VoiceName.Length > 0 ? Eleven.VoiceName : Eleven.VoiceId);
+
+    /// <summary>A warning when a standard voice is set for this engine and the current voice is another one; else null.</summary>
+    public string? StandardVoiceWarning(bool speechToSpeech)
+    {
+        if (!StandardVoices.TryGetValue(speechToSpeech ? "elevenlabs" : Engine ?? "elevenlabs", out var s) || string.IsNullOrEmpty(s.Id)) return null;
+        var (id, name) = CurrentVoice(speechToSpeech);
+        if (id == s.Id) return null;
+        return $"The standard voice for {Name} is {(s.Name.Length > 0 ? s.Name : s.Id)}, but the current setting is {(name.Length > 0 ? name : "no voice")}.";
+    }
 }
 
 public enum Phase1Status { Active, ChangedInMod, Removed }

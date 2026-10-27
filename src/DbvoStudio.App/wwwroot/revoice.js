@@ -1079,7 +1079,8 @@ export async function revoiceView(id) {
     const groups = est.groups.map((g) => h('div.est-group',
       h('div.row', voiceChip(g.voicePack, g.color), h('span.faint', g.engine), h('div.spacer'), h('b', `${g.lines} line(s)`), h('span.faint', `${g.characters.toLocaleString()} characters`)),
       !est.speakerName && g.speakers.length ? h('div.faint', { style: { fontSize: '12px' } }, 'Speakers: ' + g.speakers.slice(0, 8).join(', ') + (g.speakers.length > 8 ? ` and ${g.speakers.length - 8} more` : '')) : null,
-      h('div.kv4', g.settings.flatMap(([k, v]) => [h('div', k), h('div', v)]))));
+      h('div.kv4', g.settings.flatMap(([k, v]) => [h('div', k), h('div', v)])),
+      g.standardWarning ? h('div.banner.warn', { style: { margin: '6px 0 0' } }, g.standardWarning) : null));
     const skipped = est.unassigned.length
       ? h('div.faint', `${est.unassigned.length} other speaker(s) have no voice yet, so their lines are not generated. To voice them, pick their voices in the Speakers tab.`,
         h('details', h('summary', 'Show their names'), h('div', { style: { fontSize: '12px', marginTop: '4px' } }, est.unassigned.join(', '))))
