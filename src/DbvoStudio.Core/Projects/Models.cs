@@ -99,6 +99,8 @@ public sealed class ElevenSettings
     public string VoiceId { get; set; } = "";
     public string VoiceName { get; set; } = "";
     public string ModelId { get; set; } = "eleven_v4";
+    /// <summary>v4 Turbo de-grain on every new take (only used with eleven_v4_turbo; see TurboDegrain).</summary>
+    public bool TurboDegrain { get; set; }
     public double Stability { get; set; } = 0.5;
     public double Similarity { get; set; } = 0.75;
     public double Style { get; set; } = 0;

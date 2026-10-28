@@ -67,3 +67,19 @@ public class TrimImportedTests : IDisposable
         Assert.False(DbvoStudio.Core.Projects.Phase2Service.TrimImported(dest, again, voice)); // already faded: not trimmed twice
     }
 }
+
+public class TurboDegrainTests
+{
+    [Fact]
+    public void Only_v4_turbo_and_low_band_untouched()
+    {
+        Assert.True(TurboDegrain.Applies("eleven_v4_turbo"));
+        Assert.False(TurboDegrain.Applies("eleven_v4"));
+        Assert.False(TurboDegrain.Applies("eleven_turbo_v2_5"));
+        // a 500 Hz tone passes through unchanged (only 3.5-10 kHz between harmonics is touched; the lift starts at 2.5 kHz)
+        var s = Enumerable.Range(0, 44100).Select(i => (short)(8000 * Math.Sin(2 * Math.PI * 500 * i / 44100.0))).ToArray();
+        var o = TurboDegrain.Process(s, 44100);
+        Assert.Equal(s.Length, o.Length);
+        Assert.True(s.Skip(4096).Take(30000).Zip(o.Skip(4096).Take(30000)).All(p => Math.Abs(p.First - p.Second) <= 40));
+    }
+}

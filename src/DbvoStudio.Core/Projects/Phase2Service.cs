@@ -647,6 +647,9 @@ public sealed partial class Phase2Service
                     }
 
                     var w = WavFile.Read(wav);
+                    // v4 Turbo de-grain (text-to-speech with eleven_v4_turbo only)
+                    if (engine is not ("sts" or LocalEngineClient.VoxCpm or LocalEngineClient.OmniVoice) && es.TurboDegrain && TurboDegrain.Applies(es.ModelId) && w.Channels == 1)
+                        w.Samples = TurboDegrain.Process(w.Samples, w.SampleRate);
                     w.TrimTailAndFade(voice.TrimTailMs, voice.FadeOutMs);
                     w.Write(wav);
 
