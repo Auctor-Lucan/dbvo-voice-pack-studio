@@ -44,3 +44,26 @@ public class AudioTests
         Assert.Equal(xwm, x);
     }
 }
+
+public class TrimImportedTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "dbvo-trim-" + Guid.NewGuid().ToString("N"));
+    public TrimImportedTests() => Directory.CreateDirectory(_dir);
+    public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
+
+    [Fact]
+    public void Imported_wav_gets_the_tail_trim_once_and_the_source_stays()
+    {
+        var voice = new DbvoStudio.Core.Projects.VoicePack();
+        var src = Path.Combine(_dir, "raw.wav");
+        new WavFile { SampleRate = 44100, Channels = 1, Samples = Enumerable.Repeat((short)3000, 44100).ToArray() }.Write(src);
+        var dest = Path.Combine(_dir, "take.wav");
+        Assert.True(DbvoStudio.Core.Projects.Phase2Service.TrimImported(src, dest, voice));
+        var t = WavFile.Read(dest);
+        Assert.Equal(44100 - 662, t.Samples.Length);
+        Assert.Equal(0, t.Samples[^1]);
+        Assert.Equal(44100, WavFile.Read(src).Samples.Length);            // the source is never changed
+        var again = Path.Combine(_dir, "again.wav");
+        Assert.False(DbvoStudio.Core.Projects.Phase2Service.TrimImported(dest, again, voice)); // already faded: not trimmed twice
+    }
+}

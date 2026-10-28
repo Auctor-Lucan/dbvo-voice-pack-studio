@@ -340,7 +340,8 @@ public sealed partial class Phase2Service
         var rel = Path.Combine("takes", line.LineId, take.Slot.ToString("00"));
         take.WavPath = Path.Combine(rel, stem + ".wav");
         take.LipPath = Path.Combine(rel, stem + ".lip");
-        FileLinks.LinkOrCopy(wav, Path.Combine(folder, take.WavPath), true);
+        if (source == "existing" && TrimImported(wav, Path.Combine(folder, take.WavPath), voice)) take.DurationSeconds = WavSeconds(Path.Combine(folder, take.WavPath));
+        else FileLinks.LinkOrCopy(wav, Path.Combine(folder, take.WavPath), true);
         FileLinks.LinkOrCopy(lip, Path.Combine(folder, take.LipPath), true);
         if (originalFuz != null && File.Exists(originalFuz))
         {
@@ -352,6 +353,33 @@ public sealed partial class Phase2Service
         line.Status = Phase2Status.Generated;
         line.LastError = null;
         return take;
+    }
+
+    /// <summary>
+    /// An imported WAV (an earlier pack, or files found in the WAV + LIP folder) gets the voice pack's tail trim and fade,
+    /// as generated takes do, so the noise some engines leave at the very end goes. A WAV that already ends in a fade to
+    /// silence (made by DBVO Studio, or trimmed before) is left as it is, so nothing is trimmed twice. The source file is
+    /// never changed: the trimmed copy is written to <paramref name="dest"/>. False: nothing written (link the original).
+    /// </summary>
+    public static bool TrimImported(string wav, string dest, VoicePack voice)
+    {
+        if (voice.TrimTailMs <= 0 && voice.FadeOutMs <= 0) return false;
+        try
+        {
+            var w = WavFile.Read(wav);
+            int ch = Math.Max(1, w.Channels), frames = w.Samples.Length / ch;
+            if (frames < w.SampleRate / 10) return false; // under 0.1 s: leave it
+            // already faded: DBVO Studio's fade ends on an exactly silent sample (raw engine output practically never does)
+            bool lastSilent = true;
+            for (int c = 0; c < ch; c++) if (w.Samples[(frames - 1) * ch + c] != 0) lastSilent = false;
+            if (lastSilent) return false;
+            w.TrimTailAndFade(voice.TrimTailMs, voice.FadeOutMs);
+            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+            if (File.Exists(dest)) File.Delete(dest);
+            w.Write(dest);
+            return true;
+        }
+        catch { return false; }
     }
 
     /// <summary>A finished WAV + LIP made outside generation (a microphone recording, converted or not) becomes a new take.</summary>
@@ -445,6 +473,10 @@ public sealed partial class Phase2Service
     }
 
     /// <summary>Apply the pronunciation dictionary (local layer) to the spoken text before sending.</summary>
+    /// <summary>The characters ElevenLabs bills for these lines: the text actually sent, with the pronunciation rules applied.</summary>
+    public static int SentCharacters(IEnumerable<Phase2Line> lines, IReadOnlyList<Pronunciation> pronunciations, string modelId) =>
+        lines.Sum(l => ApplyPronunciations(l.Spoken, pronunciations, modelId).Length);
+
     public static string ApplyPronunciations(string text, IEnumerable<Pronunciation> entries, string modelId)
     {
         var t = text;

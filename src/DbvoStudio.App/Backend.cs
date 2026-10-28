@@ -413,7 +413,7 @@ public sealed partial class Backend
                 });
             case "line2.update": return await Locked(() => UpdatePhase2Line(p));
             case "line2.bulkTags": return await Locked(() => BulkTags(p));
-            case "patch.estimate": return await Locked(() => Estimate(p));
+            case "patch.estimate": return await EstimateAsync(p);
             case "patch.generate": return StartGenerate(p);
             case "job.cancel": _jobCts?.Cancel(); return true;
             case "patch.exportWavLip":
@@ -1026,6 +1026,43 @@ public sealed partial class Backend
         }
         _lib.Save(patch);
         return new { changed = n, patch = PatchDto(patch) };
+    }
+
+    /// <summary>Credits per character for an ElevenLabs model, from its model_rates (null when the model list can't be read).</summary>
+    private async Task<double?> CreditRate(string modelId)
+    {
+        try
+        {
+            if (_models == null) { using var c = Client(); _models = await c.GetModelsAsync(); }
+            var m = _models.FirstOrDefault(x => x.ModelId == modelId);
+            return m?.Rates == null ? null : m.Rates.CharacterCostMultiplier * m.Rates.CostDiscountMultiplier;
+        }
+        catch { return null; }
+    }
+
+    private async Task<object?> EstimateAsync(JsonElement p)
+    {
+        // Under the lock: the usual estimate, plus the characters actually sent (pronunciation rules applied).
+        object? o = null; int sent = 0; string? modelId = null;
+        await Locked(() =>
+        {
+            o = Estimate(p);
+            var patch = LoadPatch(S(p, "id"));
+            var voice = LoadVoice(patch.VoicePackId);
+            if (voice.Engine is "voxcpm" or "omnivoice") return null; // local engines: no credits
+            var lines = SelectLines(patch, p);
+            if (patch.Kind == "vc") lines = lines.Where(l => l.SourceWav == null).ToList(); // only text-to-speech lines bill characters
+            modelId = voice.Eleven.ModelId;
+            sent = Phase2Service.SentCharacters(lines, Phase2Service.MergePronunciations(_settings.Pronunciations, voice.Pronunciations), modelId);
+            return null;
+        });
+        if (modelId == null || o == null) return o;
+        // Outside the lock: the model's credit rate from ElevenLabs' model list (cached).
+        var rate = string.IsNullOrWhiteSpace(Secrets.Unprotect(_settings.ElevenLabsApiKey)) ? null : await CreditRate(modelId);
+        var d = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(o, JsonOptions), JsonOptions)!;
+        var extra = JsonSerializer.SerializeToElement(new { sentCharacters = sent, creditRate = rate, credits = rate == null ? (int?)null : (int)Math.Ceiling(sent * rate.Value), rateModel = modelId }, JsonOptions);
+        foreach (var kv in extra.EnumerateObject()) d[kv.Name] = kv.Value.Clone();
+        return d;
     }
 
     private object Estimate(JsonElement p)

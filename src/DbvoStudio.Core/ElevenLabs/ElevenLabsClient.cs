@@ -25,6 +25,14 @@ public sealed class ElevenModel
     [JsonPropertyName("can_use_speaker_boost")] public bool CanUseSpeakerBoost { get; set; }
     [JsonPropertyName("token_cost_factor")] public double TokenCostFactor { get; set; } = 1;
     [JsonPropertyName("can_do_voice_conversion")] public bool CanDoVoiceConversion { get; set; }
+    /// <summary>Credits per character: character_cost_multiplier × cost_discount_multiplier (v4 Turbo / Flash 0.5).</summary>
+    [JsonPropertyName("model_rates")] public ElevenModelRates? Rates { get; set; }
+}
+
+public sealed class ElevenModelRates
+{
+    [JsonPropertyName("character_cost_multiplier")] public double CharacterCostMultiplier { get; set; } = 1;
+    [JsonPropertyName("cost_discount_multiplier")] public double CostDiscountMultiplier { get; set; } = 1;
 }
 
 public sealed class ElevenSubscription

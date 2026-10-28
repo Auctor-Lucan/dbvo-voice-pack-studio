@@ -1188,9 +1188,14 @@ export async function patchView(id) {
       }
       let rows;
       let missingVoice = !est.voiceId;
+      // credits: the characters actually sent (pronunciation rules applied) × the model's credit rate from ElevenLabs
+      const fmtRate = (r) => (Math.round(r * 1000) / 1000).toString();
+      const creditsText = () => (est.credits != null
+        ? `${est.credits.toLocaleString()}${est.creditRate !== 1 ? ` (${est.rateModel}: ${fmtRate(est.creditRate)} credit per character)` : ''}`
+        : `≈ ${(est.sentCharacters ?? est.characters).toLocaleString()} (the model's rate couldn't be read; 1 per character assumed)`);
       if (est.kind === 'vc') {
         rows = [['Converted (speech-to-speech)', est.srcCount],
-          ...(est.ttsCount ? [['Text-to-speech (no source file)', `${est.ttsCount} line(s) · ${est.ttsCharacters.toLocaleString()} characters ≈ credits · ${est.ttsEngine}${est.ttsVoice ? ' · ' + est.ttsVoice : ''}`]] : []),
+          ...(est.ttsCount ? [['Text-to-speech (no source file)', `${est.ttsCount} line(s) · ${(est.sentCharacters ?? est.ttsCharacters).toLocaleString()} characters${est.ttsEngine === 'elevenlabs' ? ' · ' + creditsText() + ' credits' : ''} · ${est.ttsEngine}${est.ttsVoice ? ' · ' + est.ttsVoice : ''}`]] : []),
           ['Source audio (billed by length)', `${est.seconds.toFixed(0)} s ≈ ${(est.seconds / 60).toFixed(1)} min`],
           ['Target voice', est.voice || est.voiceId || '— none —'], ['Model', est.model], ['Stability', est.stability], ['Similarity', est.similarity], ['Style', est.style],
           ['Speaker boost', est.speakerBoost ? 'ON' : 'off'], ['Remove background noise', est.removeBackgroundNoise ? 'ON' : 'off'], ['Seed', est.seed ?? 'random'],
@@ -1203,7 +1208,7 @@ export async function patchView(id) {
       } else {
         const s = est.settings;
         rows = [
-          ['Lines', est.count], ['Characters (≈ credits)', est.characters.toLocaleString()],
+          ['Lines', est.count], ['Characters sent', (est.sentCharacters ?? est.characters).toLocaleString()], ['Credits', creditsText()],
           ['Voice', est.voice || est.voiceId || '— none —'], ['Model', est.model],
           ['Stability', s.stability], ['Similarity', s.similarityBoost],
           ...(s.style != null ? [['Style', s.style]] : []),
