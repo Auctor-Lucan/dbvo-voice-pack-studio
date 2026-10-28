@@ -554,10 +554,16 @@ export async function patchView(id) {
 
   // Format, seed and concurrency are set once and rarely touched: they live behind one button.
   const FORMAT_NAME = { mp3_44100_128: 'MP3 128', mp3_44100_192: 'MP3 192', pcm_44100: 'PCM 44.1k', pcm_24000: 'PCM 24k', pcm_22050: 'PCM 22k', pcm_16000: 'PCM 16k' };
+  // Clean pauses: a voice pack setting for every new take, whatever the engine or model
+  function cleanRow() {
+    return h('div.clean-row',
+      switchEl(!!voice.cleanPauses, (v) => setIn(voice, 'cleanPauses', v), 'Clean pauses', { disabled: voice.settingsLocked, title: 'Every new take: rumble below 80 Hz is removed and noisy pauses are turned down (up to 15 dB, never muted). Words, breaths next to words and fading endings are left alone.' }),
+      h('div.faint', 'Removes low rumble and turns down noise in pauses. The voice is untouched. New takes only.'));
+  }
   function outputGroup(fields, o) {
-    const sum = `${FORMAT_NAME[o.outputFormat] || o.outputFormat || '—'} · ${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once`;
+    const sum = `${FORMAT_NAME[o.outputFormat] || o.outputFormat || '—'} · ${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once${voice.cleanPauses ? ' · clean pauses on' : ''}`;
     const btn = h('button.btn.sm', { title: `Output: ${sum}. Click to change the audio format, seed and how many lines are requested at once.` }, `${FORMAT_NAME[o.outputFormat] || 'Format'} ▾`);
-    btn.onclick = () => popover(btn, fields);
+    btn.onclick = () => popover(btn, () => [...fields(), cleanRow()]);
     return grp('Output', btn);
   }
 

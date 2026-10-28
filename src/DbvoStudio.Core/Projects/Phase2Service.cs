@@ -647,6 +647,7 @@ public sealed partial class Phase2Service
                     }
 
                     var w = WavFile.Read(wav);
+                    if (voice.CleanPauses) w.Samples = CleanPauses.Process(w.Samples, w.SampleRate, w.Channels);
                     w.TrimTailAndFade(voice.TrimTailMs, voice.FadeOutMs);
                     w.Write(wav);
 

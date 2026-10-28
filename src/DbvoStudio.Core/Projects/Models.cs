@@ -223,6 +223,8 @@ public sealed class VoicePack
     public double FadeOutMs { get; set; } = 10;
     /// <summary>Soften peaks on every new take: "" (off), "standard" or "strong".</summary>
     public string SoftenPeaks { get; set; } = "";
+    /// <summary>Clean pauses on every new take: rumble below 80 Hz removed, noisy pauses turned down (see CleanPauses).</summary>
+    public bool CleanPauses { get; set; }
     /// <summary>The voice this pack is meant to use, per engine ("elevenlabs", "voxcpm", "omnivoice"; speech-to-speech uses
     /// "elevenlabs"). Projects keep the voice last picked in the toolbar; bulk generation warns when it isn't this one.</summary>
     public Dictionary<string, VoiceRef> StandardVoices { get; set; } = new();

@@ -68,3 +68,28 @@ public class TrimImportedTests : IDisposable
     }
 }
 
+
+public class CleanPausesTests
+{
+    [Fact]
+    public void Noisy_pause_goes_down_and_the_voice_stays()
+    {
+        const int sr = 44100;
+        var rnd = new Random(1);
+        // 0.5 s "voice" (300 Hz at -20 dBFS), 1 s pause with -60 dBFS noise, 0.5 s voice
+        var s = new short[sr * 2];
+        for (int i = 0; i < s.Length; i++)
+        {
+            bool voice = i < sr / 2 || i >= sr * 3 / 2;
+            double v = voice ? 0.1 * Math.Sin(2 * Math.PI * 300 * i / sr) : 0.001 * (rnd.NextDouble() * 2 - 1);
+            s[i] = (short)Math.Round(v * 32767);
+        }
+        var o = CleanPauses.Process(s, sr);
+        Assert.Equal(s.Length, o.Length);
+        static double Rms(short[] x, int a, int b) => Math.Sqrt(x.Skip(a).Take(b - a).Average(v => (double)v * v));
+        double before = Rms(s, sr * 3 / 4, sr * 5 / 4), after = Rms(o, sr * 3 / 4, sr * 5 / 4);
+        Assert.True(20 * Math.Log10(after / before) < -10);                           // the middle of the pause: down by 10+ dB
+        double vb = Rms(s, sr / 10, sr * 4 / 10), va = Rms(o, sr / 10, sr * 4 / 10);
+        Assert.InRange(20 * Math.Log10(va / vb), -0.3, 0.3);                          // the voice: unchanged
+    }
+}
