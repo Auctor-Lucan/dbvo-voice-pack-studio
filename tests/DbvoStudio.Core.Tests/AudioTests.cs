@@ -69,7 +69,7 @@ public class TrimImportedTests : IDisposable
 }
 
 
-public class CleanPausesTests
+public class PauseNoiseReductionTests
 {
     [Fact]
     public void Noisy_pause_goes_down_and_the_voice_stays()
@@ -84,7 +84,7 @@ public class CleanPausesTests
             double v = voice ? 0.1 * Math.Sin(2 * Math.PI * 300 * i / sr) : 0.001 * (rnd.NextDouble() * 2 - 1);
             s[i] = (short)Math.Round(v * 32767);
         }
-        var o = CleanPauses.Process(s, sr);
+        var o = PauseNoiseReduction.Process(s, sr);
         Assert.Equal(s.Length, o.Length);
         static double Rms(short[] x, int a, int b) => Math.Sqrt(x.Skip(a).Take(b - a).Average(v => (double)v * v));
         double before = Rms(s, sr * 3 / 4, sr * 5 / 4), after = Rms(o, sr * 3 / 4, sr * 5 / 4);

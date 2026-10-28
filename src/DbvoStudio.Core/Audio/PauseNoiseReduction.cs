@@ -1,12 +1,12 @@
 namespace DbvoStudio.Core.Audio;
 
 /// <summary>
-/// Clean pauses: removes rumble below 80 Hz (a 4th-order high-pass, where no voice has anything) and turns quiet
+/// Noise-reduced pauses: removes rumble below 80 Hz (a 4th-order high-pass, where no voice has anything) and turns quiet
 /// stretches down: anything at least 30 dB below the line's speech level is lowered by up to 15 dB (never muted), with a
 /// 6 dB soft knee. It opens 10 ms before the voice comes back and holds 120 ms after it stops (3 ms attack, 200 ms
 /// release), so words, breaths next to words and fading endings are left alone. Length and timing don't change.
 /// </summary>
-public static class CleanPauses
+public static class PauseNoiseReduction
 {
     public static short[] Process(short[] s, int rate, int channels = 1)
     {

@@ -362,7 +362,7 @@ const NEW_VOICE = () => ({
   sts: { voiceId: '', voiceName: '', modelId: 'eleven_multilingual_sts_v2', stability: 0.5, similarity: 0.75, style: 0, speakerBoost: false, seed: null, removeBackgroundNoise: false, outputFormat: 'mp3_44100_128', concurrency: 5 },
   tags: ['[whispers]', '[sighs]', '[laughs]', '[sarcastic]', '[curious]', '[excited]'],
   pronunciations: [], destinations: { wavLipFolder: '', finalRoot: '', fixFolder: '', fuzTemplate: 'Sound\\DBVO\\{packId}', releaseFolder: '' },
-  standardVoices: {}, cleanPauses: false, defaultReferenceIds: [], settingsLocked: false, loudnorm: false, gainDb: 0, overwriteWavLip: false, overwriteFuz: false, trimTailMs: 15, fadeOutMs: 10, softenPeaks: '',
+  standardVoices: {}, noiseReducedPauses: false, defaultReferenceIds: [], settingsLocked: false, loudnorm: false, gainDb: 0, overwriteWavLip: false, overwriteFuz: false, trimTailMs: 15, fadeOutMs: 10, softenPeaks: '',
 });
 
 async function voices(selectedId, rerender, onSelect) {
@@ -499,8 +499,8 @@ async function voices(selectedId, rerender, onSelect) {
         srow('Tail trim', 'Removes the end-of-clip artefact before the LIP is made.', h('div.row', txt(v, 'trimTailMs', { type: 'number', width: '80px' }), h('span.dim', 'ms cut, then'), txt(v, 'fadeOutMs', { type: 'number', width: '80px' }), h('span.dim', 'ms fade-out'))),
         srow('Soften peaks', 'On every new take: hard consonants (t, d, g, k) that spike far above the voice are turned down, so they don\'t distort at a high in-game gain. Standard limits peaks to 8 dB above the speech level, Strong to 6 dB. Existing takes: Phase 2 → Post-processing ▾.',
           segmented([['', 'Off'], ['standard', 'Standard'], ['strong', 'Strong']], v.softenPeaks || '', (x) => { v.softenPeaks = x; persistSoon(); })),
-        srow('Clean pauses', 'On every new take, with any engine or model: rumble below 80 Hz is removed and noisy pauses (30 dB or more below the voice) are turned down by up to 15 dB, never muted. It opens just before the voice and holds after it, so words, breaths and fading endings are left alone. Also in the Phase 2 toolbar under Output.',
-          switchEl(!!v.cleanPauses, (x) => { v.cleanPauses = x; persistSoon(); })),
+        srow('Noise-reduced pauses', 'On every new take, with any engine or model: rumble below 80 Hz is removed and noisy pauses (30 dB or more below the voice) are turned down by up to 15 dB, never muted. It opens just before the voice and holds after it, so words, breaths and fading endings are left alone. Also in the Phase 2 toolbar under Output.',
+          switchEl(!!v.noiseReducedPauses, (x) => { v.noiseReducedPauses = x; persistSoon(); })),
         srow('Loudness normalization', 'EBU R128, −16 LUFS. Off keeps the original DBVO Voice Pack Maker level.', switchEl(v.loudnorm, (x) => { v.loudnorm = x; persistSoon(); })),
         srow('Gain', null, h('div.row', txt(v, 'gainDb', { type: 'number', width: '80px' }), h('span.dim', 'dB')))),
       section('Behaviour', null,

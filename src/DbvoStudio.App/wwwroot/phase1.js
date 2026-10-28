@@ -298,7 +298,7 @@ export async function modView(id) {
   const view = h('div.view.work');
   const head = h('div.view-head');
   const hint = h('div.hint', h('b', 'Review flagged lines'), ' (BROKEN LINE, TOO LONG WILL CTD, PLAYER NAME), then ', h('b', 'Continue to Phase 2'), '. ',
-    'A DBVO Fix plugin is only made when at least one line needs fixing; a clean plugin gets none. ',
+    'A DBVO Fix plugin is only made when at least one line needs fixing; a plugin with no edited lines gets none. ',
     'Your edits are saved as you go. In Phase 2 they are written for you to the patch\'s DBVO Fix folder and its final folder, or use ', h('b', 'Export…'), ' (top right) to extract them anywhere now.');
   const banners = h('div');
   const tabs = h('div.filters');
@@ -593,7 +593,7 @@ export async function modView(id) {
     clear(tabs);
     if (!mod.plugins.length) { tabs.classList.add('hidden'); return; }
     tabs.classList.remove('hidden');
-    const label = (p) => `${p.fileName}  ·  ${p.isTopicFile ? 'topic file' : p.needsFix ? `fix ${p.fixes}` : 'clean'}${p.unreviewed ? `  ·  ${p.unreviewed} to review` : ''}`;
+    const label = (p) => `${p.fileName}  ·  ${p.isTopicFile ? 'topic file' : p.needsFix ? `fix ${p.fixes}` : 'no fix'}${p.unreviewed ? `  ·  ${p.unreviewed} to review` : ''}`;
     const sel = h('select.mono', { title: 'The plugin (or topic file) you are working on', style: { maxWidth: '520px' } },
       mod.plugins.map((p) => h('option', { value: p.fileName, selected: p === plugin }, label(p))));
     sel.addEventListener('change', () => { plugin = mod.plugins.find((p) => p.fileName === sel.value); save(); renderAll(); });
@@ -724,7 +724,7 @@ export async function modView(id) {
       return h('div.help.bad',
         h('p', h('b', 'BROKEN LINE. '), 'The script can\'t make this line voice-ready on its own: usually an alias placeholder like <Alias=…>, asterisks such as *laughs*, or a < or parenthesis in the wrong place.'),
         h('ul',
-          h('li', 'Reword it in the box below so the subtitle reads cleanly. Stage directions can go in a trailing (parenthesis): DBVO keeps that out of the voice and the filename. For example "No, thank you. *laughs*" can become "No, thank you. (laughs)".'),
+          h('li', 'Reword it in the box below so the subtitle reads well. Stage directions can go in a trailing (parenthesis): DBVO keeps that out of the voice and the filename. For example "No, thank you. *laughs*" can become "No, thank you. (laughs)".'),
           l.hasOtherAlias ? h('li', 'For an alias, either reword the line so no placeholder remains, or keep it and add iterations (+ Iter. in the list, or Iterations below): the line written out with each name or place it can show in game, one voice file each.') : null,
           h('li', 'Your text goes into the DBVO Fix plugin and the topic file automatically. No need to copy it anywhere by hand.'),
           h('li', 'Left as is, the plugin keeps its original line and this line stays unvoiced.')));
