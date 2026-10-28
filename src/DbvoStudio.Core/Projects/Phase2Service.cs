@@ -647,7 +647,6 @@ public sealed partial class Phase2Service
                     }
 
                     var w = WavFile.Read(wav);
-                    if (voice.NoiseReducedPauses) w.Samples = PauseNoiseReduction.Process(w.Samples, w.SampleRate, w.Channels);
                     w.TrimTailAndFade(voice.TrimTailMs, voice.FadeOutMs);
                     w.Write(wav);
 
@@ -687,11 +686,13 @@ public sealed partial class Phase2Service
             finally
             {
                 // The line's effect (reverb, filter, voice) and Soften peaks (the line's, else the voice pack's) go on the new take too.
+                // Noise-reduced pauses likewise: the line's, else the voice pack's. All three keep the dry original, so each can be taken off.
                 var soften = line.Soften.Length > 0 ? line.Soften : voice.SoftenPeaks ?? "";
-                if (newTake != null && (line.Effect.Length > 0 || PeakSoftener.IsMode(soften)))
+                bool noise = line.NoiseReduced || voice.NoiseReducedPauses;
+                if (newTake != null && (line.Effect.Length > 0 || PeakSoftener.IsMode(soften) || noise))
                 {
-                    try { await TakeEffects.RenderAsync(root, newTake, line.Effect, soften, null, tools, CancellationToken.None); }
-                    catch (Exception ex) { line.LastError = "The take was made, but its effect or Soften peaks couldn't be added: " + FriendlyError.From(ex); }
+                    try { await TakeEffects.RenderAsync(root, newTake, line.Effect, soften, null, tools, CancellationToken.None, noise); }
+                    catch (Exception ex) { line.LastError = "The take was made, but its post-processing couldn't be added: " + FriendlyError.From(ex); }
                 }
                 int d = Interlocked.Increment(ref done);
                 progress?.Report(new GenerationProgress(d, total, failed, line.FinalLine, line.LastError));

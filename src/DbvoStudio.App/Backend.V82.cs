@@ -291,6 +291,7 @@ public sealed partial class Backend
         // effect and soften are each optional: a key that isn't sent leaves that part of the line as it is
         string? fx = p.TryGetProperty("effect", out var fe) && fe.ValueKind == JsonValueKind.String ? fe.GetString() ?? "" : null;
         string? soften = p.TryGetProperty("soften", out var se) && se.ValueKind == JsonValueKind.String ? se.GetString() ?? "" : null;
+        bool? noise = p.TryGetProperty("noise", out var ne) && ne.ValueKind is JsonValueKind.True or JsonValueKind.False ? ne.GetBoolean() : null;
         var tools = File.Exists(_settings.FfmpegPath) ? GrExternal() : null;
         if (fx is { Length: > 0 } && Effects.Find(null, fx) == null) throw new InvalidOperationException("Unknown effect.");
         if (soften is { Length: > 0 } && !PeakSoftener.IsMode(soften)) throw new InvalidOperationException("Unknown Soften peaks setting.");
@@ -327,7 +328,7 @@ public sealed partial class Backend
             await Task.WhenAll(lines.Select(async l =>
             {
                 await sem.WaitAsync();
-                try { Interlocked.Add(ref takes, await TakeEffects.SetAsync(root, l, fx, null, tools, default, soften)); }
+                try { Interlocked.Add(ref takes, await TakeEffects.SetAsync(root, l, fx, null, tools, default, soften, noise)); }
                 catch (Exception ex) { lock (problems) problems.Add(l.FinalLine + ": " + FriendlyError.From(ex)); }
                 finally { sem.Release(); }
             }));

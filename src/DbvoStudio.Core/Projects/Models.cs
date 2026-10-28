@@ -443,6 +443,8 @@ public sealed class Take
     public string? DryOriginalFuz { get; set; }
     /// <summary>Soften peaks on this take's WAV: "" (off), "standard" or "strong" (applied after the effect; the dry original is kept).</summary>
     public string Soften { get; set; } = "";
+    /// <summary>Noise-reduced pauses on this take's WAV (applied first, before the effect and Soften peaks; the dry original is kept).</summary>
+    public bool NoiseReduced { get; set; }
 }
 
 /// <summary>Quality check of one take: what Whisper heard against the line, plus loudness and peak.</summary>
@@ -521,6 +523,8 @@ public class Phase2Line
     public string Effect { get; set; } = "";
     /// <summary>Soften peaks for this line: put on every take, also new ones. "" = none (the voice pack's setting decides for new takes).</summary>
     public string Soften { get; set; } = "";
+    /// <summary>Noise-reduced pauses for this line: on every take, also new ones (off = the voice pack's setting decides for new takes).</summary>
+    public bool NoiseReduced { get; set; }
 
     [JsonIgnore] public Take? SelectedTake => Takes.FirstOrDefault(t => t.Id == SelectedTakeId);
 

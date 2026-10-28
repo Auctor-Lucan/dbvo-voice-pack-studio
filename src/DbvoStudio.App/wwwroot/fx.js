@@ -50,8 +50,8 @@ export function effectRow(current, ticked, onPick, title, { compact = false } = 
  * "Post-processing ▾": Effects (on the ticked lines) and Soften peaks (on the ticked lines or on all shown).
  * o: { ticked, shown, applyFx(fx), soften(mode, which) } where which is 'ticked' | 'shown' and mode '' | 'standard' | 'strong'.
  */
-export function postButton({ ticked: tf, shown: sf, applyFx, soften }) {
-  const b = h('button.btn.sm', { title: 'Effects and Soften peaks for the takes of the ticked lines, or of all lines shown' }, 'Post-processing ▾');
+export function postButton({ ticked: tf, shown: sf, applyFx, soften, noise }) {
+  const b = h('button.btn.sm', { title: 'Noise-reduced pauses, effects and Soften peaks for the takes of the ticked lines, or of all lines shown' }, 'Post-processing ▾');
   b.addEventListener('click', () => { const ticked = tf(), shown = sf(); popupMenu(b, [
     { label: 'Effects…', sub: ticked ? `Reverb, filter or voice on the takes of the ${ticked} ticked line(s)` : 'Tick the lines to put an effect on first', disabled: !ticked, onclick: async () => {
       const list = (await effectsList()).filter((x) => !x.isEmpty);
@@ -59,7 +59,8 @@ export function postButton({ ticked: tf, shown: sf, applyFx, soften }) {
         { label: 'No effect', sub: 'Take the effect off: the dry takes come back', onclick: () => applyFx('') }]);
     } },
     { label: 'Soften peaks…', sub: 'Tame hard consonants (t, d, g, k) that distort at a high in-game gain: ticked lines or all shown', onclick: () => softenDialog({ ticked, shown, soften }) },
-  ]); });
+    noise ? { label: 'Noise-reduced pauses…', sub: 'Remove low rumble and turn down noise in pauses: ticked lines or all shown', onclick: () => noiseDialog({ ticked, shown, noise }) } : null,
+  ].filter(Boolean)); });
   return b;
 }
 
@@ -84,6 +85,43 @@ export async function softenDialog({ ticked, shown, soften }) {
   if (!ok) return;
   if (which === 'ticked' && !ticked) return;
   await soften(mode, which);
+}
+
+/** Which lines, on or off; then noise(on, which). */
+export async function noiseDialog({ ticked, shown, noise }) {
+  let which = ticked ? 'ticked' : 'shown', on = true;
+  const warn = h('div.banner.warn', { style: { margin: 0 } });
+  const renderWarn = () => {
+    const n = which === 'ticked' ? ticked : shown;
+    warn.textContent = !on ? `Takes Noise-reduced pauses off the takes of ${n.toLocaleString()} line(s): their originals come back.`
+      : `Changes the WAV of every take of ${n.toLocaleString()} line(s)${n > 200 ? ', which can take a while' : ''}. The originals are kept: Off puts them back. Runs on your PC, no credits. New takes of these lines get it too; export again afterwards.`;
+  };
+  renderWarn();
+  const ok = await modal('Noise-reduced pauses', [
+    h('div', 'Removes rumble below 80 Hz and turns down noise in pauses (30 dB or more below the voice) by up to 15 dB, never to silence. It opens just before the voice and holds after it, so words, breaths and fading endings stay as they are. Timing doesn\'t change, so the LIP files stay as they are.'),
+    h('div.row', { style: { gap: '10px', alignItems: 'center' } }, h('span.faint', 'Lines'),
+      segmented([['ticked', `Ticked (${ticked})`], ['shown', `All shown (${shown.toLocaleString()})`]], which, (v) => { which = v; renderWarn(); })),
+    h('div.row', { style: { gap: '10px', alignItems: 'center' } }, h('span.faint', 'Noise-reduced pauses'),
+      segmented([['on', 'On'], ['off', 'Off', 'Take it off: the original takes come back']], 'on', (v) => { on = v === 'on'; renderWarn(); })),
+    warn,
+  ], [{ label: 'Cancel', value: false }, { label: 'Apply', primary: true, value: true }]);
+  if (!ok) return;
+  if (which === 'ticked' && !ticked) return;
+  await noise(on, which);
+}
+
+/** The small N on a line with Noise-reduced pauses: click takes it off. */
+export function noiseIcon(on, onRemove) {
+  if (!on) return null;
+  return h('button.fx-e.fx-s', { title: 'Noise-reduced pauses on every take. Click to take it off.', onclick: (e) => { e.stopPropagation(); onRemove(); } }, 'N');
+}
+
+/** The inspector's Noise-reduced pauses row for a line (or the ticked lines when it is one of them). */
+export function noiseRow(on, ticked, onPick) {
+  return h('div.row', { style: { gap: '8px', alignItems: 'center', flexWrap: 'nowrap' }, title: 'Noise-reduced pauses on every take of the line (and new takes): low rumble removed and noise in pauses turned down. The originals are kept, so Off puts them back.' },
+    h('span.field-label', { style: { margin: 0 } }, 'Noise-reduced pauses'),
+    segmented([['off', 'Off'], ['on', 'On']], on ? 'on' : 'off', (v) => onPick(v === 'on')),
+    ticked > 1 ? h('span.faint', `applies to the ${ticked} ticked lines`) : null);
 }
 
 /** The small S on a line with Soften peaks: click takes it off. */

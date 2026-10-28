@@ -5,7 +5,7 @@ import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
-import { effectRow, effectIcon, postButton, softenIcon, softenRow } from './fx.js';
+import { effectRow, effectIcon, postButton, softenIcon, softenRow, noiseIcon, noiseRow } from './fx.js';
 import { qaDialog } from './qa.js';
 
 const CERT = { Exact: 'Speaker known', Probable: 'Probable speakers', Unknown: 'Speaker unknown' };
@@ -496,7 +496,7 @@ export async function revoiceView(id) {
         sort: (l) => { const t = l.takes.find((x) => x.id === l.sel); return !t || !t.qa ? 2 : t.qa.flags.length ? 0 : 1; }, render: (l) => qaBadgeRv(l) },
       { id: 'take', title: 'Take', width: 84, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s). Click to play, switch or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } }, l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—'),
-        effectIcon(l.effect, () => applyFx([l.id], '')), softenIcon(l.soften, () => applySoften([l.id], ''))) },
+        effectIcon(l.effect, () => applyFx([l.id], '')), softenIcon(l.soften, () => applySoften([l.id], '')), noiseIcon(l.noise, () => applyNoise([l.id], false))) },
       { id: 'act', title: '', width: 146, resizable: false, render: (l) => h('span.row.icon-bar', { style: { gap: '2px' } },
         h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: inFlight.has(l.id) ? 'Making a new take…' : genBlock(l) || 'Regenerate (a new take; older takes stay)', disabled: !!genBlock(l), onmousedown: keepEditing, onclick: (e) => { e.stopPropagation(); regen(l); } }, icon('regen')),
         h('button.act-btn', { title: l.takes.length ? 'Open this line\'s takes folder' : 'No takes yet', disabled: !l.takes.length, onclick: (e) => { e.stopPropagation(); rpc('revoice.openTakeFolder', { id, lineId: l.id }).catch(fail); } }, icon('folder')),
@@ -572,7 +572,8 @@ export async function revoiceView(id) {
       h('div.spacer'),
       postButton({ ticked: () => grid.selected.size, shown: () => grid.rows.filter((l) => !l.gone && l.takes && l.takes.length).length,
         applyFx: (fx) => applyFx([...grid.selected], fx),
-        soften: (mode, which) => applySoften(which === 'ticked' ? [...grid.selected] : grid.rows.filter((l) => !l.gone && l.takes && l.takes.length).map((l) => l.id), mode) }),
+        soften: (mode, which) => applySoften(which === 'ticked' ? [...grid.selected] : grid.rows.filter((l) => !l.gone && l.takes && l.takes.length).map((l) => l.id), mode),
+        noise: (on, which) => applyNoise(which === 'ticked' ? [...grid.selected] : grid.rows.filter((l) => !l.gone && l.takes && l.takes.length).map((l) => l.id), on) }),
       folderButton());
   }
   // Search, Columns and Hide panel sit on the tag row (as in Phase 2); Open folder sits on the filter row.
@@ -641,7 +642,7 @@ export async function revoiceView(id) {
       h('div', h('div.field-label', 'Subtitle (in game)'), h('div.box.ellipsis', { title: l.text }, l.text)),
       (() => {
         const ids = grid.selected.has(l.id) && grid.selected.size > 1 ? [...grid.selected] : [l.id];
-        return h('div.col', { style: { gap: '6px' } }, effectRow(l.effect || '', ids.length, (fx) => applyFx(ids, fx)), softenRow(l.soften || '', ids.length, (m) => applySoften(ids, m)));
+        return h('div.col', { style: { gap: '6px' } }, effectRow(l.effect || '', ids.length, (fx) => applyFx(ids, fx)), softenRow(l.soften || '', ids.length, (m) => applySoften(ids, m)), noiseRow(!!l.noise, ids.length, (on) => applyNoise(ids, on)));
       })(),
       h('div', h('div.field-label', 'Spoken text (tags allowed)'), spoken,
         h('div.row', { style: { marginTop: '6px', gap: '6px' } },
@@ -982,6 +983,14 @@ export async function revoiceView(id) {
   async function applyFx(ids, fx) {
     try {
       const r = await withBusy(rpc('takes.effect', { kind: 'revoice', id, lineIds: ids, effect: fx }), fx ? 'Adding the effect' : 'Taking the effect off', `${ids.length} line(s)…`);
+      for (const nl of r.lines) replaceLine(nl, false);
+      grid.setRows(visible()); renderInspector(); renderActions();
+      toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
+    } catch (e) { fail(e); renderInspector(); }
+  }
+  async function applyNoise(ids, on) {
+    try {
+      const r = await withBusy(rpc('takes.effect', { kind: 'revoice', id, lineIds: ids, noise: on }), on ? 'Reducing noise in pauses' : 'Taking Noise-reduced pauses off', `${ids.length.toLocaleString()} line(s)…`);
       for (const nl of r.lines) replaceLine(nl, false);
       grid.setRows(visible()); renderInspector(); renderActions();
       toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);

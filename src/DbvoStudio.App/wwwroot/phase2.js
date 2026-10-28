@@ -3,7 +3,7 @@ import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, co
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
-import { effectRow, effectIcon, postButton, softenIcon, softenRow } from './fx.js';
+import { effectRow, effectIcon, postButton, softenIcon, softenRow, noiseIcon, noiseRow } from './fx.js';
 import { qaDialog } from './qa.js';
 
 const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Edited since take' };
@@ -341,7 +341,7 @@ export async function patchView(id) {
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s); #${(l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot} is used. Click to play, switch, keep or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } },
           l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—'),
         (selTake(l) || {}).original ? h('span.imp-mark', { title: 'The take in use is an imported .fuz, kept as it is' }, 'fuz') : null,
-        effectIcon(l.effect, () => applyFx([l.lineId], '')), softenIcon(l.soften, () => applySoften([l.lineId], ''))) },
+        effectIcon(l.effect, () => applyFx([l.lineId], '')), softenIcon(l.soften, () => applySoften([l.lineId], '')), noiseIcon(l.noise, () => applyNoise([l.lineId], false))) },
       { id: 'act', title: '', width: 176, resizable: false, render: (l) => rowIcons(l) },
     ].filter(Boolean),
   });
@@ -473,6 +473,13 @@ export async function patchView(id) {
       toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
     } catch (e) { fail(e); renderInspector(); }
   }
+  async function applyNoise(ids, on) {
+    try {
+      const r = await withBusy(rpc('takes.effect', { kind: 'patch', id, lineIds: ids, noise: on }), on ? 'Reducing noise in pauses' : 'Taking Noise-reduced pauses off', `${ids.length.toLocaleString()} line(s)…`);
+      patch = r.patch; reindex(); grid.setRows(visible()); renderInspector(); renderActions();
+      toast(r.problems.length ? r.problems.slice(0, 2).join(' · ') : `${r.takes} take(s) changed.`, !!r.problems.length);
+    } catch (e) { fail(e); renderInspector(); }
+  }
   async function applySoften(ids, mode) {
     try {
       const r = await withBusy(rpc('takes.effect', { kind: 'patch', id, lineIds: ids, soften: mode }), mode ? 'Softening peaks' : 'Taking Soften peaks off', `${ids.length.toLocaleString()} line(s)…`);
@@ -482,7 +489,7 @@ export async function patchView(id) {
   }
   function fxRow(l) {
     const ids = grid.selected.has(l.lineId) && grid.selected.size > 1 ? [...grid.selected] : [l.lineId];
-    return h('div.col', { style: { gap: '6px' } }, effectRow(l.effect || '', ids.length, (fx) => applyFx(ids, fx)), softenRow(l.soften || '', ids.length, (m) => applySoften(ids, m)));
+    return h('div.col', { style: { gap: '6px' } }, effectRow(l.effect || '', ids.length, (fx) => applyFx(ids, fx)), softenRow(l.soften || '', ids.length, (m) => applySoften(ids, m)), noiseRow(!!l.noise, ids.length, (on) => applyNoise(ids, on)));
   }
   async function upd(l, action, value) {
     try {
@@ -558,7 +565,7 @@ export async function patchView(id) {
   function pauseNoiseRow() {
     return h('div.pause-row',
       switchEl(!!voice.noiseReducedPauses, (v) => setIn(voice, 'noiseReducedPauses', v), 'Noise-reduced pauses', { disabled: voice.settingsLocked, title: 'Every new take: rumble below 80 Hz is removed and noisy pauses are turned down (up to 15 dB, never muted). Words, breaths next to words and fading endings are left alone.' }),
-      h('div.faint', 'Removes low rumble and turns down noise in pauses. The voice is untouched. New takes only.'));
+      h('div.faint', 'Removes low rumble and turns down noise in pauses. The voice is untouched. New takes; for existing ones use Post-processing ▾.'));
   }
   function outputGroup(fields, o) {
     const sum = `${FORMAT_NAME[o.outputFormat] || o.outputFormat || '—'} · ${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once${voice.noiseReducedPauses ? ' · noise-reduced pauses' : ''}`;
@@ -731,7 +738,8 @@ export async function patchView(id) {
       h('div.spacer'),
       postButton({ ticked: () => grid.selected.size, shown: () => grid.rows.filter((l) => !l.omitted && l.takes && l.takes.length).length,
         applyFx: (fx) => applyFx([...grid.selected], fx),
-        soften: (mode, which) => applySoften(which === 'ticked' ? [...grid.selected] : grid.rows.filter((l) => !l.omitted && l.takes && l.takes.length).map((l) => l.lineId), mode) }));
+        soften: (mode, which) => applySoften(which === 'ticked' ? [...grid.selected] : grid.rows.filter((l) => !l.omitted && l.takes && l.takes.length).map((l) => l.lineId), mode),
+        noise: (on, which) => applyNoise(which === 'ticked' ? [...grid.selected] : grid.rows.filter((l) => !l.omitted && l.takes && l.takes.length).map((l) => l.lineId), on) }));
   }
 
   async function autotag(ids) {

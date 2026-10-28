@@ -914,7 +914,7 @@ public sealed partial class Backend
     private static object Line2Dto(Phase2Line l, VoicePack? v) => new
     {
         l.LineId, l.FinalLine, l.OriginalLine, l.Spoken, l.SpokenEdited, status = l.Status.ToString(), l.OmittedBy, l.OverrideOmit,
-        omitted = l.IsOmitted, l.LastError, l.TagSuggestion, l.SelectedTakeId, l.Marked, excluded = l.Excluded, undo = l.UndoSpoken != null, approved = l.Approved, effect = l.Effect, soften = l.Soften,
+        omitted = l.IsOmitted, l.LastError, l.TagSuggestion, l.SelectedTakeId, l.Marked, excluded = l.Excluded, undo = l.UndoSpoken != null, approved = l.Approved, effect = l.Effect, soften = l.Soften, noise = l.NoiseReduced,
         hasSource = l.SourceWav != null, sourceWav = l.SourceWav,
         stem = v == null ? "" : LineNaming.Stem(l.FinalLine, v.Naming),
         legacyName = LineNaming.Legacy(l.FinalLine),

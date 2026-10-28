@@ -93,3 +93,27 @@ public class PauseNoiseReductionTests
         Assert.InRange(20 * Math.Log10(va / vb), -0.3, 0.3);                          // the voice: unchanged
     }
 }
+
+public class NoiseReducedTakeTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "dbvo-nr-" + Guid.NewGuid().ToString("N"));
+    public NoiseReducedTakeTests() => Directory.CreateDirectory(_dir);
+    public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
+
+    [Fact]
+    public async Task On_then_off_brings_the_original_back()
+    {
+        const int sr = 44100; var rnd = new Random(2);
+        var s = new short[sr * 2];
+        for (int i = 0; i < s.Length; i++) { bool v = i < sr / 2 || i >= sr * 3 / 2; s[i] = (short)Math.Round((v ? 0.1 * Math.Sin(2 * Math.PI * 300 * i / sr) : 0.001 * (rnd.NextDouble() * 2 - 1)) * 32767); }
+        Directory.CreateDirectory(Path.Combine(_dir, "takes"));
+        new WavFile { SampleRate = sr, Channels = 1, Samples = s }.Write(Path.Combine(_dir, "takes", "a.wav"));
+        var t = new DbvoStudio.Core.Projects.Take { WavPath = Path.Combine("takes", "a.wav") };
+        Assert.True(await DbvoStudio.Core.Projects.TakeEffects.RenderAsync(_dir, t, "", "", null, null, default, true));
+        Assert.True(t.NoiseReduced);
+        Assert.NotEqual(s, WavFile.Read(Path.Combine(_dir, "takes", "a.wav")).Samples);
+        Assert.True(await DbvoStudio.Core.Projects.TakeEffects.RenderAsync(_dir, t, "", "", null, null, default, false));
+        Assert.False(t.NoiseReduced);
+        Assert.Equal(s, WavFile.Read(Path.Combine(_dir, "takes", "a.wav")).Samples);
+    }
+}
