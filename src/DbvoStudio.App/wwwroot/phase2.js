@@ -554,17 +554,8 @@ export async function patchView(id) {
 
   // Format, seed and concurrency are set once and rarely touched: they live behind one button.
   const FORMAT_NAME = { mp3_44100_128: 'MP3 128', mp3_44100_192: 'MP3 192', pcm_44100: 'PCM 44.1k', pcm_24000: 'PCM 24k', pcm_22050: 'PCM 22k', pcm_16000: 'PCM 16k' };
-  // v4 Turbo de-grain: only for eleven_v4_turbo, where it softens the fizz between the voice's harmonics
-  const isTurbo = (m) => /^eleven_v4/i.test(m || '') && /turbo/i.test(m || '');
-  function degrainRow(e, locked) {
-    const turbo = isTurbo(e.modelId);
-    return h('div.degrain-row',
-      switchEl(!!e.turboDegrain, (v) => setE('turboDegrain', v), 'v4 Turbo de-grain', { disabled: locked || !turbo, title: 'Softens the fine fizz v4 Turbo adds to the voice (3.5–10 kHz) and lifts the top slightly, closer to regular v4. New takes only.' }),
-      h('div.faint', turbo ? 'Softens Turbo\'s fizz, closer to regular v4. New takes only.' : 'Only for eleven_v4_turbo; other models are left as they are.'));
-  }
-
   function outputGroup(fields, o) {
-    const sum = `${FORMAT_NAME[o.outputFormat] || o.outputFormat || '—'} · ${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once${o.turboDegrain && isTurbo(o.modelId) ? ' · de-grain on' : ''}`;
+    const sum = `${FORMAT_NAME[o.outputFormat] || o.outputFormat || '—'} · ${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once`;
     const btn = h('button.btn.sm', { title: `Output: ${sum}. Click to change the audio format, seed and how many lines are requested at once.` }, `${FORMAT_NAME[o.outputFormat] || 'Format'} ▾`);
     btn.onclick = () => popover(btn, fields);
     return grp('Output', btn);
@@ -635,8 +626,7 @@ export async function patchView(id) {
         grp('Language', lang), grp('Read numbers ⓘ', norm),
         outputGroup(() => [grp('Format', fmt),
           numIn(e, 'seed', 'Seed', { placeholder: 'random', nullable: true, width: '92px', title: 'Same seed + same text + same settings ≈ same take. Empty = random.' }),
-          numIn(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit; the app slows down automatically on "too many requests".' }),
-          degrainRow(e, locked)], e));
+          numIn(e, 'concurrency', 'Concurrent', { min: 1, width: '58px', title: 'How many lines are requested at once. Match your ElevenLabs plan\'s concurrency limit; the app slows down automatically on "too many requests".' })], e));
     }
     if (locked) tb.append(h('span.badge.b-toolong', { title: 'Unlock in Global Settings → Voice packs' }, '🔒 locked'));
     tb.append(helpButton('the-toolbar'));

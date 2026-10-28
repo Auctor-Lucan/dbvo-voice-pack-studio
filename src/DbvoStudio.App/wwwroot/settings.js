@@ -499,8 +499,6 @@ async function voices(selectedId, rerender, onSelect) {
         srow('Tail trim', 'Removes the end-of-clip artefact before the LIP is made.', h('div.row', txt(v, 'trimTailMs', { type: 'number', width: '80px' }), h('span.dim', 'ms cut, then'), txt(v, 'fadeOutMs', { type: 'number', width: '80px' }), h('span.dim', 'ms fade-out'))),
         srow('Soften peaks', 'On every new take: hard consonants (t, d, g, k) that spike far above the voice are turned down, so they don\'t distort at a high in-game gain. Standard limits peaks to 8 dB above the speech level, Strong to 6 dB. Existing takes: Phase 2 → Post-processing ▾.',
           segmented([['', 'Off'], ['standard', 'Standard'], ['strong', 'Strong']], v.softenPeaks || '', (x) => { v.softenPeaks = x; persistSoon(); })),
-        srow('v4 Turbo de-grain', 'Only with the eleven_v4_turbo model: softens the fine fizz Turbo adds to the voice (3.5–10 kHz) and lifts the top slightly, so new takes sound closer to regular v4. Other models are never changed. Also in the Phase 2 toolbar under Output.',
-          switchEl(!!v.eleven.turboDegrain, (x) => { v.eleven.turboDegrain = x; persistSoon(); })),
         srow('Loudness normalization', 'EBU R128, −16 LUFS. Off keeps the original DBVO Voice Pack Maker level.', switchEl(v.loudnorm, (x) => { v.loudnorm = x; persistSoon(); })),
         srow('Gain', null, h('div.row', txt(v, 'gainDb', { type: 'number', width: '80px' }), h('span.dim', 'dB')))),
       section('Behaviour', null,
