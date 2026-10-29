@@ -641,7 +641,7 @@ public sealed class RevoiceService
                 var key = line.RelativePath.ToLowerInvariant();
                 bool skip;
                 // A file this tool wrote is rebuilt when the line has another take; other files follow "overwrite".
-                lock (rep) skip = File.Exists(target) && (p.ExportedTakes.TryGetValue(key, out var had) ? had == line.SelectedTakeId : !overwrite);
+                lock (rep) skip = File.Exists(target) && (p.ExportedTakes.TryGetValue(key, out var had) ? line.SelectedTake != null && had == Projects.Phase2Service.ExportStamp(line.SelectedTake) : !overwrite);
                 if (skip) { lock (rep) rep.Skipped++; return; }
                 using var work = new WorkFolder(workRoot);
                 var t = line.SelectedTake!;
@@ -654,7 +654,7 @@ public sealed class RevoiceService
                 {
                     rep.Written++;
                     if (!p.ExportedFiles.Contains(line.RelativePath, StringComparer.OrdinalIgnoreCase)) p.ExportedFiles.Add(line.RelativePath);
-                    p.ExportedTakes[key] = t.Id;
+                    p.ExportedTakes[key] = Projects.Phase2Service.ExportStamp(t);
                     var folder = Path.GetDirectoryName(line.RelativePath)!;
                     rep.Folders[folder] = rep.Folders.TryGetValue(folder, out var n) ? n + 1 : 1;
                 }

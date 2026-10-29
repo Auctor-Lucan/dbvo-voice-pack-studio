@@ -513,7 +513,7 @@ public sealed partial class Backend
         id = l.LineId, l.Info, resp = l.Response, pf = l.PluginFolder, vt = l.VoiceType, stem = l.FileStem, text = l.FinalLine, spoken = l.Spoken,
         l.SpokenEdited, tag = l.TagSuggestion, speaker = l.SpeakerKey, speakerName = l.SpeakerName, l.Npcs, cert = l.Certainty, l.Via,
         emo = ResponseInfo.EmotionNames.ElementAtOrDefault(l.Emotion) ?? "Neutral", emoV = l.EmotionValue, l.Notes, l.Quest, l.Topic, l.Plugin,
-        l.Original, excl = l.Excluded, undo = l.UndoSpoken != null, plan = l.PlanId, status = l.Status.ToString(), err = l.LastError, sel = l.SelectedTakeId, l.Marked, approved = l.Approved, effect = l.Effect, soften = l.Soften, noise = l.NoiseReduced, l.Gone, newSpeaker = l.NewSpeakerName,
+        l.Original, excl = l.Excluded, undo = l.UndoSpoken != null, plan = l.PlanId, status = l.Status.ToString(), err = l.LastError, sel = l.SelectedTakeId, selStamp = l.SelectedTake == null ? null : Core.Projects.Phase2Service.ExportStamp(l.SelectedTake), l.Marked, approved = l.Approved, effect = l.Effect, soften = l.Soften, noise = l.NoiseReduced, l.Gone, newSpeaker = l.NewSpeakerName,
         takes = l.Takes.Select(t => new { t.Id, t.Slot, t.CreatedUtc, t.SpokenText, engine = t.Settings.Engine, model = t.Settings.ModelId, wav = t.WavPath.Replace('\\', '/'), t.DurationSeconds, t.Qa }),
     };
 

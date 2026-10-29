@@ -74,7 +74,7 @@ export async function revoiceView(id) {
   function unexported() {
     const ex = proj.exportedTakes || {};
     const skip = new Set(proj.speakers.filter((x) => x.skip).map((x) => x.key));
-    return proj.lines.filter((l) => l.sel && !l.excl && !l.gone && !skip.has(l.speaker) && ex[relKey(l)] !== l.sel).length;
+    return proj.lines.filter((l) => l.sel && !l.excl && !l.gone && !skip.has(l.speaker) && ex[relKey(l)] !== (l.selStamp || l.sel)).length;
   }
   const expNew = h('span.exp-new');
   const updateExpNew = () => { const n = unexported(); expNew.textContent = n ? ` · ${n.toLocaleString()} new` : ''; expNew.title = n ? `${n} take(s) not in the output folder yet` : ''; };
