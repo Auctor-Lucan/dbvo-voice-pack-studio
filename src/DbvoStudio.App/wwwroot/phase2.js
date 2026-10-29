@@ -619,7 +619,7 @@ export async function patchView(id) {
         localVoices.map((v) => h('option', { value: v, selected: v === o.voice }, v)));
       if (o.voice && !localVoices.includes(o.voice)) vsel.append(h('option', { value: o.voice, selected: true }, o.voice));
       const health = h('span.badge.b-skip', 'checking…');
-      rpc('engine.health', { engine: eng }).then((r) => { health.className = 'badge ' + (r.ok ? 'b-valid' : 'b-broken'); health.textContent = r.ok ? `ready${r.device ? ' · ' + r.device : ''}` : r.phase; }).catch(() => { health.textContent = 'offline'; health.className = 'badge b-broken'; });
+      rpc('engine.health', { engine: eng }).then((r) => { health.className = 'badge ' + (r.ok ? 'b-valid' : 'b-broken'); health.textContent = r.ok ? `ready${r.device ? ' · ' + r.device : ''}` : r.phase; health.title = r.error || ''; }).catch(() => { health.textContent = 'offline'; health.className = 'badge b-broken'; });
       tb.append(engineSel, grp('Reference voice', vsel, h('button.icon-btn', { title: 'Reload', onclick: () => loadEngine(true) }, '⟳')), grp('Server', health));
       if (eng === 'voxcpm') {
         tb.append(numIn(o, 'cfgValue', 'CFG', { step: 0.1 }), numIn(o, 'inferenceTimesteps', 'Timesteps', { min: 1 }),

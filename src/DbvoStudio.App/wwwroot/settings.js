@@ -275,12 +275,15 @@ async function general(_, rerender) {
 
   // Local engines
   const engStatus = { voxcpm: h('span.badge.b-skip', '…'), omnivoice: h('span.badge.b-skip', '…') };
+  const engWhy = { voxcpm: h('div.help'), omnivoice: h('div.help') };
   const checkEngine = async (e) => {
     engStatus[e].textContent = 'checking…';
     try {
       const r = await rpc('engine.health', { engine: e });
       engStatus[e].className = 'badge ' + (r.ok ? 'b-valid' : 'b-broken');
       engStatus[e].textContent = r.ok ? `ready${r.device ? ' · ' + r.device : ''}` : r.phase;
+      engStatus[e].title = r.error || '';
+      engWhy[e].textContent = !r.ok && r.error ? r.error : '';
     } catch (err) { engStatus[e].className = 'badge b-broken'; engStatus[e].textContent = 'offline'; }
   };
   checkEngine('voxcpm');
@@ -350,8 +353,8 @@ async function general(_, rerender) {
     section('WAV to LIP (Other Tools)', null, wlBox),
     section('Local voice engines', null,
       h('div.help', { style: { margin: '10px 0' } }, 'VoxCPM and OmniVoice run on your own PC, as with DBVO Voice Pack Maker 2.7.0 (same servers and settings). Start the server, then pick the engine for a voice pack (Voice packs → Engine, or the Phase 2 toolbar).'),
-      srow('VoxCPM server', 'Default http://localhost:7861', h('div.row', textInput(st.localEngines.voxCpmAddress, (x) => save({ voxCpmAddress: x }), 'http://localhost:7861'), engStatus.voxcpm, h('button.btn.sm', { title: 'See whether the VoxCPM server answers at this address', onclick: () => checkEngine('voxcpm') }, 'Check'))),
-      srow('OmniVoice server', 'Default http://localhost:7862', h('div.row', textInput(st.localEngines.omniVoiceAddress, (x) => save({ omniVoiceAddress: x }), 'http://localhost:7862'), engStatus.omnivoice, h('button.btn.sm', { title: 'See whether the OmniVoice server answers at this address', onclick: () => checkEngine('omnivoice') }, 'Check')))),
+      srow('VoxCPM server', 'Default http://localhost:7861', h('div.col', h('div.row', textInput(st.localEngines.voxCpmAddress, (x) => save({ voxCpmAddress: x }), 'http://localhost:7861'), engStatus.voxcpm, h('button.btn.sm', { title: 'See whether the VoxCPM server answers at this address', onclick: () => checkEngine('voxcpm') }, 'Check')), engWhy.voxcpm))),
+      srow('OmniVoice server', 'Default http://localhost:7862', h('div.col', h('div.row', textInput(st.localEngines.omniVoiceAddress, (x) => save({ omniVoiceAddress: x }), 'http://localhost:7862'), engStatus.omnivoice, h('button.btn.sm', { title: 'See whether the OmniVoice server answers at this address', onclick: () => checkEngine('omnivoice') }, 'Check')), engWhy.omnivoice)))),
   );
 }
 

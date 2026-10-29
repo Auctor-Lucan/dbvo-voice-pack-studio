@@ -22,16 +22,43 @@ public sealed class LocalEngineClient : IDisposable
     public LocalEngineClient(string baseUrl, HttpClient? http = null)
     {
         _base = (string.IsNullOrWhiteSpace(baseUrl) ? "http://localhost:7861" : baseUrl.Trim()).TrimEnd('/');
+        if (!_base.Contains("://")) _base = "http://" + _base; // "localhost:7862" or "127.0.0.1:7862" as typed
+        // Python servers usually listen on IPv4 only, and on Windows "localhost" tries IPv6 first (a refused try there
+        // costs about 2 s each time), so localhost goes straight to 127.0.0.1.
+        if (Uri.TryCreate(_base, UriKind.Absolute, out var u) && u.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+            _base = new UriBuilder(u) { Host = "127.0.0.1" }.Uri.ToString().TrimEnd('/');
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
     }
 
-    public async Task<EngineHealth> HealthAsync(CancellationToken ct = default)
+    public Task<EngineHealth> HealthAsync(CancellationToken ct = default) => HealthAtAsync(_base, ct);
+
+    private async Task<EngineHealth> HealthAtAsync(string baseUrl, CancellationToken ct)
     {
+        string body;
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(4));
-            using var doc = JsonDocument.Parse(await _http.GetStringAsync(_base + "/health", cts.Token));
+            cts.CancelAfter(TimeSpan.FromSeconds(8));
+            using var resp = await _http.GetAsync(baseUrl + "/health", cts.Token);
+            if (!resp.IsSuccessStatusCode)
+                return Offline($"{baseUrl} answers, but {baseUrl}/health gave HTTP {(int)resp.StatusCode}. DBVO Studio needs the OmniVoice / VoxCPM server from DBVO Voice Pack Maker (it has /health, /voices and /tts_to_audio/), not a Gradio web page or another server.");
+            body = await resp.Content.ReadAsStringAsync(cts.Token);
+        }
+        catch (HttpRequestException ex)
+        {
+            return Offline($"Nothing answers at {baseUrl} ({ex.Message}). Is the server running, and on this port? Check the port in the server's console window.");
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return Offline($"{baseUrl} didn't answer within 8 s. The server may still be loading its model; try Check again in a minute.");
+        }
+        catch (Exception ex) when (ex is UriFormatException or NotSupportedException or InvalidOperationException)
+        {
+            return Offline($"\"{baseUrl}\" isn't a valid address. Use something like http://127.0.0.1:7862.");
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
             var r = doc.RootElement;
             bool loaded = r.TryGetProperty("model_loaded", out var ml) && ml.ValueKind == JsonValueKind.True;
             string phase = loaded ? "ready" : r.TryGetProperty("phase", out var ph) ? ph.GetString() ?? "starting" : "starting";
@@ -41,11 +68,13 @@ public sealed class LocalEngineClient : IDisposable
                 r.TryGetProperty("progress", out var p) && p.ValueKind == JsonValueKind.Number ? p.GetDouble() : null,
                 r.TryGetProperty("model", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() : null);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        catch (JsonException)
         {
-            return new EngineHealth(false, "offline", null, null, null, null);
+            return Offline($"{baseUrl}/health answers, but not with JSON: that's a web page or another server, not the DBVO Voice Pack Maker OmniVoice / VoxCPM server.");
         }
     }
+
+    private static EngineHealth Offline(string why) => new(false, "offline", null, why, null, null);
 
     public async Task<List<string>> VoicesAsync(CancellationToken ct = default)
     {
