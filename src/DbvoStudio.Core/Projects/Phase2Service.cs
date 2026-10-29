@@ -867,10 +867,17 @@ public sealed partial class Phase2Service
     }
 
     /// <summary>Write a target unless it holds this take already, or it is someone else's file and overwriting is off.</summary>
+    /// <summary>
+    /// What an export remembers about a take: its id, plus its post-processing and edit count when it has any, so a take
+    /// whose audio changed since (Post-processing, Edit take → Save over) is written again. Plain takes keep the bare id.
+    /// </summary>
+    public static string ExportStamp(Take t) =>
+        t.Effect.Length == 0 && t.Soften.Length == 0 && !t.NoiseReduced && t.Rev == 0 ? t.Id : $"{t.Id}:{t.Effect}:{t.Soften}:{(t.NoiseReduced ? 1 : 0)}:{t.Rev}";
+
     private static bool ShouldWrite(DbvoPatch patch, string target, Take take, bool overwrite)
     {
         if (!File.Exists(target)) return true;
-        if (patch.Exported.TryGetValue(ExportKey(target), out var tid)) return tid != take.Id;
+        if (patch.Exported.TryGetValue(ExportKey(target), out var tid)) return tid != ExportStamp(take);
         return overwrite;
     }
 
@@ -964,7 +971,7 @@ public sealed partial class Phase2Service
                     FileLinks.LinkOrCopy(Path.Combine(_lib.PatchFolder(patch.Id), srcRel), target, true);
                     // A hard link keeps the take's own date; dated now, an export sorts to the top in Explorer.
                     try { File.SetLastWriteTimeUtc(target, DateTime.UtcNow); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-                    patch.Exported[ExportKey(target)] = t.Id;
+                    patch.Exported[ExportKey(target)] = ExportStamp(t);
                     any = true;
                 }
                 if (any) rep.Written++; else rep.Skipped++;
@@ -1056,7 +1063,7 @@ public sealed partial class Phase2Service
                 lock (rep)
                 {
                     rep.Written++;
-                    if (track) foreach (var n in needed) written.Add((n, t.Id));
+                    if (track) foreach (var n in needed) written.Add((n, ExportStamp(t)));
                 }
             }
             catch (OperationCanceledException) { throw; }

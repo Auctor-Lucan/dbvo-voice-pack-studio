@@ -144,6 +144,7 @@ public sealed partial class Backend
             var dry = TakeEffects.DryPath(root, t);
             var wavNow = Path.Combine(root, t.WavPath);
             var src = File.Exists(dry) ? dry : wavNow;
+            bool srcIsDry = src == dry;
             if (!File.Exists(src)) throw new InvalidOperationException("This take's WAV isn't there anymore.");
             var w = WavFile.Read(src);
             var edited = new WavFile { SampleRate = w.SampleRate, Channels = w.Channels, Samples = TakeEdit.Apply(w.Samples, w.SampleRate, w.Channels, ops) };
@@ -179,9 +180,9 @@ public sealed partial class Backend
                 File.Copy(wav, Path.Combine(root, target.WavPath), true);
                 if (lip) File.Copy(lipFile, Path.Combine(root, target.LipPath), true);
                 line.Takes.Add(target);
-                bool wasUsed = line.SelectedTakeId == t.Id;
-                if (wasUsed || line.SelectedTakeId == null) line.SelectedTakeId = target.Id;
-                if (t.Kept && wasUsed) { t.Kept = false; target.Kept = true; }
+                // the edit takes the original's place: in use, and kept as a variant when the original was
+                line.SelectedTakeId = target.Id;
+                if (t.Kept) { t.Kept = false; target.Kept = true; }
             }
             else
             {
@@ -200,10 +201,17 @@ public sealed partial class Backend
                 t.OriginalFuz = null; t.DryOriginalFuz = null; // the edit isn't what the imported .fuz holds
                 t.Qa = null;
                 t.CreatedUtc = DateTime.UtcNow;
+                t.Rev++; // exported copies of this take are now out of date
             }
             target.DurationSeconds = edited.DurationSeconds;
             string? problem = null;
-            if (effect.Length > 0 || soften.Length > 0 || noise)
+            if ((effect.Length > 0 || soften.Length > 0 || noise) && !srcIsDry)
+            {
+                // No unprocessed original was kept (an old take): the edit was made to the processed audio, so its
+                // post-processing is already in it and is only noted, not added a second time.
+                target.Effect = effect; target.Soften = soften; target.NoiseReduced = noise;
+            }
+            else if (effect.Length > 0 || soften.Length > 0 || noise)
             {
                 try { await TakeEffects.RenderAsync(root, target, effect, soften, null, tools, CancellationToken.None, noise); }
                 catch (Exception ex) { problem = "The edit was saved, but its post-processing couldn't be put back: " + FriendlyError.From(ex); }

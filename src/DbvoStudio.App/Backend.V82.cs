@@ -31,6 +31,7 @@ public sealed partial class Backend
     {
         if (m.StartsWith("ui.") || m.StartsWith("window.") || m.StartsWith("pick.") || m.StartsWith("open.")) return false;
         if (m is "state" or "undo.apply" or "undo.list" or "queue.list" or "queue.remove" or "window.ready" or "job.cancel") return false;
+        if (m.StartsWith("take.edit.")) return false; // the audio and .lip files change too, which Undo can't put back
         var a = m.Contains('.') ? m[(m.IndexOf('.') + 1)..] : m;
         if (a is "get" or "list" or "paths" or "audio" or "draft" or "estimate" or "checks" or "check" or "recordTarget" or "transcribe" or "stringsDiff") return false;
         foreach (var bad in new[] { "delete", "Delete", "reverb", "effect", "record", "export", "Export", "generate", "build", "Build", "discard", "commit", "try", "scan", "qa", "measure", "whisper", "Whisper", "open", "Open", "pick", "backup", "restore", "Restore", "library", "settings" })

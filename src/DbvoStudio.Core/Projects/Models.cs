@@ -445,6 +445,8 @@ public sealed class Take
     public string Soften { get; set; } = "";
     /// <summary>Noise-reduced pauses on this take's WAV (applied first, before the effect and Soften peaks; the dry original is kept).</summary>
     public bool NoiseReduced { get; set; }
+    /// <summary>Times the take's audio was replaced in place (Edit take → Save over), so exports know to write it again.</summary>
+    public int Rev { get; set; }
 }
 
 /// <summary>Quality check of one take: what Whisper heard against the line, plus loudness and peak.</summary>
