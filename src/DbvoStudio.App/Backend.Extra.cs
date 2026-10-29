@@ -488,10 +488,9 @@ public sealed partial class Backend
     }
 
     /// <summary>The patch row in the DBVO Patches list: Phase 1 flags, progress, characters left and warnings.</summary>
-    private object PatchSummary(DbvoPatch x, List<VoicePack> voices, List<Mod> mods)
+    private object PatchSummary(DbvoPatch x, List<VoicePack> voices, List<(string Id, string Name, string Category, int Unreviewed)> its)
     {
         var voice = voices.FirstOrDefault(v => v.Id == x.VoicePackId);
-        var its = mods.Where(m => x.ModIds.Contains(m.Id)).ToList();
         var warnings = new List<string>();
         if (string.IsNullOrWhiteSpace(x.WavLipFolder)) warnings.Add("WAV + LIP folder not set");
         if (string.IsNullOrWhiteSpace(x.FinalRoot)) warnings.Add("Final folder not set");
@@ -512,13 +511,13 @@ public sealed partial class Backend
             voicePack = voice?.Name ?? "(missing)",
             voiceColor = voice?.Color ?? "",
             modNames = its.Select(m => m.Name).ToList(),
-            category = its.FirstOrDefault()?.Category ?? "Misc",
+            category = its.Count > 0 ? its[0].Category : "Misc",
             total = x.Lines.Count,
             generated = x.Lines.Count(l => l.SelectedTakeId != null && !l.IsOmitted && !l.Excluded),
             failed = x.Lines.Count(l => l.Status == Phase2Status.Failed && !l.IsOmitted && !l.Excluded),
             omitted = x.Lines.Count(l => l.IsOmitted),
             excluded = x.Lines.Count(l => l.Excluded && !l.IsOmitted),
-            unreviewed = its.Sum(m => m.Plugins.Sum(pl => Phase1Service.UnreviewedFlags(pl).Count)),
+            unreviewed = its.Sum(m => m.Unreviewed),
             charsLeft = pending.Where(l => x.Kind != "vc" || l.SourceWav == null).Sum(l => l.Spoken.Length),
             secondsLeft = x.Kind == "vc" ? pending.Count(l => l.SourceWav != null) : 0,
             noSource = x.Kind == "vc" ? x.Lines.Count(l => !l.IsOmitted && !l.Excluded && l.SelectedTakeId == null && l.SourceWav == null) : 0,

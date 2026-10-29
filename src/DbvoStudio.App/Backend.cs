@@ -468,9 +468,8 @@ public sealed partial class Backend
 
     private object State()
     {
-        var mods = _lib.LoadMods();
-        var patches = _lib.LoadPatches();
         var voices = _lib.LoadVoicePacks();
+        var (mods, patches) = ListRowsFor(voices);
         return new
         {
             libraryRoot = _lib.Root,
@@ -507,8 +506,8 @@ public sealed partial class Backend
             },
             references = _settings.References,
             voicePacks = voices,
-            mods = mods.Select(ModSummary).ToList(),
-            patches = patches.Select(x => PatchSummary(x, voices, mods)).ToList(),
+            mods,
+            patches,
             fomods = _lib.LoadFomods().Select(f => new
             {
                 f.Id, f.Name, f.VoicePackId, f.UpdatedUtc, f.LastBuildUtc, f.LastArchive,

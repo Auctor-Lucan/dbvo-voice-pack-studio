@@ -173,6 +173,7 @@ public sealed class Library
             foreach (var f in Directory.EnumerateFiles(Root, "*.json", SearchOption.AllDirectories))
             {
                 if (f.StartsWith(dir, StringComparison.OrdinalIgnoreCase)) continue;
+                if (f.StartsWith(Path.Combine(Root, "cache") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
                 zip.CreateEntryFromFile(f, Path.GetRelativePath(Root, f), CompressionLevel.Fastest);
             }
         }
