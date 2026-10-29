@@ -182,7 +182,7 @@ public sealed partial class Phase2Service
         report.Removed = patch.Lines.Count(l => !result.ContainsKey(l.Key));
         // Lines that left Phase 1 keep their takes out of sight: toggling a line off in Phase 1 (or editing it and
         // changing it back) must not lose them.
-        patch.Parked = old.Values.Where(l => !result.ContainsKey(l.Key) && l.Takes.Count > 0).ToList();
+        patch.Parked = old.Values.Where(l => !result.ContainsKey(l.Key) && HasWork(l)).ToList();
         foreach (var l in patch.Parked) l.Sources.Clear();
         report.Parked = patch.Lines.Count(l => !result.ContainsKey(l.Key) && l.Takes.Count > 0);
         patch.Lines = result.Values.ToList();
@@ -203,7 +203,7 @@ public sealed partial class Phase2Service
     private static int CarryTakes(Dictionary<string, Phase2Line> old, Dictionary<string, Phase2Line> result)
     {
         var bySource = new Dictionary<(string, string, uint, LineField), List<Phase2Line>>();
-        foreach (var o in old.Values.Where(o => o.Takes.Count > 0 && !result.ContainsKey(o.Key)))
+        foreach (var o in old.Values.Where(o => HasWork(o) && !result.ContainsKey(o.Key)))
             foreach (var src in o.Sources)
             {
                 var k = (src.ModId, src.Plugin.ToLowerInvariant(), src.FormId, src.Field);
@@ -227,10 +227,16 @@ public sealed partial class Phase2Service
             from.FinalLine = line.FinalLine;
             from.OriginalLine = line.OriginalLine;
             from.Sources = line.Sources;
-            from.Spoken = oldSpoken == SpokenText.DefaultFor(oldFinal) ? line.Spoken
-                : oldSpoken.Contains(oldFinal, StringComparison.Ordinal) ? oldSpoken.Replace(oldFinal, line.FinalLine, StringComparison.Ordinal)
-                : SpokenText.DefaultFor(oldFinal) is { Length: > 0 } d && oldSpoken.Contains(d, StringComparison.Ordinal) ? oldSpoken.Replace(d, SpokenText.DefaultFor(line.FinalLine), StringComparison.Ordinal)
-                : oldSpoken;
+            // Your tags go on the new text; words you changed yourself are kept, and the line is marked to check.
+            bool keptAsWritten = false;
+            var oldDefault = SpokenText.DefaultFor(oldFinal);
+            if (oldSpoken == oldDefault) from.Spoken = line.Spoken;
+            else if (oldSpoken.Contains(oldFinal, StringComparison.Ordinal)) from.Spoken = oldSpoken.Replace(oldFinal, line.FinalLine, StringComparison.Ordinal);
+            else if (oldDefault.Length > 0 && oldSpoken.Contains(oldDefault, StringComparison.Ordinal)) from.Spoken = oldSpoken.Replace(oldDefault, SpokenText.DefaultFor(line.FinalLine), StringComparison.Ordinal);
+            else { from.Spoken = oldSpoken; keptAsWritten = true; }
+            from.SpokenEdited = from.Spoken != SpokenText.DefaultFor(from.FinalLine);
+            if (keptAsWritten && !SoundsSame(oldFinal, line.FinalLine)) from.TextChanged = true;
+            from.TagSuggestion = null;
             if (from.SelectedTake is { } t && t.SpokenText == oldSpoken && SoundsSame(oldFinal, line.FinalLine)) t.SpokenText = from.Spoken;
             from.RefreshStale();
             result[key] = from;
@@ -238,6 +244,9 @@ public sealed partial class Phase2Service
         }
         return n;
     }
+
+    /// <summary>Anything of yours on a line that a sync must not drop: takes, your spoken text or tags, Exclude, the omit override, a flag.</summary>
+    private static bool HasWork(Phase2Line l) => l.Takes.Count > 0 || l.SpokenEdited || l.Excluded || l.OverrideOmit || l.Marked;
 
     /// <summary>The same words read aloud: case, punctuation and British/American spelling ignored (honour/honor, travelling/traveling, apologise/apologize, centre/center, moulded/molded).</summary>
     public static bool SoundsSame(string a, string b)
@@ -647,7 +656,9 @@ public sealed partial class Phase2Service
             try
             {
                 var got = await Synthesize(line, spoken, ct);
-                await convertGate.WaitAsync(ct);
+                // The audio is paid for now: a Stop pressed from here on still lets it become a take (a few seconds).
+                var post = CancellationToken.None;
+                await convertGate.WaitAsync(post);
                 try
                 {
                     using var work = new WorkFolder(workRoot);
@@ -657,13 +668,13 @@ public sealed partial class Phase2Service
                         int rate = int.Parse(got.Format.Split('_')[1]);
                         var raw = work.File("raw.wav");
                         ExternalTools.PcmToWav(got.Audio, rate, raw);
-                        await tools.ToWavAsync(raw, wav, 44100, voice.Loudnorm, voice.GainDb, ct);
+                        await tools.ToWavAsync(raw, wav, 44100, voice.Loudnorm, voice.GainDb, post);
                     }
                     else
                     {
                         var src = work.File(got.Format == "wav" ? "src.wav" : "a.mp3");
-                        await File.WriteAllBytesAsync(src, got.Audio, ct);
-                        await tools.ToWavAsync(src, wav, 44100, voice.Loudnorm, voice.GainDb, ct);
+                        await File.WriteAllBytesAsync(src, got.Audio, post);
+                        await tools.ToWavAsync(src, wav, 44100, voice.Loudnorm, voice.GainDb, post);
                     }
 
                     var w = WavFile.Read(wav);
@@ -671,7 +682,7 @@ public sealed partial class Phase2Service
                     w.Write(wav);
 
                     var lip = work.File("a.lip");
-                    if (makeLip) await tools.MakeLipAsync(wav, work.File("r.wav"), lip, SpokenText.StripTags(spoken), ct);
+                    if (makeLip) await tools.MakeLipAsync(wav, work.File("r.wav"), lip, SpokenText.StripTags(spoken), post);
 
                     var take = new Take
                     {
@@ -928,11 +939,28 @@ public sealed partial class Phase2Service
     }
 
     /// <summary>Files from earlier exports that a full export would no longer write (still on disk).</summary>
+    /// <summary>Files another patch exported to the same folders: never removed as this patch's stale files.</summary>
+    public ISet<string>? KeepFiles { get; set; }
+
+    /// <summary>The folders a patch exports to (WAV + LIP folder, and each mod's .fuz folder), as full paths.</summary>
+    public static HashSet<string> ExportFolders(DbvoPatch patch, VoicePack voice, IEnumerable<string> modNames)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        static string Norm(string f) { try { return Path.GetFullPath(f).TrimEnd('\\', '/'); } catch { return f; } }
+        if (!string.IsNullOrWhiteSpace(patch.WavLipFolder)) set.Add(Norm(patch.WavLipFolder));
+        if (!string.IsNullOrWhiteSpace(patch.FinalRoot))
+        {
+            var template = ResolveFuzTemplate(patch, voice);
+            foreach (var n in modNames) set.Add(Norm(Path.Combine(patch.FinalRoot, ExpandTemplate(template, n, voice, patch))));
+        }
+        return set;
+    }
+
     public List<string> StaleExports(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods)
     {
         ExportMap(patch);
         var planned = PlannedExports(patch, voice, mods);
-        return patch.Exported.Keys.Where(k => !planned.Contains(k) && File.Exists(k)).OrderBy(k => k).ToList();
+        return patch.Exported.Keys.Where(k => !planned.Contains(k) && File.Exists(k) && (KeepFiles == null || !KeepFiles.Contains(k))).OrderBy(k => k).ToList();
     }
 
     /// <summary>Each stale file with the reason its line is no longer exported, in plain words.</summary>

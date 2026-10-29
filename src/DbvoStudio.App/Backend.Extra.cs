@@ -513,6 +513,7 @@ public sealed partial class Backend
             voicePack = voice?.Name ?? "(missing)",
             voiceColor = voice?.Color ?? "",
             modNames = its.Select(m => m.Name).ToList(),
+            folders = voice == null ? new List<string>() : Phase2Service.ExportFolders(x, voice, its.Select(m => m.Name)).ToList(),
             category = its.Count > 0 ? its[0].Category : "Misc",
             total = x.Lines.Count,
             generated = x.Lines.Count(l => l.SelectedTakeId != null && !l.IsOmitted && !l.Excluded),

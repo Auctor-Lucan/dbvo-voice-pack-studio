@@ -434,6 +434,7 @@ public sealed partial class Backend
                     var patch = LoadPatch(S(p, "id"));
                     var voice = LoadVoice(patch.VoicePackId);
                     var svc = new Phase2Service(_lib, Runtime());
+                    svc.KeepFiles = SharedFolderFiles(patch, voice, PatchModNames(patch));
                     int removed = B(p, "removeStale") ? svc.RemoveStaleExports(patch, voice, _lib.LoadMods()) : 0;
                     var rep = svc.ExportWavLip(patch, voice);
                     // "WAV + LIP only": the DBVO Fix plugins and topic file in those folders are left as they are.
@@ -445,7 +446,9 @@ public sealed partial class Backend
                 return await Locked(() =>
                 {
                     var patch = LoadPatch(S(p, "id"));
-                    return new Phase2Service(_lib, Runtime()).StaleExportReasons(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods()).Select(x => new { path = x.Path, why = x.Why }).ToList();
+                    var sv = new Phase2Service(_lib, Runtime());
+                    sv.KeepFiles = SharedFolderFiles(patch, LoadVoice(patch.VoicePackId), PatchModNames(patch));
+                    return sv.StaleExportReasons(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods()).Select(x => new { path = x.Path, why = x.Why }).ToList();
                 });
             case "patch.writeFixPlugins": return await Locked(() => WritePatchFixPlugins(p));
             case "patch.fixConflicts": return await Locked(() => FixConflicts(LoadPatch(S(p, "id"))));
@@ -924,6 +927,7 @@ public sealed partial class Backend
             category = mods.FirstOrDefault(m => patch.ModIds.Contains(m.Id))?.Category ?? "Misc",
             mediaBase = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, _lib.PatchFolder(patch.Id)).Replace('\\', '/') + "/",
             modNames = mods.Where(m => patch.ModIds.Contains(m.Id)).ToDictionary(m => m.Id, m => m.Name),
+            sharedWith = SharedFolderPatches(patch, voice, mods.Where(m => patch.ModIds.Contains(m.Id)).Select(m => m.Name)).Select(x => x.Name).ToList(),
             lines = patch.Lines.Select(l => Line2Dto(l, voice)).ToList(),
         };
     }
@@ -935,7 +939,7 @@ public sealed partial class Backend
         hasSource = l.SourceWav != null, sourceWav = l.SourceWav,
         stem = v == null ? "" : LineNaming.Stem(l.FinalLine, v.Naming),
         legacyName = LineNaming.Legacy(l.FinalLine),
-        differs = l.SpokenDiffersFromFinal, editedInPhase1 = l.EditedInPhase1,
+        differs = l.SpokenDiffersFromFinal, editedInPhase1 = l.EditedInPhase1, textChanged = l.TextChanged,
         stale = l.SelectedTake != null && l.SelectedTake.SpokenText != l.Spoken,
         sources = l.Sources.Select(s => new { s.ModId, s.Plugin, formId = s.FormId.ToString("X8"), field = s.Field.ToString() }),
         takes = l.Takes.Select(t => new { t.Id, t.Slot, t.CreatedUtc, t.SpokenText, t.Settings, wav = t.WavPath.Replace('\\', '/'), t.DurationSeconds, kept = t.Kept, t.Qa, original = t.OriginalFuz != null }),
@@ -950,12 +954,14 @@ public sealed partial class Backend
         {
             case "spoken":
                 line.UndoSpoken = null;
+                line.TextChanged = false;
                 line.Spoken = S(p, "value");
                 line.SpokenEdited = line.Spoken != SpokenText.DefaultFor(line.FinalLine);
                 line.TagSuggestion = null;
                 line.RefreshStale();
                 break;
             case "resetSpoken":
+                line.TextChanged = false;
                 line.UndoSpoken = line.Spoken;
                 line.Spoken = SpokenText.DefaultFor(line.FinalLine);
                 line.SpokenEdited = false;
@@ -1238,7 +1244,7 @@ public sealed partial class Backend
                 try
                 {
                     files = string.IsNullOrWhiteSpace(custom) ? WriteFixAndTopics(patch, keepFix) : new List<string>();
-                    if (removeStale && string.IsNullOrWhiteSpace(custom)) { removed = svc.RemoveStaleExports(patch, voice, _lib.LoadMods()); _lib.Save(patch); }
+                    if (removeStale && string.IsNullOrWhiteSpace(custom)) { svc.KeepFiles = SharedFolderFiles(patch, voice, PatchModNames(patch)); removed = svc.RemoveStaleExports(patch, voice, _lib.LoadMods()); _lib.Save(patch); }
                 }
                 finally { _gate.Release(); }
                 if (removed > 0) files.Insert(0, $"{removed} file(s) from earlier exports removed (lines no longer exported).");

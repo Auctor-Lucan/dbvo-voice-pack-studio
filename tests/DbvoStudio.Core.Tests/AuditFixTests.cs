@@ -97,6 +97,28 @@ public class AuditFixTests : IDisposable
     }
 
     [Fact]
+    public void Tags_and_edits_on_a_line_without_takes_survive_a_text_change()
+    {
+        var (mod, patch, voice, svc) = OneLinePatch();
+        svc.Sync(patch, voice, new[] { mod });
+        var line = patch.Lines.Single();
+        line.Spoken = "[sighs] Follow me."; line.SpokenEdited = true; line.Marked = true;
+        mod.Plugins[0].Lines[0].Final = "Follow me, friend."; // a mod update or a Phase 1 edit
+        svc.Sync(patch, voice, new[] { mod });
+        var l2 = patch.Lines.Single();
+        Assert.Equal("[sighs] Follow me, friend.", l2.Spoken); // the tags go on the new text
+        Assert.True(l2.Marked);
+        Assert.False(l2.TextChanged);
+
+        l2.Spoken = "[sighs] Come along, friend."; l2.SpokenEdited = true; // words of your own
+        mod.Plugins[0].Lines[0].Final = "Follow me, my friend.";
+        svc.Sync(patch, voice, new[] { mod });
+        var l3 = patch.Lines.Single();
+        Assert.Equal("[sighs] Come along, friend.", l3.Spoken); // kept as written…
+        Assert.True(l3.TextChanged); // …and marked to check
+    }
+
+    [Fact]
     public void Takes_survive_a_line_leaving_phase1_and_coming_back()
     {
         var (mod, patch, voice, svc) = OneLinePatch();

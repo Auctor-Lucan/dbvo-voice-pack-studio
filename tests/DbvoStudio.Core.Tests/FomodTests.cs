@@ -232,6 +232,30 @@ second line</description>
     }
 
     [Fact]
+    public async Task Pack_as_bsa_leaves_names_a_bsa_cant_store_as_loose_files()
+    {
+        var root = Path.Combine(_dir, "rootbsa2");
+        var snd = Path.Combine(root, "Inigo", "Sound", "DBVO", "myvoice");
+        Directory.CreateDirectory(snd);
+        File.WriteAllText(Path.Combine(snd, "Hello.fuz"), "fuz1");
+        File.WriteAllText(Path.Combine(snd, "Привет.fuz"), "fuz2");
+        var voice = new VoicePack { Name = "My Voice", PackId = "MyVoice" };
+        var p = FomodService.NewProject(voice, "My Voice");
+        p.RootFolder = root;
+        p.ReleaseFolder = Path.Combine(_dir, "releasebsa2");
+        p.PackBsa = true;
+        FomodService.GroupFor(p, "Followers").Options.Add(new FomodOption { Name = "Inigo", Files = { new FomodFile { Kind = "folder", Source = @"Inigo\Sound", Destination = "Sound" } } });
+        var res = await new FomodService(new Library(Path.Combine(_dir, "lib2")), new AppSettings()).BuildAsync(p, NamingMode.Dbvo2Hash, false);
+        Assert.Equal(1, res.Bsas);
+        Assert.Contains(res.Warnings, w => w.Contains("loose"));
+        using (var bsa = Archives.BsaArchive.Open(Path.Combine(res.Staging, "_bsa", "DBVO - MyVoice - Inigo.bsa")))
+            Assert.Equal("fuz1"u8.ToArray(), bsa.Read(@"sound\dbvo\myvoice\hello.fuz"));
+        var mc = FomodXml.ReadText(Path.Combine(res.Staging, "fomod", "ModuleConfig.xml"));
+        Assert.Contains("Привет.fuz", mc);
+        Assert.True(Directory.EnumerateFiles(res.Staging, "Привет.fuz", SearchOption.AllDirectories).Any());
+    }
+
+    [Fact]
     public async Task Build_works_when_the_release_folder_is_the_fomod_root()
     {
         var root = Path.Combine(_dir, "root2");

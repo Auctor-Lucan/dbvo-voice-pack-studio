@@ -592,7 +592,7 @@ public sealed class FomodService
         }
 
         // BSA: each option's Sound folder(s) become "<plugin>.bsa" next to the plugin that loads it.
-        var bsaJobs = new List<(string Base, List<string> Folders, bool MakeLoader, string Option)>();
+        var bsaJobs = new List<(string Base, List<string> Folders, bool MakeLoader, string Option, HashSet<string> Loose)>();
         if (p.PackBsa)
         {
             var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -615,6 +615,21 @@ public sealed class FomodService
                     : UniqueName(usedNames, SafeName($"DBVO - {(string.IsNullOrWhiteSpace(p.Json.VoicePackId) ? p.Name : p.Json.VoicePackId)} - {o.Name}"));
                 bool loader = fix == null || !Path.GetFileNameWithoutExtension(fix.Destination).Equals(baseName, StringComparison.OrdinalIgnoreCase);
                 foreach (var f in sound) o.Files.Remove(f);
+                // A BSA stores names as 8-bit text: names with letters beyond Latin-1 (Cyrillic, Greek, ł …) would turn
+                // into "?" and never be found in game. Those files go next to the archive as loose files instead.
+                var loose = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var d in folders)
+                    foreach (var file in Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories))
+                    {
+                        var rel = Path.GetRelativePath(d, file);
+                        if (rel.All(c => c <= 0xFF)) continue;
+                        loose.Add(Path.GetFullPath(file));
+                        var stagedRel = "_loose\\" + baseName + "\\" + rel;
+                        mapped[file + "|False"] = stagedRel;
+                        jobs.Add((file, Path.Combine(staging, Os(stagedRel)), false));
+                        o.Files.Add(new FomodFile { Kind = "file", Source = file, Destination = "Sound\\" + rel });
+                    }
+                if (loose.Count > 0) res.Warnings.Add($"{o.Name}: {loose.Count} file(s) have letters a BSA can't store in their names, so they are installed as loose files next to the archive (they work the same in game).");
                 var bsaRel = "_bsa\\" + baseName + ".bsa";
                 o.Files.Add(new FomodFile { Kind = "file", Source = bsaRel, Destination = baseName + ".bsa" });
                 mapped[bsaRel + "|False"] = bsaRel;
@@ -624,7 +639,7 @@ public sealed class FomodService
                     o.Files.Add(new FomodFile { Kind = "file", Source = espRel, Destination = baseName + ".esp" });
                     mapped[espRel + "|False"] = espRel;
                 }
-                bsaJobs.Add((baseName, folders, loader, o.Name));
+                bsaJobs.Add((baseName, folders, loader, o.Name, loose));
             }
         }
 
@@ -673,9 +688,9 @@ public sealed class FomodService
         }
         for (int b = 0; b < bsaJobs.Count; b++)
         {
-            var (baseName, folders, loader, option) = bsaJobs[b];
+            var (baseName, folders, loader, option, loose) = bsaJobs[b];
             progress?.Report(new GenerationProgress(b, bsaJobs.Count, 0, baseName + ".bsa", "Packing BSA archives"));
-            var entries = folders.SelectMany(d => Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories).Where(f => !InRelease(f))
+            var entries = folders.SelectMany(d => Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories).Where(f => !InRelease(f) && !loose.Contains(Path.GetFullPath(f)))
                 .Select(f => new Archives.BsaWriter.Entry("sound\\" + Path.GetRelativePath(d, f), f))).ToList();
             var bsa = Path.Combine(staging, "_bsa", baseName + ".bsa");
             await Task.Run(() => Archives.BsaWriter.Write(bsa, entries, ct), ct);

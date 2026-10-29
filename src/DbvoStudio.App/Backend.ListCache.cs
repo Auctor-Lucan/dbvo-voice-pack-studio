@@ -129,6 +129,34 @@ public sealed partial class Backend
         }
     }
 
+    /// <summary>Other patches exporting to one of the same folders (WAV + LIP or .fuz) as this one.</summary>
+    private List<(string Id, string Name)> SharedFolderPatches(DbvoPatch patch, VoicePack? voice, IEnumerable<string> modNames)
+    {
+        if (voice == null) return new();
+        var mine = Phase2Service.ExportFolders(patch, voice, modNames);
+        if (mine.Count == 0) return new();
+        var (_, rows) = ListRowsFor(_lib.LoadVoicePacks());
+        var o = new List<(string, string)>();
+        foreach (var r in rows)
+        {
+            var id = r.GetProperty("id").GetString() ?? "";
+            if (id == patch.Id || !r.TryGetProperty("folders", out var fs)) continue;
+            if (fs.EnumerateArray().Any(f => mine.Contains(f.GetString() ?? ""))) o.Add((id, r.GetProperty("name").GetString() ?? id));
+        }
+        return o;
+    }
+
+    private List<string> PatchModNames(DbvoPatch patch) => patch.ModIds.Select(id => { try { return _lib.LoadMod(id)?.Name; } catch { return null; } }).Where(n => n != null).Select(n => n!).ToList();
+
+    /// <summary>Files the patches sharing this patch's folders have exported: this patch never removes them as stale.</summary>
+    private HashSet<string> SharedFolderFiles(DbvoPatch patch, VoicePack voice, IEnumerable<string> modNames)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (id, _) in SharedFolderPatches(patch, voice, modNames))
+            try { foreach (var k in LoadPatch(id).Exported.Keys) set.Add(k); } catch { }
+        return set;
+    }
+
     /// <summary>patch stamp | voice pack id=stamp | mod id=stamp…</summary>
     private string PatchKey(string stamp, string voiceId, IEnumerable<string> modIds) =>
         stamp + "|" + voiceId + "=" + Stamp(Path.Combine(_lib.Root, "voicepacks", voiceId + ".json")) + "|" +

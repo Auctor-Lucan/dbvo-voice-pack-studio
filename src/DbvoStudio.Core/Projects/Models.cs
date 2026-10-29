@@ -500,6 +500,8 @@ public class Phase2Line
     /// <summary>What the voice says. Free text, tags allowed.</summary>
     public string Spoken { get; set; } = "";
     public bool SpokenEdited { get; set; }
+    /// <summary>The in-game text changed (a mod update, a Phase 1 edit) and the spoken text was kept as you wrote it: check it.</summary>
+    public bool TextChanged { get; set; }
     public List<LineSource> Sources { get; set; } = new();
     public Phase2Status Status { get; set; } = Phase2Status.Pending;
     public string? OmittedBy { get; set; }
