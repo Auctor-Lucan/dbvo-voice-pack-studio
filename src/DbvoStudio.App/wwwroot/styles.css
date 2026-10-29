@@ -1074,3 +1074,10 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .te-chip { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--accent-soft); border: 1px solid var(--accent); color: var(--link); }
 .pp-cell:empty::after { content: ''; }
 .modal-card:focus { outline: none; }
+
+/* NPC Revoice setup and speakers: compact */
+.dropzone.slim { display: flex; align-items: center; gap: 16px; padding: 10px 14px; text-align: left; }
+.dropzone.slim .faint { font-size: 12px; margin-top: 2px; }
+.rv-path { font-size: 12px; }
+.speakers-sec { max-width: 1180px; }
+.speakers-sec .section-body { padding: 2px 12px 6px; }

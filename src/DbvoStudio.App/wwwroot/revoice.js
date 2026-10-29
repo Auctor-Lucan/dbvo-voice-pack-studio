@@ -155,12 +155,12 @@ export async function revoiceView(id) {
 
   // ---------------------------------------------------------------- setup
   function renderSetup() {
-    const wrap = h('div.view-body.reading');
+    const wrap = h('div.view-body.form-page');
     const sec = (title, extra, ...rows) => h('div.section', h('div.section-head', h('h2', title), h('div.spacer'), extra), h('div.section-body', rows));
     const srow = (label, help, control) => h('div.srow', h('div.lbl', h('span', label), help ? h('small', help) : null), h('div', { title: typeof help === 'string' ? help : label }, control));
-    const drop = h('div.dropzone', h('div', h('b', 'Drop plugins, .bsa archives, .zip / .7z files or folders here')),
-      h('div.faint', 'A plugin brings its own archives (Plugin.bsa, Plugin - Voices.bsa) and a Sound\\Voice folder next to it. Folders can be a Data folder, a mod folder (MO2\\mods\\…) or an unpacked download.'),
-      h('div.row', { style: { justifyContent: 'center', marginTop: '10px' } },
+    const drop = h('div.dropzone.slim', h('div.grow', h('b', 'Drop plugins, .bsa archives, .zip / .7z files or folders here'),
+      h('div.faint', 'A plugin brings its own archives (Plugin.bsa, Plugin - Voices.bsa) and a Sound\\Voice folder next to it. Folders can be a Data folder, a mod folder (MO2\\mods\\…) or an unpacked download.')),
+      h('div.row', { style: { flexWrap: 'nowrap' } },
         h('button.btn.sm', { title: 'Add plugins', onclick: async () => add(await rpc('pick.files', { title: 'Plugins to revoice (and their masters)', filter: 'Plugins|*.esp;*.esm;*.esl' })) }, 'Add plugins…'),
         h('button.btn.sm', { title: 'Add voice archives', onclick: async () => add(await rpc('pick.files', { title: 'Voice archives', filter: 'Archives|*.bsa;*.zip;*.7z' })) }, 'Add .bsa / .zip / .7z…'),
         h('button.btn.sm', { title: 'Add a folder with Sound\\Voice inside', onclick: async () => { const f = await rpc('pick.folder', { title: 'Folder with Sound\\Voice' }); if (f) add([f]); } }, 'Add folder…')));
@@ -183,19 +183,19 @@ export async function revoiceView(id) {
       : h('div.dim', 'Not scanned yet. Add the plugins and voice sources, then Scan.');
 
     wrap.append(
-      sec('Scan', h('button.btn.primary.sm', { title: 'Read everything and build the line list', onclick: scan }, proj.lastScan ? '⟳ Rescan' : 'Scan'), h('div', { style: { padding: '10px 0' } }, scanBox)),
+      sec('Scan', h('button.btn.primary.sm', { title: 'Read everything and build the line list', onclick: scan }, proj.lastScan ? '⟳ Rescan' : 'Scan'), h('div', { style: { padding: '8px 0' } }, scanBox)),
       sec('Plugins', null,
-        h('div', { style: { padding: '10px 0' } }, drop),
+        h('div', { style: { padding: '8px 0 4px' } }, drop),
         h('table.tbl', h('thead', h('tr', h('th', 'Plugin'), h('th', { title: 'Lines from this plugin are revoiced. Others are only read (masters, NPCs, conditions).' }, 'Revoice its lines'), h('th', ''))),
           h('tbody', proj.plugins.map((pl) => h('tr',
-            h('td', h('div.mono', pl.fileName, pl.baseGame ? h('span.badge.b-skip', { style: { marginLeft: '6px' } }, 'base game') : null, !pl.exists ? h('span.badge.b-broken', { style: { marginLeft: '6px' } }, 'missing') : null), h('div.faint.ellipsis', { title: pl.path }, pl.path)),
+            h('td', h('div.mono', pl.fileName, pl.baseGame ? h('span.badge.b-skip', { style: { marginLeft: '6px' } }, 'base game') : null, !pl.exists ? h('span.badge.b-broken', { style: { marginLeft: '6px' } }, 'missing') : null), h('div.ellipsis.rv-path', pathText(pl.path))),
             h('td', switchEl(pl.target, (v) => setPlugin(pl, { target: v }), '', { title: 'Revoice this plugin\'s lines' + (pl.baseGame ? ' (base game: many thousands of lines)' : '') })),
             h('td', pl.baseGame ? null : h('button.icon-btn', { title: 'Remove from the project', onclick: () => setPlugin(pl, { remove: true }) }, '×'))))))),
       sec('Voice file sources', null,
-        h('div.faint', { style: { padding: '8px 0' } }, 'Where the current voice files are (for playback, and to know which voice type folders exist). Higher priority wins; loose files beat archives, as in game.'),
+        h('div.faint', { style: { padding: '6px 0' } }, 'Where the current voice files are (for playback, and to know which voice type folders exist). Higher priority wins; loose files beat archives, as in game.'),
         h('table.tbl', h('thead', h('tr', h('th', 'Source'), h('th', { title: 'Higher wins when two sources have the same file' }, 'Priority'), h('th', ''))),
           h('tbody', proj.sources.map((src) => h('tr',
-            h('td', h('div', h('span.badge.b-fixed', src.kind), ' ', h('span.mono', src.path.split('\\').pop()), src.baseGame ? h('span.badge.b-skip', { style: { marginLeft: '6px' } }, 'base game') : null, !src.exists ? h('span.badge.b-broken', { style: { marginLeft: '6px' } }, 'missing') : null), h('div.faint.ellipsis', { title: src.path }, src.path)),
+            h('td', h('div', h('span.badge.b-fixed', src.kind), ' ', h('span.mono', src.path.split('\\').pop()), src.baseGame ? h('span.badge.b-skip', { style: { marginLeft: '6px' } }, 'base game') : null, !src.exists ? h('span.badge.b-broken', { style: { marginLeft: '6px' } }, 'missing') : null), h('div.ellipsis.rv-path', pathText(src.path))),
             h('td', src.baseGame ? h('span.faint', String(src.priority)) : h('input', { type: 'number', value: src.priority, style: { width: '70px' }, title: 'Higher wins', onchange: (e) => setSource(src, { priority: Number(e.target.value) }) })),
             h('td', src.baseGame ? null : h('button.icon-btn', { title: 'Remove this source', onclick: () => setSource(src, { remove: true }) }, '×'))))))),
       sec('Options', null,
@@ -434,7 +434,7 @@ export async function revoiceView(id) {
     const charsLeft = list.filter((x) => x.state < 2).reduce((a, x) => a + (stats.get(x.sp.key) || { chars: 0 }).chars, 0);
     const kind = (sp) => sp.key.startsWith('vt:') ? 'shared lines of a voice type' : sp.key.startsWith('nvt:') ? 'new voice type' : '';
     const STATE = [['In progress', ''], ['Needs a voice', 'warn'], ['Finished', 'ok'], ['Skipped', '']];
-    const tbl = h('table.tbl.speakers-tbl', { style: { maxWidth: '1180px' } },
+    const tbl = h('table.tbl.speakers-tbl',
       h('thead', h('tr', h('th', 'Speaker'), h('th', 'Voice type'), h('th', { title: 'Lines with a current take, out of the lines to make (excluded lines don\'t count)' }, 'Progress'),
         h('th', { title: 'Characters still to generate ≈ ElevenLabs credits' }, 'Left'), h('th', { title: 'Engine and voice for this speaker' }, 'Voice'), h('th', { title: 'Leave this speaker\'s lines alone (not generated or exported)' }, 'Skip'), h('th', ''))),
       h('tbody', list.map(({ sp, state }) => {
@@ -464,7 +464,7 @@ export async function revoiceView(id) {
         n[3] ? h('span.faint', `${n[3]} skipped`) : null,
         h('div.spacer'),
         h('span.faint', { title: 'Characters still to generate for speakers that are not skipped ≈ ElevenLabs credits' }, `${charsLeft.toLocaleString()} characters left`)),
-      tbl);
+      h('div.section.speakers-sec', h('div.section-body', tbl)));
     return wrap;
   }
 
@@ -1113,7 +1113,7 @@ export async function revoiceView(id) {
 
   // ---------------------------------------------------------------- new voice types
   function renderVoiceTypes() {
-    const wrap = h('div.view-body.reading');
+    const wrap = h('div.view-body.form-page');
     wrap.append(
       h('div.help', { style: { maxWidth: '1100px', marginBottom: '12px' } },
         h('p', h('b', 'Only when you need it. '), 'Replacing files in place needs no plugin. A new voice type is for one NPC who shares a vanilla voice type (Aela uses FemaleCommander with Uthgerd, Rayya, Legate Rikke…) and should sound different in all of their lines, including greetings and combat.'),
