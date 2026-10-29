@@ -580,12 +580,12 @@ export async function patchView(id) {
       switchEl(!!voice.noiseReducedPauses, (v) => setIn(voice, 'noiseReducedPauses', v), 'Noise-reduced pauses', { disabled: voice.settingsLocked, title: 'Every new take: rumble below 80 Hz is removed and noisy pauses are turned down (up to 15 dB, never muted). Words, breaths next to words and fading endings are left alone.' }),
       h('div.faint', 'Removes low rumble and turns down noise in pauses. The voice is untouched. New takes; for existing ones use Post-processing ▾.'));
   }
-  // Experiment: leading [tags] go to ElevenLabs as context (previous_text), which isn't billed, instead of as text.
+  // Leading [tags] go to ElevenLabs as context (previous_text), which isn't counted against credits, instead of as text.
   function tagsContextRow() {
     if (vc || voice.engine !== 'elevenlabs') return null;
     return h('div.pause-row',
-      switchEl(!!patch.tagsAsContext, async (v) => { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: v }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Tags as context (experiment)', { title: 'This patch, new takes: the [tags] at the start of a line are sent as the text before it (request stitching), which ElevenLabs doesn\'t bill, instead of as part of the line. Whether the voice still follows them is what the experiment is for. Each take shows the credits ElevenLabs billed in its takes window.' }),
-      h('div.faint', 'Leading [tags] are sent as context, not billed. Compare takes made with it on and off: the takes window shows what each one was billed.'));
+      switchEl(!!patch.tagsAsContext, async (v) => { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: v }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Leading tags as context', { title: 'This patch, new takes: the [tags] at the start of a line are sent to ElevenLabs as context (the text before the line) instead of as part of the line. Context isn\'t counted against your credits, and short lines no longer get doubled words from their tags. Tags later in the line stay in the text.' }),
+      h('div.faint', 'Leading [tags] don\'t use credits, but they come through weaker: phrase them stronger, e.g. [British Extremely Baleful] instead of [British Baleful]. Check the billed credits in the takes window.'));
   }
   function outputGroup(fields, o) {
     const sum = `${FORMAT_NAME[o.outputFormat] || o.outputFormat || '—'} · ${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once${voice.noiseReducedPauses ? ' · noise-reduced pauses' : ''}`;
