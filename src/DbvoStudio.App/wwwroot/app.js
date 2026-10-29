@@ -167,6 +167,10 @@ on('progress', (p) => {
   jobEl.querySelector('.bar-fill').style.width = (p.total ? (100 * p.done) / p.total : 0) + '%';
   document.dispatchEvent(new CustomEvent('job-progress', { detail: p }));
 });
+on('contextBilled', (d) => {
+  toast(`ElevenLabs may have started billing the context: "${d.line}" cost ${d.billed} credits, while its words alone come to about ${d.expected}. Tags as context may no longer save credits — compare the billed numbers in the takes window.`, true);
+});
+
 on('jobDone', async (d) => {
   lastDone = { kind: d.kind, t: Date.now() };
   app.job = null;

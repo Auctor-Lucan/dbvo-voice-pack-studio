@@ -1152,7 +1152,26 @@ public sealed partial class Backend
                 var svc = new Phase2Service(_lib, Runtime());
                 var progress = new DirectProgress<GenerationProgress>(g => Emit("progress", new { kind = "generate", g.Done, g.Total, g.Failed, g.Current, g.Message }));
                 Emit("progress", new { kind = "generate", done = 0, total = lines.Count, failed = 0, current = (string?)null, message = (string?)null });
-                Task OnLine(Phase2Line l) { Emit("line2", new { patchId = patch.Id, line = Line2Dto(l, voice) }); return Task.CompletedTask; }
+                // Tags as context: warn once if ElevenLabs bills a take for more than its words (it started billing the context).
+                double? ctxRate = patch.TagsAsContext && patch.Kind != "vc" && voice.Engine == "elevenlabs" ? await CreditRate(voice.Eleven.ModelId) : null;
+                bool ctxWarned = false;
+                Task OnLine(Phase2Line l)
+                {
+                    Emit("line2", new { patchId = patch.Id, line = Line2Dto(l, voice) });
+                    if (ctxRate is { } r && !ctxWarned && l.Takes.OrderByDescending(t => t.CreatedUtc).FirstOrDefault() is { Settings: { TagsAsContext: true, BilledCharacters: { } billed } } t)
+                    {
+                        var words = System.Text.RegularExpressions.Regex.Replace(t.SpokenText, @"^\s*(?:\[[^\]]*\]\s*)+", "");
+                        var tags = t.SpokenText.Length - words.Length;
+                        double expected = Math.Ceiling(words.Length * r);
+                        if (billed > expected + Math.Max(2, tags * r * 0.5))
+                        {
+                            ctxWarned = true;
+                            App.Log($"Tags as context: \"{l.FinalLine}\" was billed {billed} credits; its words alone come to about {expected}.");
+                            Emit("contextBilled", new { patchId = patch.Id, line = l.FinalLine, billed, expected });
+                        }
+                    }
+                    return Task.CompletedTask;
+                }
                 if (patch.Kind == "vc")
                 {
                     // Voice Changer on: lines with a source are converted; the rest (only when allowed) use text-to-speech.

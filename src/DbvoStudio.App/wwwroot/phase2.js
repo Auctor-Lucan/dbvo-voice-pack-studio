@@ -419,7 +419,7 @@ export async function patchView(id) {
       clear(list).append(line.takes.slice().reverse().map((t) => h('div.take' + (t.id === line.selectedTakeId ? '.sel' : ''),
         h('button.icon-btn.big', { title: 'Play this take', onclick: () => play(line, t) }, '▶'),
         h('div.grow', { style: { minWidth: 0 } }, h('div', '#' + t.slot + (t.id === line.selectedTakeId ? ' · used for export and .fuz' : '')),
-          h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.settings.engine || ''} · ${t.settings.modelId || ''} · ${new Date(t.createdUtc).toLocaleString()}${t.settings.billedCharacters != null ? ` · billed ${t.settings.billedCharacters} characters` : ''}${t.settings.tagsAsContext ? ' · tags as context' : ''}`),
+          h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.settings.engine || ''} · ${t.settings.modelId || ''} · ${new Date(t.createdUtc).toLocaleString()}${t.settings.billedCharacters != null ? ` · billed ${t.settings.billedCharacters} credits` : ''}${t.settings.tagsAsContext ? ' · tags as context' : ''}`),
           t.spokenText !== line.spoken ? h('div.meta.ellipsis', { title: t.spokenText }, 'Text then: ' + t.spokenText) : null),
         h('button.act-btn' + (t.kept ? '.on' : ''), { title: t.kept ? 'Kept as a variant - click to un-keep' : 'Keep as a variant (DBVO 2.0 exports every kept take)', onclick: async () => { await keep(line, t); render(); } }, icon('star', { filled: t.kept })),
         t.id !== line.selectedTakeId ? h('button.btn.sm', { title: 'Use this take for export and .fuz', onclick: async () => { await upd(line, 'selectTake', t.id); render(); } }, 'Use') : null,
@@ -584,7 +584,7 @@ export async function patchView(id) {
   function tagsContextRow() {
     if (vc || voice.engine !== 'elevenlabs') return null;
     return h('div.pause-row',
-      switchEl(!!patch.tagsAsContext, async (v) => { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: v }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Tags as context (experiment)', { title: 'This patch, new takes: the [tags] at the start of a line are sent as the text before it (request stitching), which ElevenLabs doesn\'t bill, instead of as part of the line. Whether the voice still follows them is what the experiment is for. Each take shows the characters ElevenLabs billed in its takes window.' }),
+      switchEl(!!patch.tagsAsContext, async (v) => { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: v }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Tags as context (experiment)', { title: 'This patch, new takes: the [tags] at the start of a line are sent as the text before it (request stitching), which ElevenLabs doesn\'t bill, instead of as part of the line. Whether the voice still follows them is what the experiment is for. Each take shows the credits ElevenLabs billed in its takes window.' }),
       h('div.faint', 'Leading [tags] are sent as context, not billed. Compare takes made with it on and off: the takes window shows what each one was billed.'));
   }
   function outputGroup(fields, o) {
