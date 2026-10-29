@@ -1610,6 +1610,7 @@ export async function patchView(id) {
           h('li', h('b', 'Short lines stop doubling their words. '), 'Tags in the text of a very short line can make ElevenLabs repeat or ramble; as context they don\'t.'),
           h('li', h('b', 'Tags come through weaker. '), 'Add "Extremely" to make up for it, e.g. [British Extremely Baleful] instead of [British Baleful]. Two tags weaken each other a little; three or more are untested.')),
         h('div.faint', 'Tags later in a line stay in the text and are billed as before. You can turn it off for any patch in the toolbar: Output ▾ → Leading tags as context. Existing patches are unchanged.'),
+        h('div.faint', 'More in Global Settings → General & tools → Leading tags as context: the default for new patches, which each patch can change for itself.'),
       ], [{ label: 'Turn it off for this patch', value: 'off' }, { label: 'Keep it on', primary: true, value: 'on' }], { help: 'leading-tags-as-context' });
       if (v === 'off') { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: false }); reindex(); renderAll(); } catch (e) { fail(e); } }
     }, 400);

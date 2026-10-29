@@ -489,6 +489,7 @@ public sealed partial class Backend
                 },
                 _settings.SevenZipPath,
                 _settings.PlayerNameLinesVoiced,
+                _settings.LeadingTagsAsContext,
                 wavToLip = _settings.WavToLip,
                 categories = _settings.Categories,
                 pronunciations = _settings.Pronunciations,
@@ -543,6 +544,7 @@ public sealed partial class Backend
             _settings.PlayerNameLinesVoiced = pv.GetBoolean();
             Phase1Line.PlayerNamesVoicedByDefault = _settings.PlayerNameLinesVoiced;
         }
+        if (s.TryGetProperty("leadingTagsAsContext", out var lt) && lt.ValueKind is JsonValueKind.True or JsonValueKind.False) _settings.LeadingTagsAsContext = lt.GetBoolean();
         if (s.TryGetProperty("backupsToKeep", out var bk) && bk.ValueKind == JsonValueKind.Number) _settings.BackupsToKeep = bk.GetInt32();
         if (s.TryGetProperty("pronunciations", out var pr) && pr.ValueKind == JsonValueKind.Array)
             _settings.Pronunciations = pr.Deserialize<List<Pronunciation>>(JsonOptions) ?? new();
@@ -1304,7 +1306,7 @@ public sealed partial class Backend
             Kind = kind == "vc" ? "vc" : "tts",
             SourceFolders = sourceFolders ?? new List<string>(),
             // New ElevenLabs patches send leading [tags] as context (not counted against credits, no doubled words on short lines).
-            TagsAsContext = kind != "vc" && voice.Engine == "elevenlabs",
+            TagsAsContext = _settings.LeadingTagsAsContext && kind != "vc" && voice.Engine == "elevenlabs",
         };
         string Expand(string t) => string.IsNullOrWhiteSpace(t) ? "" : Phase2Service.ExpandTemplate(t, modName, voice, patch);
         patch.WavLipFolder = Expand(voice.Destinations.WavLipFolder);

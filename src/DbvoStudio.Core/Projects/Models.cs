@@ -33,6 +33,8 @@ public sealed class AppSettings
     public int BackupsToKeep { get; set; } = 30;
     /// <summary>Lines with &lt;Alias=Player&gt; go into the topic file and are voiced in Phase 2. Off (default): they are left out (voiced in a dedicated player-name patch instead) but can still be exported.</summary>
     public bool PlayerNameLinesVoiced { get; set; }
+    /// <summary>New ElevenLabs patches send leading [tags] as context (each patch can change it in Output ▾).</summary>
+    public bool LeadingTagsAsContext { get; set; } = true;
     public string? LastVoicePackId { get; set; }
     public Dictionary<string, string> Ui { get; set; } = new();
     /// <summary>The global DBVO pronunciation dictionary, used by every voice pack. Voice pack entries win for the same word.</summary>

@@ -294,6 +294,9 @@ async function general(_, rerender) {
           h('button.btn.sm.primary', { title: 'Save the key encrypted for your Windows user', onclick: async () => { try { await rpc('settings.setApiKey', { key: apiKey.value.trim() }); apiKey.value = ''; await refreshState(); rerender(); } catch (e) { fail(e); } } }, 'Save key'),
           h('button.btn.sm', { title: 'Check the key and show your remaining credits', onclick: test }, 'Test')),
         apiStatus))),
+    section('Leading tags as context', null,
+      switchRow('Default for new DBVO Patches', 'On (default): new ElevenLabs patches send the [tags] at the start of each line as context instead of as part of the line. Context isn\'t counted against your credits, and short lines no longer double their words, but the tags come through weaker: add "Extremely" (e.g. [British Extremely Baleful] instead of [British Baleful]); "Very" barely helps, and words like "Deeply" or "Intensely" add a meaning of their own. Two leading tags weaken each other a little; three or more are untested. Tags later in a line stay in the text. Each patch can change it in its toolbar: Output ▾ → Leading tags as context. Existing patches keep their own setting.',
+        switchEl(st.leadingTagsAsContext !== false, (x) => save({ leadingTagsAsContext: x }), null, { title: 'New patches send leading [tags] as context' }))),
     section('Appearance', null,
       srow('Colour theme', 'Changes the whole app straight away. Voice pack labels keep their own colours.', h('div.theme-picks', THEMES.map((t) => {
         const cur = ((st.ui || {}).theme || 'github-dark') === t.id;
