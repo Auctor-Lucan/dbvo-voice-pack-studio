@@ -1,6 +1,6 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips, closeAllModals } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
 import { bulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
@@ -263,7 +263,7 @@ export async function revoiceView(id) {
     });
     const ok = await modal(`Orphaned voice files (${data.proposals.length})`, [
       h('div.faint', 'Files are first matched by the quest and topic part of their name. For the rest, Whisper (the WAV to LIP settings) listens to each file and the transcript is matched to the subtitles of silent lines. Check the matches, then Link.'),
-      h('div.row', h('button.btn.sm', { title: 'Transcribe the files that have no match yet and match them by text', onclick: async () => { try { await rpc('revoice.orphansWhisper', { id }); document.getElementById('modal').classList.add('hidden'); toast('Transcribing… the list opens again when it is done.'); } catch (e) { fail(e); } } }, '🎙 Match the rest with Whisper'),
+      h('div.row', h('button.btn.sm', { title: 'Transcribe the files that have no match yet and match them by text', onclick: async () => { try { await rpc('revoice.orphansWhisper', { id }); closeAllModals(); toast('Transcribing… the list opens again when it is done.'); } catch (e) { fail(e); } } }, '🎙 Match the rest with Whisper'),
         h('span.faint', `${data.proposals.filter((m) => m.lineId).length} matched`)),
       h('div.box', { style: { maxHeight: '420px', overflow: 'auto' } }, h('table.tbl', h('tbody', rows))),
     ], [{ label: 'Cancel', value: false }, { label: 'Link the matched files', primary: true, value: true }], { wide: true, help: 'setup' });
@@ -1138,10 +1138,14 @@ export async function revoiceView(id) {
     const q = h('input', { type: 'text', placeholder: 'NPC name or EditorID', style: { width: '100%' } });
     const res = h('div.col', { style: { maxHeight: '320px', overflow: 'auto' } });
     let chosen = null;
+    let seq = 0;
     const run = debounce(async () => {
+      const mine = ++seq;
       try {
+        chosen = null; // a new search: pick again from what it shows
         clear(res).append(h('div.faint', 'Searching… (the first search loads the plugins)'));
         const list = await rpc('revoice.npcs', { id, q: q.value });
+        if (mine !== seq) return; // a newer search is on its way
         clear(res).append(list.length ? list.map((n) => h('label.row', { style: { padding: '4px 0' } }, h('input', { type: 'radio', name: 'npc', onchange: () => { chosen = n.key; } }), h('b', n.name), h('span.faint.mono', n.editorId), h('span.faint', n.plugin), h('div.spacer'), h('span.mono', n.voiceType))) : h('div.faint', 'No NPC found.'));
       } catch (e) { fail(e); }
     }, 300);

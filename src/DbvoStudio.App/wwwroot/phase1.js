@@ -1,6 +1,6 @@
 // Phase 1: Mods list and the per-plugin workspace.
 import { findReplaceDialog } from './tagtools.js';
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton, segmented, pathText, pathRows, pathList, searchLamp } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton, segmented, pathText, pathRows, pathList, searchLamp, closeDialogOf } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
 const KIND_LABEL = {
@@ -250,7 +250,7 @@ async function batchAdd(initial) {
         results.push({ name: m.name, ok: true, plugins: m.rows.length, lines: r.reports.reduce((a, x) => a + x.added + x.kept + x.changed, 0), miss, strings });
       } catch (e) { results.push({ name: m.name, ok: false, error: e.message || String(e) }); }
     }
-    document.querySelector('#modal .modal-card')?.querySelector(':scope > .row:last-child .btn')?.click();
+    closeDialogOf(createBtn);
     const bad = results.filter((r) => !r.ok);
     await modal('Mods added', [
       h('div', `${results.length - bad.length} of ${results.length} mod(s) created.`),

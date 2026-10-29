@@ -127,43 +127,86 @@ export function helpButton(anchor, { label = '' } = {}) {
     onclick: (e) => { e.preventDefault(); e.stopPropagation(); document.dispatchEvent(new CustomEvent('open-help', { detail: { anchor, toggle: true } })); } }, icon('help', { size: 15 }));
 }
 
-// A dialog opened from inside another (e.g. "+ New category…" in New mod) stacks on it: the one below is put back when it closes.
-const modalStack = [];
-export function modal(title, content, buttons = [{ label: 'OK', primary: true, value: true }], { wide = false, help = null, onOpen = null, cls = '' } = {}) {
+// Dialogs stack: one opened from inside another (e.g. "+ New category…" in New mod) goes on top, and the one below comes
+// back (with its scroll position) when it closes. Escape closes the top one. Closing a dialog closes the ones on it first.
+const dialogs = [];
+let modalKeysOn = false;
+function scrollState(root) {
+  const out = [];
+  const walk = (el) => { if (el.scrollTop || el.scrollLeft) out.push([el, el.scrollTop, el.scrollLeft]); for (const c of el.children) walk(c); };
+  walk(root);
+  return out;
+}
+export function modal(title, content, buttons = [{ label: 'OK', primary: true, value: true }], { wide = false, help = null, onOpen = null, cls = '', autofocus = true } = {}) {
   const m = document.getElementById('modal');
-  const cardEl = m.querySelector('.modal-card');
-  if (m.classList.contains('hidden')) modalStack.length = 0; // (a dialog hidden by hand leaves nothing to restore)
-  else { modalStack.push({ nodes: [...cardEl.childNodes], wide: cardEl.classList.contains('wide'), cls: cardEl.dataset.cls || '' }); if (cardEl.dataset.cls) cardEl.classList.remove(cardEl.dataset.cls); }
-  const level = modalStack.length;
-  const card = clear(cardEl);
+  const card = m.querySelector('.modal-card');
+  if (!modalKeysOn) {
+    modalKeysOn = true;
+    card.tabIndex = -1;
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && dialogs.length && !m.classList.contains('hidden')) dialogs[dialogs.length - 1].close(null); });
+  }
+  // A dialog hidden by hand earlier: forget it (its caller gets null).
+  if (m.classList.contains('hidden') && dialogs.length) for (const d of dialogs.splice(0)) d.resolve(null);
+  // The same dialog twice (a double-click on the button that opens it): the second one is a no.
+  if (dialogs.length && dialogs[dialogs.length - 1].title === title) return Promise.resolve(null);
+  document.querySelectorAll('.menu').forEach((x) => x.remove());
+  closePopover();
+  if (dialogs.length) {
+    const top = dialogs[dialogs.length - 1];
+    top.scroll = [[card, card.scrollTop, card.scrollLeft], ...scrollState(card)];
+    top.nodes = [...card.childNodes];
+    if (top.cls) card.classList.remove(top.cls);
+  }
+  clear(card);
   card.classList.toggle('wide', wide);
-  card.dataset.cls = cls;
   if (cls) card.classList.add(cls);
   return new Promise((resolve) => {
-    let done = false;
-    const close = (v) => {
-      if (done) return; done = true;
-      document.removeEventListener('keydown', key);
-      const below = modalStack.length === level && level > 0 ? modalStack.pop() : null;
+    const me = { title, wide, cls, resolve, nodes: null, scroll: null, close: null };
+    me.close = (v) => {
+      const i = dialogs.indexOf(me);
+      if (i < 0) return;
+      while (dialogs.length - 1 > i) dialogs[dialogs.length - 1].close(null);
+      dialogs.pop();
       if (cls) card.classList.remove(cls);
-      card.dataset.cls = below ? below.cls : '';
-      if (below) { clear(card).append(...below.nodes); card.classList.toggle('wide', below.wide); if (below.cls) card.classList.add(below.cls); }
-      else m.classList.add('hidden');
+      const below = dialogs[dialogs.length - 1];
+      if (below) {
+        clear(card).append(...below.nodes);
+        card.classList.toggle('wide', below.wide);
+        if (below.cls) card.classList.add(below.cls);
+        for (const [el, t, l] of below.scroll || []) { el.scrollTop = t; el.scrollLeft = l; }
+        below.nodes = null;
+      } else m.classList.add('hidden');
       resolve(v);
     };
-    const key = (e) => { if (e.key === 'Escape' && modalStack.length === level) close(null); };
-    document.addEventListener('keydown', key);
+    dialogs.push(me);
     card.append(
       help ? h('div.modal-head', h('h2', title), helpButton(help)) : h('h2', title),
       ...[content].flat(),
       h('div.row', h('div.spacer'), ...buttons.map((b) =>
-        h('button.btn' + (b.primary ? '.primary' : '') + (b.danger ? '.danger' : ''), { onclick: () => close(typeof b.value === 'function' ? b.value() : b.value) }, b.label))),
+        h('button.btn' + (b.primary ? '.primary' : '') + (b.danger ? '.danger' : ''), { onclick: () => me.close(typeof b.value === 'function' ? b.value() : b.value) }, b.label))),
     );
     m.classList.remove('hidden');
-    const first = card.querySelector('input,textarea,select');
-    if (first) first.focus();
-    if (onOpen) onOpen(close);
+    // Focus moves into the dialog, so keys (Space, Enter, arrows) no longer reach the button or grid behind it.
+    const first = autofocus && card.querySelector('input,textarea,select');
+    if (first) first.focus(); else card.focus({ preventScroll: true });
+    if (onOpen) onOpen(me.close);
   });
+}
+
+/** Close every open dialog (their callers get null): before going to another page. */
+export function closeAllModals() { while (dialogs.length) dialogs[dialogs.length - 1].close(null); }
+
+/** Close the dialog that holds el (and any dialog on top of it). */
+export function closeDialogOf(el, value = null) {
+  const card = document.querySelector('#modal .modal-card');
+  const d = dialogs.find((x, i) => (i === dialogs.length - 1 ? card.contains(el) : (x.nodes || []).some((n) => n.contains(el))));
+  if (d) d.close(value);
+}
+
+/** True while el is in the dialog on top (not covered by another one). */
+export function inTopDialog(el) {
+  const m = document.getElementById('modal');
+  return !m.classList.contains('hidden') && m.querySelector('.modal-card').contains(el);
 }
 
 export async function confirmBox(title, text, okLabel = 'OK', danger = false) {

@@ -1,5 +1,5 @@
 import { applyTheme } from './themes.js';
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, popupMenu, pathText, pathRows, pathList } from './lib.js';
+import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, popupMenu, pathText, pathRows, pathList, closeAllModals } from './lib.js';
 import { modsView, modView } from './phase1.js';
 import { patchesView, patchView } from './phase2.js';
 import { fomodsView, fomodView } from './phase3.js';
@@ -47,6 +47,9 @@ export async function refreshState() {
 let navigated = false; // set once the user moves, so the start-up below never overrides a click made while it loads
 export function go(view, params = {}, { history = true } = {}) {
   navigated = true;
+  // Dialogs and the book editor belong to the page being left.
+  closeAllModals();
+  document.querySelectorAll('.book-editor-overlay').forEach((o) => o.dispatchEvent(new CustomEvent('leave')));
   const next = { view, ...params };
   if (history) beforeNavigate(next);
   app.route = next;

@@ -1,7 +1,7 @@
 // Other Tools → Player Grunts Tool: player voice packs for PC Head Tracking (with or without Multi Voice Packs) and
 // Smart Player Voice System. Events are shown as blocks by category; the panel on the right holds the selected event's
 // lines. Event definitions are data (built in, read from the installed mods, or the user's own custom events).
-import { rpc, h, clear, toast, fail, modal, confirmBox, store, debounce, switchEl, segmented, popupMenu, droppedPaths, icon, helpButton, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, store, debounce, switchEl, segmented, popupMenu, droppedPaths, icon, helpButton, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips, closeDialogOf } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { setPaletteExtra } from './nav.js';
 import { recordTake } from './recorder.js';
@@ -418,7 +418,7 @@ export async function gruntProjectView(id) {
       try {
         const r = await rpc('grunts.commit', { id, ...key, tryId: dr.selectedId, subtitle: sub.value });
         committed = r; d = r.project; byId = evById();
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        closeDialogOf(saveBtn);
       } catch (err) { fail(err); }
     });
     const discard = h('button.btn.ghost.danger', { title: 'Throw away every try and the texts of this workspace' }, 'Discard all');
@@ -426,7 +426,7 @@ export async function gruntProjectView(id) {
     discard.addEventListener('click', async () => {
       // A second click confirms (a dialog on top would close this workspace).
       if (dr.tries.length && !armed) { armed = true; discard.textContent = `Delete ${dr.tries.length} tr${dr.tries.length === 1 ? 'y' : 'ies'}? Click again`; setTimeout(() => { armed = false; discard.textContent = 'Discard all'; }, 4000); return; }
-      try { d = await rpc('grunts.discard', { id, ...key }); byId = evById(); document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); } catch (err) { fail(err); }
+      try { d = await rpc('grunts.discard', { id, ...key }); byId = evById(); closeDialogOf(discard); } catch (err) { fail(err); }
     });
     paintTries();
     const voiceLine = V.ready ? [V.voicePack, V.engine === 'elevenlabs' ? 'ElevenLabs' : V.engine === 'voxcpm' ? 'VoxCPM' : 'OmniVoice', V.voiceName !== V.voicePack ? V.voiceName : null, V.model].filter(Boolean).join(' · ') : (V.voicePack ? `${V.voicePack} has no ${V.engine} voice yet.` : 'Pick a DBVO voice pack in Setup & export first.');
@@ -774,7 +774,7 @@ export async function gruntProjectView(id) {
   }
   function issueList(c) {
     const sev = { error: ['b-broken', 'Error'], warning: ['b-toolong', 'Warning'], info: ['b-skip', 'Note'] };
-    const row = (i) => h('div.gr-issue' + (i.eventId ? '.link' : ''), { title: i.eventId ? 'Show this event' : '', onclick: i.eventId ? () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); tab = 'events'; selId = i.eventId; renderAll(); } : null },
+    const row = (i) => h('div.gr-issue' + (i.eventId ? '.link' : ''), { title: i.eventId ? 'Show this event' : '', onclick: i.eventId ? (e) => { closeDialogOf(e.currentTarget); tab = 'events'; selId = i.eventId; renderAll(); } : null },
       h('span.badge.' + sev[i.severity][0], sev[i.severity][1]), h('span', i.text));
     const main = c.issues.filter((i) => i.severity !== 'info').slice(0, 200);
     const notes = c.issues.filter((i) => i.severity === 'info');

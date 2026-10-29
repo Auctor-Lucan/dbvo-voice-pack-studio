@@ -712,8 +712,15 @@ export async function bookProjectView(id) {
     const overlay = h('div.book-editor-overlay');
     const card = h('div.book-editor');
     overlay.append(card);
+    let asking = false; // while "Unsaved changes" is open, leaving the text box doesn't save it
     const close = async () => {
-      if (dirty) { const v = await modal('Unsaved changes', [h('div', 'Save the spoken text before closing?')], [{ label: 'Discard', value: 'discard' }, { label: 'Cancel', value: null }, { label: 'Save', primary: true, value: 'save' }]); if (v == null) return; if (v === 'save') await saveText(); }
+      if (dirty) {
+        asking = true;
+        const v = await modal('Unsaved changes', [h('div', 'Save the spoken text before closing?')], [{ label: 'Discard', value: 'discard' }, { label: 'Cancel', value: null }, { label: 'Save', primary: true, value: 'save' }]);
+        asking = false;
+        if (v == null) return;
+        if (v === 'save') await saveText(); else dirty = false;
+      }
       overlay.remove(); document.removeEventListener('keydown', onKey, true); off(); edAudio.pause();
       try { proj = await rpc('books.get', { id }); reindex(); renderAll(); } catch { /* keep */ }
     };
@@ -734,12 +741,17 @@ export async function bookProjectView(id) {
 
     const currentText = () => variant ? (d.variantsList.find((x) => x.id === variant) || {}).spoken || '' : d.spoken;
     async function saveText() {
-      if (!dirty) return;
+      if (!dirty || asking) return;
+      const sent = ta.value;
       try {
-        d = await rpc('books.book', variant ? { id, stem, action: 'variantSpoken', variant, value: ta.value } : { id, stem, action: 'spoken', value: ta.value });
-        dirty = false; renderEd(true); replaceBook(d.book);
+        d = await rpc('books.book', variant ? { id, stem, action: 'variantSpoken', variant, value: sent } : { id, stem, action: 'spoken', value: sent });
+        // typed on while it was saving: keep what is in the box (it is saved next time)
+        if (ta.value === sent) { dirty = false; renderEd(true); } else renderEd(false);
+        replaceBook(d.book);
       } catch (e) { fail(e); }
     }
+    // Going to another page with the editor open: save the text and close it.
+    overlay.addEventListener('leave', async () => { await saveText(); overlay.remove(); document.removeEventListener('keydown', onKey, true); off(); edAudio.pause(); });
     ta.addEventListener('input', () => { dirty = true; renderCount(); });
     ta.addEventListener('blur', () => saveText());
     const countEl = h('span.faint');
@@ -920,7 +932,10 @@ export async function bookProjectView(id) {
       try {
         if (dirty) await saveText();
         toast('Asking the AI… long books take a while.');
-        const r = await rpc('books.aiFormat', { id, stem, text: ta.value });
+        const asked = ta.value;
+        const r = await rpc('books.aiFormat', { id, stem, text: asked });
+        if (!overlay.isConnected) return; // the editor was closed meanwhile
+        if (ta.value !== asked) { toast('The text changed while the AI worked on it, so its suggestion was left out. Ask again.', true); return; }
         const box = h('textarea', { rows: 16, style: { width: '100%' } }, r.suggestion);
         const ok = await modal('AI spoken format', [
           h('div.faint', 'Check the result: pacing (…) and ALL-CAPS emphasis should be added, words left as they are. The checks below compare it with the game text.'),

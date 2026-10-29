@@ -1,5 +1,5 @@
 // Phase 3: FOMOD Creation — import any ModuleConfig.xml, options from DBVO Patches, the DBVO JSON, validate, simulate, build.
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, switchEl, segmented, popupMenu, helpButton, keepScroll, dragSource, dragTarget } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, switchEl, segmented, popupMenu, helpButton, keepScroll, dragSource, dragTarget, closeAllModals } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip } from './phase2.js';
 
@@ -524,7 +524,7 @@ export async function fomodView(id) {
       store.set('fomodVal:' + id, { errors: errors.length, warnings: issues.length - errors.length, at: Date.now() });
       paintSummary();
       await modal(issues.length ? `${errors.length} error(s), ${issues.length - errors.length} warning(s)` : 'No problems found', [
-        issues.length ? h('div.box', { style: { maxHeight: '60vh', overflow: 'auto', padding: 0 } }, issues.map((i) => h('div.issue', { onclick: () => { if (i.optionId) { document.getElementById('modal').classList.add('hidden'); select(i.optionId); } } },
+        issues.length ? h('div.box', { style: { maxHeight: '60vh', overflow: 'auto', padding: 0 } }, issues.map((i) => h('div.issue', { onclick: () => { if (i.optionId) { closeAllModals(); select(i.optionId); } } },
           h('span.badge.' + (i.level === 'error' ? 'b-broken' : 'b-toolong'), i.level), h('span.faint', i.where), h('span', i.message))))
           : h('div', 'The XML passes the ModConfig 5.0 schema, every file is in place and the DBVO JSON is carried by an option.'),
       ], undefined, { wide: true, help: '5-check-it' });

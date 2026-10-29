@@ -1,6 +1,6 @@
 // Record a take with the microphone: record, listen, trim, then keep it as it is or convert it into the voice pack's
 // voice with the Voice Changer (ElevenLabs speech-to-speech), when that is set up.
-import { rpc, h, clear, toast, fail, modal } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, closeDialogOf } from './lib.js';
 
 const fmt = (s) => (Math.max(0, s) || 0).toFixed(2) + ' s';
 
@@ -157,7 +157,7 @@ export async function recordTake({ patchId, line, onSaved, kind = 'patch', subti
       saved = r.line;
       if (onSaved) onSaved(r.line, r.takeId);
       toast(convert ? 'Converted and kept as a new take.' : kind === 'grunts' ? 'Recording added.' : 'Recording kept as a new take.');
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); // closes the recorder
+      closeDialogOf(status); // closes the recorder
     } catch (e) {
       fail(e);
       status.textContent = 'Not saved: ' + (e.message || e);

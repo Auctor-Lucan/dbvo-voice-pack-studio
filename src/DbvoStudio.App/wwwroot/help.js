@@ -1,6 +1,6 @@
 // The user guide inside the app: a Help page (contents, search, the whole guide) and a side panel that the
 // small ? buttons open at one section. The guide is help/guide.html, exported from the DBVO Studio user guide.
-import { rpc, h, clear, icon, debounce } from './lib.js';
+import { rpc, h, clear, icon, debounce, closeAllModals } from './lib.js';
 import { go } from './app.js';
 
 let guide = null; // a <div> holding the parsed guide
@@ -68,7 +68,7 @@ export async function openHelp(anchor, { toggle = false } = {}) {
   wireLinks(body, (id) => openHelp(id));
   drawer = h('aside.help-drawer', { role: 'dialog', 'aria-label': 'Help: ' + title },
     h('div.help-head', icon('book', { size: 16 }), h('b.grow.ellipsis', title),
-      h('button.btn.sm', { title: 'Open the whole guide at this section', onclick: () => { closeDrawer(); document.getElementById('modal').classList.add('hidden'); go('help', { anchor }); } }, 'Open in the guide'),
+      h('button.btn.sm', { title: 'Open the whole guide at this section', onclick: () => { closeDrawer(); closeAllModals(); go('help', { anchor }); } }, 'Open in the guide'),
       h('button.icon-btn', { title: 'Close (Esc)', onclick: closeDrawer }, icon('x', { size: 16 }))),
     body);
   drawer.dataset.anchor = String(anchor);

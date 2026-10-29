@@ -1073,3 +1073,4 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .te-box { gap: 12px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; background: var(--bg); }
 .te-chip { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--accent-soft); border: 1px solid var(--accent); color: var(--link); }
 .pp-cell:empty::after { content: ''; }
+.modal-card:focus { outline: none; }

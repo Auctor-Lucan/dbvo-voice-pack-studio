@@ -218,7 +218,7 @@ export function initNav() {
     if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); back(); return; }
     if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); forward(); return; }
     // Ctrl+Z in a text field undoes typing there; elsewhere it undoes the last edit.
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !editable(e.target) && !document.querySelector('#modal:not(.hidden)')) {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !editable(e.target) && !document.querySelector('#modal:not(.hidden)') && !document.querySelector('.book-editor-overlay')) {
       if (undoCount) { e.preventDefault(); undoTo(0); }
     }
   });

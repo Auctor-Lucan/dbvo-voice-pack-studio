@@ -88,6 +88,7 @@ export async function editTake({ kind = 'patch', id, lineId, takeId, onSaved }) 
   let loop = false;
   let snap = store.get('edit:snap', true);
   let closeFn = null;
+  let saving = false;
 
   const dur = () => buf.duration;
   const css = (n) => getComputedStyle(document.body).getPropertyValue(n).trim() || '#58a6ff';
@@ -193,7 +194,7 @@ export async function editTake({ kind = 'patch', id, lineId, takeId, onSaved }) 
     const has = !!sel && sel.b - sel.a > 0.005;
     for (const b of [bDel, bKeep, bSil, bFin, bFout, bGain, bPlaySel, bLoop]) b.disabled = !has;
     bUndo.disabled = !history.length; bRedo.disabled = !redo.length;
-    bNew.disabled = bOver.disabled = !ops.length;
+    bNew.disabled = bOver.disabled = !ops.length || saving;
     histText.textContent = ops.length ? `${ops.length} edit(s) · ${fmt(info.seconds)} s → ${fmt(dur())} s` : 'No edits yet';
     wordsNote.textContent = wordsState === 'loading' ? 'Finding the words with Whisper…' : wordsState === 'off' ? 'Words: set up Whisper (Check takes) to see the words here' : wordsState === 'failed' ? 'Whisper couldn\'t find the words' : words && words.length ? 'Words from Whisper: click one to select it' : 'Whisper heard no words';
   }
@@ -308,7 +309,8 @@ export async function editTake({ kind = 'patch', id, lineId, takeId, onSaved }) 
   }
 
   async function save(mode) {
-    if (!ops.length) return;
+    if (!ops.length || saving) return;
+    saving = true;
     stop();
     for (const b of [bNew, bOver]) b.disabled = true;
     const was = (mode === 'new' ? bNew : bOver).textContent;
@@ -320,6 +322,7 @@ export async function editTake({ kind = 'patch', id, lineId, takeId, onSaved }) 
       closeFn && closeFn(true);
     } catch (e) {
       fail(e);
+      saving = false;
       (mode === 'new' ? bNew : bOver).textContent = was;
       draw();
     }
@@ -327,6 +330,7 @@ export async function editTake({ kind = 'patch', id, lineId, takeId, onSaved }) 
 
   // ---------------------------------------------------------------- keys
   const keys = (e) => {
+    if (!canvas.isConnected) return; // another dialog is on top of the editor
     if (e.target.matches('input,textarea,select')) return;
     if (e.key === ' ') { e.preventDefault(); togglePlay(false); }
     else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); doOp('delete'); }
@@ -344,7 +348,7 @@ export async function editTake({ kind = 'patch', id, lineId, takeId, onSaved }) 
   }
 
   const result = modal('Edit take', body, [{ label: 'Cancel', value: false }], {
-    wide: true, cls: 'te-modal',
+    wide: true, cls: 'te-modal', autofocus: false,
     onOpen: (close) => { closeFn = close; requestAnimationFrame(() => { ro.observe(scroller); draw(); }); },
   });
   const v = await result;
