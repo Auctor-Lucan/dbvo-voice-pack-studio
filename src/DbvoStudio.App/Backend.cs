@@ -171,7 +171,18 @@ public sealed partial class Backend
                     return v;
                 });
             case "voice.delete":
-                return await Locked(() => { _lib.DeleteVoicePack(S(p, "id")); return State(); });
+                return await Locked(() =>
+                {
+                    var vid = S(p, "id");
+                    // Patches and FOMODs that use the voice pack would be left without one (their takes can't move to another).
+                    var users = _lib.LoadPatches().Where(x => x.VoicePackId == vid).Select(x => x.Name)
+                        .Concat(_lib.LoadFomods().Where(f => f.VoicePackId == vid).Select(f => f.Name + " (FOMOD)")).ToList();
+                    if (users.Count > 0)
+                        throw new InvalidOperationException($"This voice pack is used by {string.Join(", ", users.Take(6))}{(users.Count > 6 ? $" and {users.Count - 6} more" : "")}. Delete those first, or keep the voice pack.");
+                    _lib.Backup("before-delete-voice-pack", _settings.BackupsToKeep);
+                    _lib.DeleteVoicePack(vid);
+                    return State();
+                });
 
             // ---- mods (Phase 1)
             case "mod.create":
@@ -235,7 +246,7 @@ public sealed partial class Backend
                     Directory.Delete(_lib.ModFolder(S(p, "id")), true);
                     return State();
                 });
-            case "mod.import": return await Locked(() => ImportPlugins(p));
+            case "mod.import": return await Locked(() => { NoUndoHere(); return ImportPlugins(p); });
             case "mod.deletePlugin":
                 return await Locked(() =>
                 {
@@ -393,7 +404,7 @@ public sealed partial class Backend
                     var svc2 = new Phase2Service(_lib, Runtime());
                     svc2.Sync(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods());
                     // Another WAV + LIP folder: its files are read in (new takes where they differ from what a line has).
-                    if (wavLipChanged) { svc2.ReloadWavLipFolder(patch, LoadVoice(patch.VoicePackId)); _lib.Save(patch); }
+                    if (wavLipChanged) { NoUndoHere(); svc2.ReloadWavLipFolder(patch, LoadVoice(patch.VoicePackId)); _lib.Save(patch); }
                     return PatchDto(patch);
                 });
             case "patch.delete":
@@ -577,6 +588,8 @@ public sealed partial class Backend
     {
         if (!File.Exists(_settings.FfmpegPath)) throw new InvalidOperationException("ffmpeg.exe wasn't found. Pick it in Global Settings → General & tools → Tools.");
         if (!File.Exists(_settings.FaceFxWrapperPath)) throw new InvalidOperationException("Making .lip files needs FaceFXWrapper.exe, and it wasn't found. Pick it in Global Settings → General & tools → Tools.");
+        // Checked before anything is generated: a missing FonixData.cdf would otherwise fail each line after its audio was paid for.
+        if (!File.Exists(_settings.FonixDataPath)) throw new InvalidOperationException("Making .lip files needs FonixData.cdf, and it wasn't found. Pick it in Global Settings → General & tools → Tools.");
         return new ExternalTools
         {
             FfmpegPath = _settings.FfmpegPath,
@@ -970,6 +983,7 @@ public sealed partial class Backend
                 }
                 break;
             case "deleteTake":
+                NoUndoHere();
                 var t = line.Takes.FirstOrDefault(x => x.Id == S(p, "value"));
                 if (t != null)
                 {
@@ -1057,7 +1071,7 @@ public sealed partial class Backend
             var lines = SelectLines(patch, p);
             if (patch.Kind == "vc") lines = lines.Where(l => l.SourceWav == null).ToList(); // only text-to-speech lines bill characters
             modelId = voice.Eleven.ModelId;
-            sent = Phase2Service.SentCharacters(lines, Phase2Service.MergePronunciations(_settings.Pronunciations, voice.Pronunciations), modelId);
+            sent = Phase2Service.SentCharacters(lines, Phase2Service.MergePronunciations(_settings.Pronunciations, voice.Pronunciations), modelId, patch.TagsAsContext && patch.Kind != "vc");
             return null;
         });
         if (modelId == null || o == null) return o;
@@ -1164,7 +1178,7 @@ public sealed partial class Backend
                     {
                         var words = System.Text.RegularExpressions.Regex.Replace(t.SpokenText, @"^\s*(?:\[[^\]]*\]\s*)+", "");
                         var tags = t.SpokenText.Length - words.Length;
-                        double expected = Math.Ceiling(words.Length * r);
+                        double expected = Math.Ceiling((t.Settings.SentCharacters ?? words.Length) * r); // what was sent, pronunciation rules included
                         if (billed > expected + Math.Max(2, tags * r * 0.5))
                         {
                             ctxWarned = true;

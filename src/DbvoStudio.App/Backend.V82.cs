@@ -19,6 +19,8 @@ public sealed partial class Backend
         public DateTime At = DateTime.Now;
         public readonly Dictionary<string, byte[]?> Files = new(StringComparer.OrdinalIgnoreCase);
         public bool Closed;
+        /// <summary>The action also changed files Undo can't take back (takes deleted or added): it isn't kept as a step.</summary>
+        public bool Discard;
     }
 
     private const int UndoDepth = 10;
@@ -60,7 +62,10 @@ public sealed partial class Backend
             Library.BeforeSave = path =>
             {
                 var e = UndoCapture.Value;
-                if (e == null || e.Closed || e.Files.ContainsKey(path)) return;
+                // Saved by a job or an action that isn't undoable: earlier undo steps for this file would now put back
+                // an old copy over that work (and lose takes made since), so they are dropped.
+                if (e == null || e.Closed || e.Discard) { ForgetUndoFor(path); return; }
+                if (e.Files.ContainsKey(path)) return;
                 if (path.EndsWith("settings.json", StringComparison.OrdinalIgnoreCase)) return; // settings aren't project edits (and hold keys)
                 try { e.Files[path] = File.Exists(path) ? File.ReadAllBytes(path) : null; } catch { }
             };
@@ -71,12 +76,33 @@ public sealed partial class Backend
         return entry;
     }
 
+    /// <summary>Call in an action that also deletes or adds take files: it doesn't become an undo step, and earlier steps for its files go.</summary>
+    private static void NoUndoHere()
+    {
+        var e = UndoCapture.Value;
+        if (e == null) return;
+        e.Discard = true;
+        e.Files.Clear();
+    }
+
+    private void ForgetUndoFor(string path)
+    {
+        int left;
+        lock (_undo)
+        {
+            int n = _undo.RemoveAll(x => x.Files.ContainsKey(path));
+            if (n == 0) return;
+            left = _undo.Count;
+        }
+        Emit("undo", new { count = left, label = (string?)null });
+    }
+
     private void EndUndo(UndoEntry? e)
     {
         if (e == null) return;
         e.Closed = true;
         UndoCapture.Value = null;
-        if (e.Files.Count == 0) return;
+        if (e.Discard || e.Files.Count == 0) return;
         lock (_undo)
         {
             _undo.Add(e);

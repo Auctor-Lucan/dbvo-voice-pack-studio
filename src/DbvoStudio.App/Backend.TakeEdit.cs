@@ -16,6 +16,9 @@ namespace DbvoStudio.App;
 /// </summary>
 public sealed partial class Backend
 {
+    private static bool SameFolder(string? a, string? b) =>
+        string.Equals((a ?? "").Trim().TrimEnd('\\', '/'), (b ?? "").Trim().TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+
     private sealed record EditOwner(List<Phase2Line> Lines, string Root, Action Save, Func<Phase2Line, object> Result);
 
     private EditOwner EditOwnerOf(string kind, string id)
@@ -43,11 +46,13 @@ public sealed partial class Backend
         }
     }
 
-    private (EditOwner Owner, Phase2Line Line, Take Take) EditTarget(JsonElement p)
+    private (EditOwner Owner, Phase2Line Line, Take Take) EditTarget(JsonElement p, bool exact = false)
     {
         var o = EditOwnerOf(S(p, "kind", "patch"), S(p, "id"));
         var line = o.Lines.FirstOrDefault(l => l.LineId == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
-        var take = line.Takes.FirstOrDefault(t => t.Id == S(p, "takeId")) ?? line.SelectedTake ?? throw new InvalidOperationException("This line has no take.");
+        var take = line.Takes.FirstOrDefault(t => t.Id == S(p, "takeId"))
+            ?? (exact ? throw new InvalidOperationException("The take you edited isn't there anymore (deleted meanwhile?), so the edit wasn't saved.") : (Take?)null)
+            ?? line.SelectedTake ?? throw new InvalidOperationException("This line has no take.");
         return (o, line, take);
     }
 
@@ -62,6 +67,8 @@ public sealed partial class Backend
                     var dry = TakeEffects.DryPath(o.Root, t);
                     var src = File.Exists(dry) ? dry : Path.Combine(o.Root, t.WavPath);
                     if (!File.Exists(src)) throw new InvalidOperationException("This take's WAV isn't there anymore.");
+                    try { WavFile.Read(src); } // only 16-bit PCM can be saved: say so now, not after the editing
+                    catch (Exception ex) { throw new InvalidOperationException("This take can't be edited: " + FriendlyError.From(ex)); }
                     return new
                     {
                         url = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, src).Replace('\\', '/') + "?t=" + DateTime.UtcNow.Ticks,
@@ -112,7 +119,15 @@ public sealed partial class Backend
                 var (words, engine) = await tool.CreateWordTimerAsync(CancellationToken.None);
                 _wordsEngine = (words, engine, key);
             }
-            var list = await _wordsEngine.Value.Words(tmp, CancellationToken.None);
+            List<WordTime> list;
+            try { list = await _wordsEngine.Value.Words(tmp, CancellationToken.None); }
+            catch
+            {
+                // A broken Whisper (the Python helper stopped, the model failed) is started again next time.
+                var bad = _wordsEngine.Value.Engine; _wordsEngine = null;
+                try { await bad.DisposeAsync(); } catch { }
+                throw;
+            }
             var stamp = Interlocked.Increment(ref _wordsUsed);
             _ = Task.Run(async () =>
             {
@@ -139,7 +154,7 @@ public sealed partial class Backend
         await _gate.WaitAsync();
         try
         {
-            var (o, line, t) = EditTarget(p);
+            var (o, line, t) = EditTarget(p, exact: true);
             var root = o.Root;
             var dry = TakeEffects.DryPath(root, t);
             var wavNow = Path.Combine(root, t.WavPath);

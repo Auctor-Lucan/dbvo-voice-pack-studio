@@ -23,6 +23,8 @@ public sealed partial class Backend
     private sealed class ListRows
     {
         public int Version { get; set; } = 1;
+        /// <summary>What every row also depends on: the app version, the library folder and the player-name setting.</summary>
+        public string Context { get; set; } = "";
         public Dictionary<string, ListRow> Mods { get; set; } = new();
         public Dictionary<string, ListRow> Patches { get; set; } = new();
     }
@@ -47,6 +49,11 @@ public sealed partial class Backend
             {
                 try { _rows = File.Exists(RowsPath) ? JsonSerializer.Deserialize<ListRows>(File.ReadAllText(RowsPath), JsonOptions) : null; } catch { }
                 if (_rows == null || _rows.Version != 1) _rows = new ListRows();
+            }
+            var ctx = $"{typeof(Backend).Assembly.GetName().Version}|{_lib.Root}|{DbvoStudio.Core.Projects.Phase1Line.PlayerNamesVoicedByDefault}";
+            if (_rows.Context != ctx)
+            {
+                _rows = new ListRows { Context = ctx };
             }
             bool changed = false;
 

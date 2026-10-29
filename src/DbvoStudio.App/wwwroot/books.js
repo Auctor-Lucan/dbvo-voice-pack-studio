@@ -751,7 +751,7 @@ export async function bookProjectView(id) {
       } catch (e) { fail(e); }
     }
     // Going to another page with the editor open: save the text and close it.
-    overlay.addEventListener('leave', async () => { await saveText(); overlay.remove(); document.removeEventListener('keydown', onKey, true); off(); edAudio.pause(); });
+    overlay.addEventListener('leave', async () => { asking = false; await saveText(); overlay.remove(); document.removeEventListener('keydown', onKey, true); off(); edAudio.pause(); });
     ta.addEventListener('input', () => { dirty = true; renderCount(); });
     ta.addEventListener('blur', () => saveText());
     const countEl = h('span.faint');

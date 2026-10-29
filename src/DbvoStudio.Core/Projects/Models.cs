@@ -421,6 +421,8 @@ public sealed class TakeSettings
     public string OutputFormat { get; set; } = "";
     /// <summary>Characters ElevenLabs billed for this take (its character-cost header); null = not known.</summary>
     public int? BilledCharacters { get; set; }
+    /// <summary>Characters of text sent for this take (pronunciation rules applied, leading tags left out when sent as context).</summary>
+    public int? SentCharacters { get; set; }
     /// <summary>The leading [tags] were sent as context (previous_text), not as text (experiment).</summary>
     public bool TagsAsContext { get; set; }
 }

@@ -275,6 +275,7 @@ public sealed partial class Backend
             case "patch.purgeTakes":
                 return await Locked(() =>
                 {
+                    NoUndoHere();
                     var patch = LoadPatch(S(p, "id"));
                     List<string>? ids = p.TryGetProperty("lineIds", out var li) && li.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds") : null;
                     int n = new Phase2Service(_lib, Runtime()).PurgeUnusedTakes(patch, ids);
@@ -283,6 +284,7 @@ public sealed partial class Backend
             case "patch.deleteOmittedTakes":
                 return await Locked(() =>
                 {
+                    NoUndoHere();
                     var patch = LoadPatch(S(p, "id"));
                     int n = new Phase2Service(_lib, Runtime()).DeleteOmittedTakes(patch);
                     return new { removed = n, patch = PatchDto(patch) };

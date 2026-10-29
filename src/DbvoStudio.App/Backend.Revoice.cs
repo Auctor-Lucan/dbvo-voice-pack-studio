@@ -88,7 +88,10 @@ public sealed partial class Backend
                 {
                     var proj = LoadRv(S(p, "id"));
                     proj.Name = S(p, "name", proj.Name);
-                    proj.OutputFolder = S(p, "outputFolder", proj.OutputFolder);
+                    var newOut = S(p, "outputFolder", proj.OutputFolder);
+                    // Another output folder: the files written to the old one are not in the new one (they are left where they are).
+                    if (!SameFolder(newOut, proj.OutputFolder)) { proj.ExportedFiles.Clear(); proj.ExportedTakes.Clear(); }
+                    proj.OutputFolder = newOut;
                     proj.Language = S(p, "language", proj.Language);
                     proj.VoiceTypePlugin = S(p, "voiceTypePlugin", proj.VoiceTypePlugin);
                     if (NB(p, "emotionTags") is { } et) proj.EmotionTags = et;
@@ -561,6 +564,7 @@ public sealed partial class Backend
                 break;
             case "deleteTake":
             {
+                NoUndoHere();
                 var t = l.Takes.FirstOrDefault(x => x.Id == S(p, "value"));
                 if (t == null) break;
                 var root = _lib.RevoiceFolder(proj.Id);
@@ -573,6 +577,7 @@ public sealed partial class Backend
             }
             case "keepUsedTake":
             {
+                NoUndoHere();
                 var root = _lib.RevoiceFolder(proj.Id);
                 foreach (var t in l.Takes.Where(t => t.Id != l.SelectedTakeId).ToList())
                 {

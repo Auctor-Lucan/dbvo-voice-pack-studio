@@ -279,7 +279,8 @@ public sealed partial class Phase2Service
             if (wav == null) continue;
             var lip = Path.ChangeExtension(wav, ".lip");
             if (!File.Exists(lip)) continue; // a WAV without its LIP is not a finished line
-            AddExistingTake(patch, voice, line, wav, lip, "existing");
+            var adopted = AddExistingTake(patch, voice, line, wav, lip, "existing");
+            Remember(patch, adopted, wav, lip); // these files are this take's export, so a later edit or new take replaces them
             n++;
         }
         return n;
@@ -307,7 +308,8 @@ public sealed partial class Phase2Service
             if (!File.Exists(lip)) continue;
             if (line.Takes.Count > 0 && line.Takes.Any(t => SameAudio(Path.Combine(root, t.WavPath), wav))) continue;
             bool had = line.Takes.Count > 0;
-            AddExistingTake(patch, voice, line, wav, lip, "existing", label: "imported WAV + LIP (" + Path.GetFileName(patch.WavLipFolder.TrimEnd('\\', '/')) + ")");
+            var took = AddExistingTake(patch, voice, line, wav, lip, "existing", label: "imported WAV + LIP (" + Path.GetFileName(patch.WavLipFolder.TrimEnd('\\', '/')) + ")");
+            Remember(patch, took, wav, lip);
             line.NoAdopt = false;
             line.RefreshStale();
             if (had) added++; else adopted++;
@@ -432,7 +434,7 @@ public sealed partial class Phase2Service
                 var lip = work.File("a.lip");
                 await File.WriteAllBytesAsync(lip, lipBytes, ct);
                 await gate.WaitAsync(ct);
-                try { if (line.Takes.Count == 0) { AddExistingTake(patch, voice, line, wav, lip, "fuz", fuzPath); ok++; } }
+                try { if (line.Takes.Count == 0) { var ft = AddExistingTake(patch, voice, line, wav, lip, "fuz", fuzPath); Remember(patch, ft, fuzPath); ok++; } }
                 finally { gate.Release(); }
             }
             catch (OperationCanceledException) { throw; }
@@ -474,8 +476,17 @@ public sealed partial class Phase2Service
 
     /// <summary>Apply the pronunciation dictionary (local layer) to the spoken text before sending.</summary>
     /// <summary>The characters ElevenLabs bills for these lines: the text actually sent, with the pronunciation rules applied.</summary>
-    public static int SentCharacters(IEnumerable<Phase2Line> lines, IReadOnlyList<Pronunciation> pronunciations, string modelId) =>
-        lines.Sum(l => ApplyPronunciations(l.Spoken, pronunciations, modelId).Length);
+    public static int SentCharacters(IEnumerable<Phase2Line> lines, IReadOnlyList<Pronunciation> pronunciations, string modelId, bool leadingTagsAsContext = false) =>
+        lines.Sum(l =>
+        {
+            var t = ApplyPronunciations(l.Spoken, pronunciations, modelId);
+            if (leadingTagsAsContext && !modelId.Contains("v3", StringComparison.OrdinalIgnoreCase))
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(t, @"^\s*((?:\[[^\]]*\]\s*)+)");
+                if (m.Success && t.Length > m.Length) t = t[m.Length..]; // sent as context, not counted
+            }
+            return t.Length;
+        });
 
     public static string ApplyPronunciations(string text, IEnumerable<Pronunciation> entries, string modelId)
     {
@@ -619,7 +630,7 @@ public sealed partial class Phase2Service
                     {
                         Engine = "elevenlabs", VoiceId = es.VoiceId, ModelId = es.ModelId, Stability = req.VoiceSettings?.Stability ?? 0,
                         Similarity = es.Similarity, Style = es.Style, SpeakerBoost = es.SpeakerBoost, Speed = es.Speed, Seed = es.Seed, OutputFormat = es.OutputFormat,
-                        BilledCharacters = req.BilledCharacters, TagsAsContext = tagContext != null,
+                        BilledCharacters = req.BilledCharacters, SentCharacters = req.Text.Length, TagsAsContext = tagContext != null,
                     });
                 }
             }
@@ -864,6 +875,14 @@ public sealed partial class Phase2Service
 
     private static string ExportKey(string path) => Path.GetFullPath(path);
 
+    /// <summary>Files already in the patch's own export folders that a take was adopted from: recorded as that take's export.</summary>
+    private static void Remember(DbvoPatch patch, Take t, params string[] files)
+    {
+        if (patch.Exported.Comparer != StringComparer.OrdinalIgnoreCase)
+            patch.Exported = new Dictionary<string, string>(patch.Exported, StringComparer.OrdinalIgnoreCase);
+        foreach (var f in files) patch.Exported[ExportKey(f)] = ExportStamp(t);
+    }
+
     /// <summary>Lines an export writes: not omitted or excluded, and approved when the patch exports approved lines only.</summary>
     public static IEnumerable<Phase2Line> ExportLines(DbvoPatch patch) =>
         patch.Lines.Where(l => !l.IsOmitted && !l.Excluded && (!patch.ExportApprovedOnly || l.Approved));
@@ -1017,6 +1036,8 @@ public sealed partial class Phase2Service
         bool track = customFolder == null;
         ExportMap(patch);
 
+        try
+        {
         await Task.WhenAll(lines.Select(async item =>
         {
             var (line, take, stem) = item;
@@ -1067,7 +1088,10 @@ public sealed partial class Phase2Service
                 }
                 var first = needed[0];
                 Directory.CreateDirectory(Path.GetDirectoryName(first)!);
-                await File.WriteAllBytesAsync(first, fuz, ct);
+                // A new file in place, never written through: an imported take can be a hard link to this .fuz,
+                // and a write cut short (cancel, full disk) must not leave a truncated file behind.
+                await File.WriteAllBytesAsync(first + ".tmp", fuz, ct);
+                File.Move(first + ".tmp", first, true);
                 foreach (var other in needed.Skip(1)) FileLinks.LinkOrCopy(first, other, true);
                 lock (rep)
                 {
@@ -1091,15 +1115,20 @@ public sealed partial class Phase2Service
                 progress?.Report(new GenerationProgress(d, lines.Count, rep.Failed, line.FinalLine, null));
             }
         }));
-        var sg = stateGate ?? new SemaphoreSlim(1, 1);
-        await sg.WaitAsync(CancellationToken.None);
-        try
-        {
-            foreach (var (target, takeId) in written) patch.Exported[ExportKey(target)] = takeId;
-            if (track) patch.LastFuzUtc = DateTime.UtcNow;
-            _lib.Save(patch);
         }
-        finally { sg.Release(); }
+        finally
+        {
+            // Also after a cancel: the files written so far are remembered as this patch's.
+            var sg = stateGate ?? new SemaphoreSlim(1, 1);
+            await sg.WaitAsync(CancellationToken.None);
+            try
+            {
+                foreach (var (target, takeId) in written) patch.Exported[ExportKey(target)] = takeId;
+                if (track && !ct.IsCancellationRequested) patch.LastFuzUtc = DateTime.UtcNow;
+                _lib.Save(patch);
+            }
+            finally { sg.Release(); }
+        }
         return rep;
     }
 

@@ -1,7 +1,7 @@
 // Edit take: a small waveform editor for one take (cut doubled words, trim, silence, fade, gain).
 // The steps are previewed here and sent to the app, which makes the same steps on the unprocessed take, puts its
 // post-processing back on and makes a new .lip from the take's text.
-import { rpc, h, clear, toast, fail, modal, icon, switchEl, store } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, icon, switchEl, store } from './lib.js';
 
 const XF_MS = 6; // the crossfade at cuts (TakeEdit.CrossfadeMs in the app)
 
@@ -79,7 +79,9 @@ export async function editTake({ kind = 'patch', id, lineId, takeId, onSaved }) 
   let ops = [];
   const history = []; // { buf, ops, words }
   const redo = [];
-  let words = null; // [{ w, s, e }] or null while unknown
+  let rawWords = null; // what Whisper heard, in the times of the take as opened
+  let words = null; // the same words in the times of the take as edited now (null while unknown)
+  const remap = () => { words = rawWords ? ops.reduce((w, op) => mapWords(w, op), rawWords) : null; };
   let wordsState = info.words ? 'loading' : 'off';
   let sel = null; // { a, b } seconds
   let cursor = 0;
@@ -164,16 +166,16 @@ export async function editTake({ kind = 'patch', id, lineId, takeId, onSaved }) 
     const g = canvas.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
-    const acc = css('--accent');
+    const acc = css('--accent'), txt = css('--text'), lineC = css('--line');
     if (sel) {
       g.fillStyle = 'rgba(56,139,253,.20)';
       g.fillRect(tx(sel.a), 0, tx(sel.b) - tx(sel.a), H);
       g.fillStyle = acc; g.fillRect(Math.round(tx(sel.a)), 0, 1, H); g.fillRect(Math.round(tx(sel.b)), 0, 1, H);
     }
-    g.fillStyle = css('--line'); g.fillRect(0, H / 2, W, 1);
+    g.fillStyle = lineC; g.fillRect(0, H / 2, W, 1);
     for (let x = 0; x < W; x++) {
       const t = xt(x + 0.5);
-      g.fillStyle = sel && t >= sel.a && t <= sel.b ? css('--text') : acc;
+      g.fillStyle = sel && t >= sel.a && t <= sel.b ? txt : acc;
       const y1 = H / 2 - peaks.mx[x] * H * 0.48, y2 = H / 2 - peaks.mn[x] * H * 0.48;
       g.fillRect(x, y1, 1, Math.max(1, y2 - y1));
     }
@@ -251,7 +253,9 @@ export async function editTake({ kind = 'patch', id, lineId, takeId, onSaved }) 
   scroller.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.25 : 0.8)); } }, { passive: false });
   function setZoom(z) {
     const mid = (scroller.scrollLeft + scroller.clientWidth / 2) / width();
-    zoom = Math.max(1, Math.min(40, z));
+    // a canvas can't be wider than about 32,000 pixels
+    const maxZoom = Math.max(1, 32000 / ((scroller.clientWidth || 1000) * (window.devicePixelRatio || 1)));
+    zoom = Math.max(1, Math.min(40, maxZoom, z));
     draw();
     scroller.scrollLeft = mid * width() - scroller.clientWidth / 2;
   }
@@ -284,11 +288,11 @@ export async function editTake({ kind = 'patch', id, lineId, takeId, onSaved }) 
     if (!sel || sel.b - sel.a < 0.005) return;
     stop();
     const op = { op: kindOp, a: +sel.a.toFixed(5), b: +sel.b.toFixed(5), ...extra };
-    history.push({ buf, ops: ops.slice(), words, sel, cursor });
+    history.push({ buf, ops: ops.slice(), sel, cursor });
     redo.length = 0;
     buf = applyOp(ctx, buf, op);
     ops.push(op);
-    if (words) words = mapWords(words, op);
+    remap();
     if (kindOp === 'delete') { cursor = op.a; sel = null; } else if (kindOp === 'keep') { cursor = 0; sel = null; }
     peaks = null;
     draw();
@@ -296,16 +300,16 @@ export async function editTake({ kind = 'patch', id, lineId, takeId, onSaved }) 
   function undo() {
     const last = history.pop(); if (!last) return;
     stop();
-    redo.push({ buf, ops: ops.slice(), words, sel, cursor });
-    ({ buf, ops, words, sel, cursor } = last);
-    peaks = null; draw();
+    redo.push({ buf, ops: ops.slice(), sel, cursor });
+    ({ buf, ops, sel, cursor } = last);
+    remap(); peaks = null; draw();
   }
   function doRedo() {
     const next = redo.pop(); if (!next) return;
     stop();
-    history.push({ buf, ops: ops.slice(), words, sel, cursor });
-    ({ buf, ops, words, sel, cursor } = next);
-    peaks = null; draw();
+    history.push({ buf, ops: ops.slice(), sel, cursor });
+    ({ buf, ops, sel, cursor } = next);
+    remap(); peaks = null; draw();
   }
 
   async function save(mode) {
@@ -343,12 +347,13 @@ export async function editTake({ kind = 'patch', id, lineId, takeId, onSaved }) 
   // words (Whisper), while the editor is already usable
   if (info.words) {
     rpc('take.edit.words', { kind, id, lineId, takeId: info.takeId })
-      .then((ws) => { words = ws; for (const op of ops) words = mapWords(words, op); wordsState = 'done'; draw(); })
+      .then((ws) => { rawWords = ws; remap(); wordsState = 'done'; draw(); })
       .catch((e) => { wordsState = 'failed'; wordsNote.title = e.message || String(e); draw(); });
   }
 
   const result = modal('Edit take', body, [{ label: 'Cancel', value: false }], {
     wide: true, cls: 'te-modal', autofocus: false,
+    guard: async () => !ops.length || saving || (await confirmBox('Discard your edits?', `${ops.length} edit(s) haven't been saved.`, 'Discard', true)),
     onOpen: (close) => { closeFn = close; requestAnimationFrame(() => { ro.observe(scroller); draw(); }); },
   });
   const v = await result;

@@ -183,13 +183,15 @@ public static class BooksExporter
             written.Add(Path.Combine("fomod", "ModuleConfig.xml"));
             written.Add(Path.Combine("fomod", "info.xml"));
         }
-        // Clean up files an earlier export wrote that this one didn't.
-        foreach (var stale in p.ExportedFiles.Except(written, StringComparer.OrdinalIgnoreCase))
-        {
-            var f = Path.Combine(p.OutputFolder, stale);
-            try { if (File.Exists(f)) File.Delete(f); } catch { }
-        }
-        p.ExportedFiles = written;
+        // Clean up files an earlier export wrote that this one didn't. Not when a book failed this time: its earlier
+        // audio stays in place (and on the list) rather than leaving the book silent in game.
+        if (rep.Failed == 0)
+            foreach (var stale in p.ExportedFiles.Except(written, StringComparer.OrdinalIgnoreCase))
+            {
+                var f = Path.Combine(p.OutputFolder, stale);
+                try { if (File.Exists(f)) File.Delete(f); } catch { }
+            }
+        p.ExportedFiles = rep.Failed == 0 ? written : written.Union(p.ExportedFiles, StringComparer.OrdinalIgnoreCase).ToList();
         p.LastExportUtc = DateTime.UtcNow;
         var report = Validate(p, projectFolder, rep, results);
         var rpath = Path.Combine(p.OutputFolder, Path.GetFileNameWithoutExtension(IniFileName(p)).Replace("_VBOS", "") + "_IVBOS_FULL_VALIDATION.txt");

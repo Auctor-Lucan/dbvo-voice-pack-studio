@@ -106,6 +106,7 @@ public sealed partial class Backend
             case "patch.mergeTakes":
                 return await Locked(() =>
                 {
+                    NoUndoHere();
                     if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
                     var patch = LoadPatch(S(p, "id"));
                     var other = LoadPatch(S(p, "sourceId"));

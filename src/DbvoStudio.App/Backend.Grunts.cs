@@ -377,7 +377,7 @@ public sealed partial class Backend
         Str("name", v => { if (v.Trim().Length > 0) proj.Name = v.Trim(); });
         Str("gender", v => { if (v is "female" or "male" or "both") proj.Gender = v; });
         Str("voicePackId", v => proj.VoicePackId = v);
-        Str("outputFolder", v => proj.OutputFolder = v.Trim());
+        Str("outputFolder", v => { if (!SameFolder(v.Trim(), proj.OutputFolder)) proj.ExportedFiles.Clear(); proj.OutputFolder = v.Trim(); });
         if (p.TryGetProperty("pcht", out var pc) && pc.ValueKind == JsonValueKind.Object)
             proj.Pcht = MergeJson(proj.Pcht, pc);
         if (p.TryGetProperty("spvs", out var sp) && sp.ValueKind == JsonValueKind.Object)

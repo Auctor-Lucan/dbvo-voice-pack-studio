@@ -137,18 +137,18 @@ function scrollState(root) {
   walk(root);
   return out;
 }
-export function modal(title, content, buttons = [{ label: 'OK', primary: true, value: true }], { wide = false, help = null, onOpen = null, cls = '', autofocus = true } = {}) {
+export function modal(title, content, buttons = [{ label: 'OK', primary: true, value: true }], { wide = false, help = null, onOpen = null, cls = '', autofocus = true, guard = null } = {}) {
   const m = document.getElementById('modal');
   const card = m.querySelector('.modal-card');
   if (!modalKeysOn) {
     modalKeysOn = true;
     card.tabIndex = -1;
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && dialogs.length && !m.classList.contains('hidden')) dialogs[dialogs.length - 1].close(null); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && dialogs.length && !m.classList.contains('hidden')) dialogs[dialogs.length - 1].ask(null); });
   }
   // A dialog hidden by hand earlier: forget it (its caller gets null).
   if (m.classList.contains('hidden') && dialogs.length) for (const d of dialogs.splice(0)) d.resolve(null);
-  // The same dialog twice (a double-click on the button that opens it): the second one is a no.
-  if (dialogs.length && dialogs[dialogs.length - 1].title === title) return Promise.resolve(null);
+  // The same dialog twice within a moment (a double-click on the button that opens it): the second one is a no.
+  if (dialogs.length && dialogs[dialogs.length - 1].title === title && Date.now() - dialogs[dialogs.length - 1].at < 1500) return Promise.resolve(null);
   document.querySelectorAll('.menu').forEach((x) => x.remove());
   closePopover();
   if (dialogs.length) {
@@ -161,7 +161,9 @@ export function modal(title, content, buttons = [{ label: 'OK', primary: true, v
   card.classList.toggle('wide', wide);
   if (cls) card.classList.add(cls);
   return new Promise((resolve) => {
-    const me = { title, wide, cls, resolve, nodes: null, scroll: null, close: null };
+    const me = { title, wide, cls, resolve, nodes: null, scroll: null, close: null, at: Date.now() };
+    // Escape and the dialog's own buttons ask first when the dialog has a guard (e.g. unsaved edits); closing by code doesn't.
+    me.ask = async (v) => { if (guard && !(await guard(v))) return; me.close(v); };
     me.close = (v) => {
       const i = dialogs.indexOf(me);
       if (i < 0) return;
@@ -183,7 +185,7 @@ export function modal(title, content, buttons = [{ label: 'OK', primary: true, v
       help ? h('div.modal-head', h('h2', title), helpButton(help)) : h('h2', title),
       ...[content].flat(),
       h('div.row', h('div.spacer'), ...buttons.map((b) =>
-        h('button.btn' + (b.primary ? '.primary' : '') + (b.danger ? '.danger' : ''), { onclick: () => me.close(typeof b.value === 'function' ? b.value() : b.value) }, b.label))),
+        h('button.btn' + (b.primary ? '.primary' : '') + (b.danger ? '.danger' : ''), { onclick: () => me.ask(typeof b.value === 'function' ? b.value() : b.value) }, b.label))),
     );
     m.classList.remove('hidden');
     // Focus moves into the dialog, so keys (Space, Enter, arrows) no longer reach the button or grid behind it.

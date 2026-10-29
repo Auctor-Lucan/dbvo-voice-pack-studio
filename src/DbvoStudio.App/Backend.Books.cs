@@ -316,7 +316,9 @@ public sealed partial class Backend
         proj.ModName = S(p, "modName", proj.ModName);
         proj.ArchivePrefix = S(p, "archivePrefix", proj.ArchivePrefix);
         proj.IniName = S(p, "iniName", proj.IniName);
-        proj.OutputFolder = S(p, "outputFolder", proj.OutputFolder);
+        var newOut = S(p, "outputFolder", proj.OutputFolder);
+        if (!SameFolder(newOut, proj.OutputFolder)) proj.ExportedFiles.Clear(); // the old folder's files stay where they are
+        proj.OutputFolder = newOut;
         proj.Packaging = S(p, "packaging", proj.Packaging);
         proj.Language = S(p, "language", proj.Language);
         if (NB(p, "npcVoices") is { } nv && nv != proj.NpcVoices) { proj.NpcVoices = nv; relines = true; }
@@ -498,6 +500,7 @@ public sealed partial class Backend
                 break;
             case "deleteTake":
             {
+                NoUndoHere();
                 var t = l.Takes.FirstOrDefault(x => x.Id == S(p, "value")) ?? throw new InvalidOperationException("Take not found.");
                 var dir = Path.GetDirectoryName(Path.Combine(folder, t.WavPath));
                 try { if (dir != null && Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }

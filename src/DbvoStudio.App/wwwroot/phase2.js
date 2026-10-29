@@ -582,7 +582,7 @@ export async function patchView(id) {
   }
   // Leading [tags] go to ElevenLabs as context (previous_text), which isn't counted against credits, instead of as text.
   function tagsContextRow() {
-    if (vc || voice.engine !== 'elevenlabs') return null;
+    if (vc || voice.engine !== 'elevenlabs' || /v3/i.test((voice.eleven || {}).modelId || '')) return null; // eleven_v3 takes no context
     return h('div.pause-row',
       switchEl(!!patch.tagsAsContext, async (v) => { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: v }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Leading tags as context', { title: 'This patch, new takes: the [tags] at the start of a line are sent to ElevenLabs as context (the text before the line) instead of as part of the line. Context isn\'t counted against your credits, and short lines no longer get doubled words from their tags. Tags later in the line stay in the text.' }),
       h('div.faint', 'Leading [tags] don\'t use credits, but they come through weaker: add "Extremely", e.g. [British Extremely Baleful] instead of [British Baleful] (in tests it only strengthens the next word; "Very" barely helped). Check the billed credits in the takes window.'));
@@ -1600,7 +1600,7 @@ export async function patchView(id) {
 
   renderAll();
   // Once, on the first new patch with leading tags as context on: what it does and how to turn it off.
-  if (patch.tagsAsContext && !vc && !store.get('seen:tags-context', false)) {
+  if (patch.tagsAsContext && !vc && voice.engine === 'elevenlabs' && !/v3/i.test((voice.eleven || {}).modelId || '') && !store.get('seen:tags-context', false)) {
     store.set('seen:tags-context', true);
     setTimeout(async () => {
       const v = await modal('New: leading tags as context', [
