@@ -212,6 +212,8 @@ public sealed class VoicePack
     public bool Loudnorm { get; set; }
     public double GainDb { get; set; }
     public bool OverwriteWavLip { get; set; }
+    /// <summary>Experiment: send each line's leading [tags] as context (previous_text, not billed) instead of as text.</summary>
+    public bool TagsAsContext { get; set; }
     public bool OverwriteFuz { get; set; }
     public VoxCpmSettings VoxCpm { get; set; } = new();
     public OmniVoiceSettings OmniVoice { get; set; } = new();
@@ -415,6 +417,10 @@ public sealed class TakeSettings
     public double Speed { get; set; }
     public long? Seed { get; set; }
     public string OutputFormat { get; set; } = "";
+    /// <summary>Characters ElevenLabs billed for this take (its character-cost header); null = not known.</summary>
+    public int? BilledCharacters { get; set; }
+    /// <summary>The leading [tags] were sent as context (previous_text), not as text (experiment).</summary>
+    public bool TagsAsContext { get; set; }
 }
 
 public sealed class Take
@@ -564,6 +570,8 @@ public sealed class DbvoPatch
     /// <summary>Folder for the DBVO Fix plugins and topic file (empty = not written there).</summary>
     public string FixFolder { get; set; } = "";
     public bool OverwriteWavLip { get; set; }
+    /// <summary>Experiment: send each line's leading [tags] as context (previous_text, not billed) instead of as text.</summary>
+    public bool TagsAsContext { get; set; }
     public bool OverwriteFuz { get; set; }
     /// <summary>Replace DBVO Fix plugins already in the final folder without asking (the working copy is always replaced).</summary>
     public bool OverwriteFix { get; set; } = true;

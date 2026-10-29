@@ -419,7 +419,7 @@ export async function patchView(id) {
       clear(list).append(line.takes.slice().reverse().map((t) => h('div.take' + (t.id === line.selectedTakeId ? '.sel' : ''),
         h('button.icon-btn.big', { title: 'Play this take', onclick: () => play(line, t) }, '▶'),
         h('div.grow', { style: { minWidth: 0 } }, h('div', '#' + t.slot + (t.id === line.selectedTakeId ? ' · used for export and .fuz' : '')),
-          h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.settings.engine || ''} · ${t.settings.modelId || ''} · ${new Date(t.createdUtc).toLocaleString()}`),
+          h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.settings.engine || ''} · ${t.settings.modelId || ''} · ${new Date(t.createdUtc).toLocaleString()}${t.settings.billedCharacters != null ? ` · billed ${t.settings.billedCharacters} characters` : ''}${t.settings.tagsAsContext ? ' · tags as context' : ''}`),
           t.spokenText !== line.spoken ? h('div.meta.ellipsis', { title: t.spokenText }, 'Text then: ' + t.spokenText) : null),
         h('button.act-btn' + (t.kept ? '.on' : ''), { title: t.kept ? 'Kept as a variant - click to un-keep' : 'Keep as a variant (DBVO 2.0 exports every kept take)', onclick: async () => { await keep(line, t); render(); } }, icon('star', { filled: t.kept })),
         t.id !== line.selectedTakeId ? h('button.btn.sm', { title: 'Use this take for export and .fuz', onclick: async () => { await upd(line, 'selectTake', t.id); render(); } }, 'Use') : null,
@@ -580,10 +580,17 @@ export async function patchView(id) {
       switchEl(!!voice.noiseReducedPauses, (v) => setIn(voice, 'noiseReducedPauses', v), 'Noise-reduced pauses', { disabled: voice.settingsLocked, title: 'Every new take: rumble below 80 Hz is removed and noisy pauses are turned down (up to 15 dB, never muted). Words, breaths next to words and fading endings are left alone.' }),
       h('div.faint', 'Removes low rumble and turns down noise in pauses. The voice is untouched. New takes; for existing ones use Post-processing ▾.'));
   }
+  // Experiment: leading [tags] go to ElevenLabs as context (previous_text), which isn't billed, instead of as text.
+  function tagsContextRow() {
+    if (vc || voice.engine !== 'elevenlabs') return null;
+    return h('div.pause-row',
+      switchEl(!!patch.tagsAsContext, async (v) => { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: v }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Tags as context (experiment)', { title: 'This patch, new takes: the [tags] at the start of a line are sent as the text before it (request stitching), which ElevenLabs doesn\'t bill, instead of as part of the line. Whether the voice still follows them is what the experiment is for. Each take shows the characters ElevenLabs billed in its takes window.' }),
+      h('div.faint', 'Leading [tags] are sent as context, not billed. Compare takes made with it on and off: the takes window shows what each one was billed.'));
+  }
   function outputGroup(fields, o) {
     const sum = `${FORMAT_NAME[o.outputFormat] || o.outputFormat || '—'} · ${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once${voice.noiseReducedPauses ? ' · noise-reduced pauses' : ''}`;
     const btn = h('button.btn.sm', { title: `Output: ${sum}. Click to change the audio format, seed and how many lines are requested at once.` }, `${FORMAT_NAME[o.outputFormat] || 'Format'} ▾`);
-    btn.onclick = () => popover(btn, () => [...fields(), pauseNoiseRow()]);
+    btn.onclick = () => popover(btn, () => [...fields(), pauseNoiseRow(), tagsContextRow()].filter(Boolean));
     return grp('Output', btn);
   }
 

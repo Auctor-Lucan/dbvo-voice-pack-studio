@@ -586,6 +586,13 @@ public sealed partial class Phase2Service
                 default:
                 {
                     var text = ApplyPronunciations(spoken, pronunciations, es.ModelId);
+                    // Experiment: the [tags] at the start go in previous_text (context, not billed) instead of the text.
+                    string? tagContext = null;
+                    if (patch.TagsAsContext && !es.ModelId.Contains("v3", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var m = System.Text.RegularExpressions.Regex.Match(text, @"^\s*((?:\[[^\]]*\]\s*)+)");
+                        if (m.Success && text.Length > m.Length) { tagContext = m.Groups[1].Value.Trim(); text = text[m.Length..]; }
+                    }
                     var req = new TtsRequest
                     {
                         VoiceId = es.VoiceId,
@@ -606,11 +613,13 @@ public sealed partial class Phase2Service
                         req.PreviousText = string.IsNullOrWhiteSpace(prevText) ? null : ApplyPronunciations(prevText, pronunciations, es.ModelId);
                         req.NextText = string.IsNullOrWhiteSpace(nextText) ? null : ApplyPronunciations(nextText, pronunciations, es.ModelId);
                     }
+                    if (tagContext != null) req.PreviousText = string.IsNullOrWhiteSpace(req.PreviousText) ? tagContext : req.PreviousText + " " + tagContext;
                     var audio = await limiter.RunAsync(x => client!.TextToSpeechAsync(req, x), ex => ex is ElevenLabsException { Retryable: true }, ct: c);
                     return new EngineAudio(audio, es.OutputFormat, new TakeSettings
                     {
                         Engine = "elevenlabs", VoiceId = es.VoiceId, ModelId = es.ModelId, Stability = req.VoiceSettings?.Stability ?? 0,
                         Similarity = es.Similarity, Style = es.Style, SpeakerBoost = es.SpeakerBoost, Speed = es.Speed, Seed = es.Seed, OutputFormat = es.OutputFormat,
+                        BilledCharacters = req.BilledCharacters, TagsAsContext = tagContext != null,
                     });
                 }
             }

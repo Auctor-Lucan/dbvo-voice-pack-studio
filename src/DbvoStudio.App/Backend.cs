@@ -385,6 +385,7 @@ public sealed partial class Backend
                     if (p.TryGetProperty("kind", out _)) patch.Kind = S(p, "kind") == "vc" ? "vc" : "tts";
                     if (p.TryGetProperty("ttsForMissing", out var tm) && tm.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.TtsForMissing = tm.GetBoolean();
                     if (p.TryGetProperty("overwriteWavLip", out var ow) && ow.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteWavLip = ow.GetBoolean();
+                    if (p.TryGetProperty("tagsAsContext", out var tc) && tc.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.TagsAsContext = tc.GetBoolean();
                     if (p.TryGetProperty("overwriteFuz", out var of) && of.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteFuz = of.GetBoolean();
                     if (p.TryGetProperty("overwriteFix", out var ox) && ox.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteFix = ox.GetBoolean();
                     if (p.TryGetProperty("exportApprovedOnly", out var ea) && ea.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.ExportApprovedOnly = ea.GetBoolean();
@@ -903,7 +904,7 @@ public sealed partial class Backend
         {
             patch.Id, patch.Name, patch.VoicePackId, patch.ModIds, patch.ReferenceIds, patch.WavLipFolder, patch.FinalRoot,
             fuzTemplate = voice == null ? patch.FuzTemplate : Phase2Service.ResolveFuzTemplate(patch, voice),
-            patch.OverwriteWavLip, patch.OverwriteFuz, patch.OverwriteFix, patch.FixFolder, patch.Kind, patch.SourceFolders, patch.LastFuzUtc, patch.TtsForMissing, patch.ExportApprovedOnly,
+            patch.OverwriteWavLip, patch.TagsAsContext, patch.OverwriteFuz, patch.OverwriteFix, patch.FixFolder, patch.Kind, patch.SourceFolders, patch.LastFuzUtc, patch.TtsForMissing, patch.ExportApprovedOnly,
             voiceName = voice?.Name ?? "", voiceColor = voice?.Color ?? "",
             category = mods.FirstOrDefault(m => patch.ModIds.Contains(m.Id))?.Category ?? "Misc",
             mediaBase = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, _lib.PatchFolder(patch.Id)).Replace('\\', '/') + "/",

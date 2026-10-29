@@ -75,6 +75,8 @@ public sealed class TtsRequest
     /// <summary>Not sent in the body: becomes the output_format query parameter (e.g. mp3_44100_128, pcm_44100).</summary>
     [JsonIgnore] public string OutputFormat { get; set; } = "mp3_44100_128";
     [JsonIgnore] public string VoiceId { get; set; } = "";
+    /// <summary>Set after the request: the characters ElevenLabs billed (its character-cost header), when it said.</summary>
+    [JsonIgnore] public int? BilledCharacters { get; set; }
 }
 
 public sealed class ElevenLabsException : Exception
@@ -165,6 +167,7 @@ public sealed class ElevenLabsClient : IDisposable
         msg.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("audio/*"));
         using var resp = await _http.SendAsync(msg, ct);
         if (!resp.IsSuccessStatusCode) throw await ErrorAsync(resp, ct);
+        if (resp.Headers.TryGetValues("character-cost", out var cc) && int.TryParse(cc.FirstOrDefault(), out var billed)) req.BilledCharacters = billed;
         return await resp.Content.ReadAsByteArrayAsync(ct);
     }
 
