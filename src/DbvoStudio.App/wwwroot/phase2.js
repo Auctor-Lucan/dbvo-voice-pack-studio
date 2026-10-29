@@ -1599,6 +1599,21 @@ export async function patchView(id) {
   }
 
   renderAll();
+  // Once, on the first new patch with leading tags as context on: what it does and how to turn it off.
+  if (patch.tagsAsContext && !vc && !store.get('seen:tags-context', false)) {
+    store.set('seen:tags-context', true);
+    setTimeout(async () => {
+      const v = await modal('New: leading tags as context', [
+        h('div', 'New patches send the [tags] at the start of each line to ElevenLabs as context instead of as part of the line:'),
+        h('ul',
+          h('li', h('b', 'They don\'t use credits. '), 'A line is billed only for its words.'),
+          h('li', h('b', 'Short lines stop doubling their words. '), 'Tags in the text of a very short line can make ElevenLabs repeat or ramble; as context they don\'t.'),
+          h('li', h('b', 'Tags come through weaker. '), 'Add "Extremely" to make up for it, e.g. [British Extremely Baleful] instead of [British Baleful]. Two tags weaken each other a little; three or more are untested.')),
+        h('div.faint', 'Tags later in a line stay in the text and are billed as before. You can turn it off for any patch in the toolbar: Output ▾ → Leading tags as context. Existing patches are unchanged.'),
+      ], [{ label: 'Turn it off for this patch', value: 'off' }, { label: 'Keep it on', primary: true, value: 'on' }], { help: 'leading-tags-as-context' });
+      if (v === 'off') { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: false }); reindex(); renderAll(); } catch (e) { fail(e); } }
+    }, 400);
+  }
   loadEngine();
   return view;
 }

@@ -1303,6 +1303,8 @@ public sealed partial class Backend
             ReferenceIds = referenceIds ?? _settings.DefaultReferenceIds.ToList(),
             Kind = kind == "vc" ? "vc" : "tts",
             SourceFolders = sourceFolders ?? new List<string>(),
+            // New ElevenLabs patches send leading [tags] as context (not counted against credits, no doubled words on short lines).
+            TagsAsContext = kind != "vc" && voice.Engine == "elevenlabs",
         };
         string Expand(string t) => string.IsNullOrWhiteSpace(t) ? "" : Phase2Service.ExpandTemplate(t, modName, voice, patch);
         patch.WavLipFolder = Expand(voice.Destinations.WavLipFolder);
