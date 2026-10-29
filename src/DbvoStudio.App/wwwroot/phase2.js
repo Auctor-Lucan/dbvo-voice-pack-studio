@@ -585,7 +585,7 @@ export async function patchView(id) {
     if (vc || voice.engine !== 'elevenlabs') return null;
     return h('div.pause-row',
       switchEl(!!patch.tagsAsContext, async (v) => { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: v }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Leading tags as context', { title: 'This patch, new takes: the [tags] at the start of a line are sent to ElevenLabs as context (the text before the line) instead of as part of the line. Context isn\'t counted against your credits, and short lines no longer get doubled words from their tags. Tags later in the line stay in the text.' }),
-      h('div.faint', 'Leading [tags] don\'t use credits, but they come through weaker: phrase them stronger, e.g. [British Extremely Baleful] instead of [British Baleful]. Check the billed credits in the takes window.'));
+      h('div.faint', 'Leading [tags] don\'t use credits, but they come through weaker: add "Extremely", e.g. [British Extremely Baleful] instead of [British Baleful] (in tests it only strengthens the next word; "Very" barely helped). Check the billed credits in the takes window.'));
   }
   function outputGroup(fields, o) {
     const sum = `${FORMAT_NAME[o.outputFormat] || o.outputFormat || '—'} · ${o.seed == null || o.seed === '' ? 'random seed' : 'seed ' + o.seed} · ${o.concurrency || 1} at once${voice.noiseReducedPauses ? ' · noise-reduced pauses' : ''}`;
