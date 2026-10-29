@@ -407,6 +407,7 @@ public sealed partial class Backend
                     if (wavLipChanged) { NoUndoHere(); svc2.ReloadWavLipFolder(patch, LoadVoice(patch.VoicePackId)); _lib.Save(patch); }
                     return PatchDto(patch);
                 });
+            case "patch.sharedFiles": return await Task.Run(() => { try { return (object)SharedFiles(LoadPatch(S(p, "id"))); } catch { return new List<object>(); } }); // read only: doesn't hold up other work
             case "patch.delete":
                 return await Locked(() =>
                 {
@@ -927,7 +928,6 @@ public sealed partial class Backend
             category = mods.FirstOrDefault(m => patch.ModIds.Contains(m.Id))?.Category ?? "Misc",
             mediaBase = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, _lib.PatchFolder(patch.Id)).Replace('\\', '/') + "/",
             modNames = mods.Where(m => patch.ModIds.Contains(m.Id)).ToDictionary(m => m.Id, m => m.Name),
-            sharedWith = SharedFolderPatches(patch, voice, mods.Where(m => patch.ModIds.Contains(m.Id)).Select(m => m.Name)).Select(x => x.Name).ToList(),
             lines = patch.Lines.Select(l => Line2Dto(l, voice)).ToList(),
         };
     }

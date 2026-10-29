@@ -1287,7 +1287,6 @@ export async function patchView(id) {
     const v = await modal('Files from earlier exports', [
       h('div', `This patch exported ${stale.length} file(s) earlier for lines it no longer exports. Left in place they still play in game and go into the FOMOD.`),
       h('div', h('b', 'Delete these files'), ' removes exactly the files listed below, and nothing else: no takes, no other files in those folders. ', h('b', 'Keep them'), ' leaves them where they are; this export still writes everything else.'),
-      (patch.sharedWith || []).length ? h('div.banner.warn', { style: { margin: 0 } }, `${patch.sharedWith.join(', ')} export${patch.sharedWith.length === 1 ? 's' : ''} to the same folder: the patches can overwrite each other's files.`) : null,
       patch.exportApprovedOnly ? h('div.banner.warn', { style: { margin: 0 } }, 'Export is set to approved lines only (Folders & options), so lines you haven\'t approved count as not exported. Turn that off to export every line; approving is optional.') : null,
       h('div.stale-groups', [...groups].map(([why, paths]) => h('details', { open: groups.size === 1 },
         h('summary', h('b', `${paths.length} file(s)`), `: ${why}`),
@@ -1338,7 +1337,14 @@ export async function patchView(id) {
       if (missing.length) banners.append(h('div.banner.bad', h('span.row', { style: { gap: '6px', flexWrap: 'wrap' } }, 'Missing:', ...missing.map(([n, k], i) => h('span.row', { style: { gap: '2px' } }, n + (i < missing.length - 1 ? ',' : ''), k ? needInfo(k) : null))), h('div.spacer'), h('button.btn.sm', { title: 'Set the tool paths', onclick: () => go('settings', { tab: 'general' }) }, 'Open Global Settings')));
       const unset = [!patch.wavLipFolder && 'WAV + LIP folder', !patch.finalRoot && 'final folder', !patch.fixFolder && 'DBVO Fix folder', vc && !patch.sourceFolders.length && 'source WAV folder'].filter(Boolean);
       if (unset.length) banners.append(h('div.banner.warn', h('span', 'Not set for this patch: ' + unset.join(', ') + '.'), h('div.spacer'), h('button.btn.sm', { title: 'Choose where files go for this patch', onclick: openOptions }, 'Set folders')));
-      if ((patch.sharedWith || []).length) banners.append(h('div.banner.warn', h('span', h('b', 'Shared folder: '), `${patch.sharedWith.join(', ')} export${patch.sharedWith.length === 1 ? 's' : ''} to the same WAV + LIP or .fuz folder as this patch, so the patches can overwrite each other's files. Give each patch its own folder, or make one patch for all its mods. Files the other patch exported are never removed as this one's.`), h('div.spacer'), h('button.btn.sm', { title: 'Choose where files go for this patch', onclick: openOptions }, 'Folders & options')));
+      // Patches writing the very same files (checked after the page is up: it reads the other patches).
+      if (!store.get('shared-banner-off:' + id, false)) rpc('patch.sharedFiles', { id }).then((list) => {
+        if (!list || !list.length || !banners.isConnected) return;
+        const who = list.map((x) => `${x.name} (${x.files.toLocaleString()} file${x.files === 1 ? '' : 's'})`).join(', ');
+        banners.prepend(h('div.banner.warn', h('span', h('b', 'Same files as another patch: '), `${who} export${list.length === 1 ? 's' : ''} files with the same names to the same place as this patch (e.g. ${list[0].sample}), so whichever exports last wins. When they are the same lines (the same text in both mods), that is usually harmless; otherwise give each patch its own folder, or omit those lines in one patch with a reference. Files the other patch exported are never removed as this one's.`),
+          h('div.spacer'), h('button.btn.sm', { title: 'Choose where files go for this patch', onclick: openOptions }, 'Folders & options'),
+          h('button.icon-btn.banner-x', { title: 'Hide this for this patch', onclick: (ev) => { store.set('shared-banner-off:' + id, true); ev.currentTarget.closest('.banner').remove(); } }, '×')));
+      }).catch(() => {});
       for (const w of c.pathWarnings) banners.append(h('div.banner.warn', h('b', 'Path length: '), h('span', `${w.where} reaches ${w.length} of ${w.limit} characters with the longest line — tools like Yakitori fail past 260.`), h('div.spacer'), h('button.btn.sm', { title: 'Open Folders & options to pick shorter folders', onclick: openOptions }, 'Shorten folders')));
       if (vc) {
         const noSrc = patch.lines.filter((l) => !l.omitted && !l.hasSource).length;

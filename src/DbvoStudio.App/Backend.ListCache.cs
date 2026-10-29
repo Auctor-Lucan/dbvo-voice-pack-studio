@@ -148,6 +148,34 @@ public sealed partial class Backend
 
     private List<string> PatchModNames(DbvoPatch patch) => patch.ModIds.Select(id => { try { return _lib.LoadMod(id)?.Name; } catch { return null; } }).Where(n => n != null).Select(n => n!).ToList();
 
+    /// <summary>
+    /// Patches that export (or exported) the very same files as this one, with how many: sharing a folder is normal
+    /// (DBVO puts every .fuz of a voice pack in one folder), sharing file names is what makes patches overwrite each other.
+    /// </summary>
+    private List<object> SharedFiles(DbvoPatch patch)
+    {
+        var voice = _lib.LoadVoicePacks().FirstOrDefault(v => v.Id == patch.VoicePackId);
+        if (voice == null) return new();
+        var mods = _lib.LoadMods();
+        var svc = new Phase2Service(_lib, Runtime());
+        var mine = svc.PlannedExports(patch, voice, mods);
+        var o = new List<object>();
+        foreach (var (id, name) in SharedFolderPatches(patch, voice, mods.Where(m => patch.ModIds.Contains(m.Id)).Select(m => m.Name)))
+        {
+            try
+            {
+                var q = LoadPatch(id);
+                var qv = _lib.LoadVoicePacks().FirstOrDefault(v => v.Id == q.VoicePackId);
+                var theirs = new HashSet<string>(q.Exported.Keys, StringComparer.OrdinalIgnoreCase);
+                if (qv != null) theirs.UnionWith(svc.PlannedExports(q, qv, mods));
+                int n = mine.Count(theirs.Contains);
+                if (n > 0) o.Add(new { name, files = n, sample = Path.GetFileName(mine.First(theirs.Contains)) });
+            }
+            catch { }
+        }
+        return o;
+    }
+
     /// <summary>Files the patches sharing this patch's folders have exported: this patch never removes them as stale.</summary>
     private HashSet<string> SharedFolderFiles(DbvoPatch patch, VoicePack voice, IEnumerable<string> modNames)
     {
