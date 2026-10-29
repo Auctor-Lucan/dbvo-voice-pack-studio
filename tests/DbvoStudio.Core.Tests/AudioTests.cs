@@ -117,3 +117,49 @@ public class NoiseReducedTakeTests : IDisposable
         Assert.Equal(s, WavFile.Read(Path.Combine(_dir, "takes", "a.wav")).Samples);
     }
 }
+
+public class TakeEditTests
+{
+    private static short[] Ramp(int n) => Enumerable.Range(0, n).Select(i => (short)(i % 1000 + 1)).ToArray();
+
+    [Fact]
+    public void Delete_cuts_the_part_out_with_a_crossfade()
+    {
+        var s = Ramp(44100);
+        var o = DbvoStudio.Core.Audio.TakeEdit.Apply(s, 44100, 1, new[] { new DbvoStudio.Core.Audio.EditOp { Op = "delete", A = 0.2, B = 0.5 } });
+        int xf = (int)Math.Round(DbvoStudio.Core.Audio.TakeEdit.CrossfadeMs / 1000 * 44100);
+        Assert.Equal(44100 - (int)Math.Round(0.3 * 44100) - xf, o.Length);
+        Assert.Equal(s[100], o[100]);
+        Assert.Equal(s[^1], o[^1]); // the end is the original end
+    }
+
+    [Fact]
+    public void Keep_and_silence_and_gain()
+    {
+        var s = Enumerable.Repeat((short)1000, 44100).ToArray();
+        var k = DbvoStudio.Core.Audio.TakeEdit.Apply(s, 44100, 1, new[] { new DbvoStudio.Core.Audio.EditOp { Op = "keep", A = 0.25, B = 0.75 } });
+        Assert.Equal(22050, k.Length);
+        Assert.True(k[0] < 1000 && k[k.Length / 2] == 1000);
+        var z = DbvoStudio.Core.Audio.TakeEdit.Apply(s, 44100, 1, new[] { new DbvoStudio.Core.Audio.EditOp { Op = "silence", A = 0.4, B = 0.6 } });
+        Assert.Equal(s.Length, z.Length);
+        Assert.Equal(0, z[22050]);
+        Assert.Equal(1000, z[1000]);
+        var g = DbvoStudio.Core.Audio.TakeEdit.Apply(s, 44100, 1, new[] { new DbvoStudio.Core.Audio.EditOp { Op = "gain", A = 0, B = 1, Db = 6.0206 } });
+        Assert.InRange(g[500], 1995, 2005);
+    }
+
+    [Fact]
+    public void Steps_apply_in_order_on_stereo()
+    {
+        var s = new short[44100 * 2];
+        for (int i = 0; i < s.Length; i++) s[i] = 500;
+        var o = DbvoStudio.Core.Audio.TakeEdit.Apply(s, 44100, 2, new[]
+        {
+            new DbvoStudio.Core.Audio.EditOp { Op = "delete", A = 0.5, B = 1.0 },
+            new DbvoStudio.Core.Audio.EditOp { Op = "fadeOut", A = 0.3, B = 0.5 },
+        });
+        Assert.Equal(0, o.Length % 2);
+        Assert.True(o[^1] < 10 && o[^2] < 10);
+        Assert.Equal(500, o[100]);
+    }
+}

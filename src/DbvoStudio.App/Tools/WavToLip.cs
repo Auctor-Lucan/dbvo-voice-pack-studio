@@ -11,6 +11,8 @@ using Whisper.net.LibraryLoader;
 
 namespace DbvoStudio.App.Tools;
 
+public sealed record WordTime(string Word, double Start, double End);
+
 public sealed record WavToLipEvent(string Kind, string Text, int Index = 0, int Total = 0);
 
 /// <summary>
@@ -157,6 +159,44 @@ public sealed class WavToLip
     }
 
 
+    /// <summary>
+    /// For Edit take: the words of a WAV with their start and end (seconds). Built-in Whisper or faster-whisper, as set.
+    /// Dispose the returned engine when done.
+    /// </summary>
+    public async Task<(Func<string, CancellationToken, Task<List<WordTime>>> Words, IAsyncDisposable Engine)> CreateWordTimerAsync(CancellationToken ct)
+    {
+        Directory.CreateDirectory(TempRoot);
+        if (_s.Engine == "faster-whisper")
+        {
+            var fw = new FasterWhisperProcess(_s, Log);
+            await fw.StartAsync(ct);
+            return (fw.WordsAsync, fw);
+        }
+        var bw = await BuiltInWhisper.CreateAsync(_s, _modelsFolder, _tools, Log, Status, ct, words: true);
+        return (bw.WordsAsync, bw);
+    }
+
+    /// <summary>True when Edit take can show words without downloading a model first.</summary>
+    public static bool WordsReady(WavToLipSettings s, string modelsFolder) =>
+        s.Engine == "faster-whisper" ? File.Exists(s.PythonPath) : File.Exists(Path.Combine(modelsFolder, BuiltInWhisper.ModelFile(s.Model, s.Compute).Item3));
+
+    /// <summary>Whisper's pieces to words: punctuation-only pieces join the word before them.</summary>
+    private static List<WordTime> Tidy(IEnumerable<WordTime> raw)
+    {
+        var o = new List<WordTime>();
+        foreach (var w in raw)
+        {
+            var t = w.Word.Trim();
+            if (t.Length == 0) continue;
+            bool word = t.Any(char.IsLetterOrDigit);
+            bool glue = !w.Word.StartsWith(' ') && o.Count > 0 && word && w.Start - o[^1].End < 0.02 && !t.StartsWith('[');
+            if ((!word || glue) && o.Count > 0) { var p = o[^1]; o[^1] = p with { Word = p.Word + t, End = Math.Max(p.End, w.End) }; continue; }
+            if (!word) continue;
+            o.Add(w with { Word = t });
+        }
+        return o;
+    }
+
     // ------------------------------------------------------------------ built-in Whisper.net
 
     private sealed class BuiltInWhisper : IAsyncDisposable
@@ -177,7 +217,9 @@ public sealed class WavToLip
             _log = log;
         }
 
-        public static async Task<BuiltInWhisper> CreateAsync(WavToLipSettings s, string modelsFolder, ExternalTools tools, Action<string> log, Action<string, int, int> status, CancellationToken ct)
+        private bool _words;
+
+        public static async Task<BuiltInWhisper> CreateAsync(WavToLipSettings s, string modelsFolder, ExternalTools tools, Action<string> log, Action<string, int, int> status, CancellationToken ct, bool words = false)
         {
             var (type, q, file) = ModelFile(s.Model, s.Compute);
             Directory.CreateDirectory(modelsFolder);
@@ -192,7 +234,7 @@ public sealed class WavToLip
                     await src.CopyToAsync(dst, ct);
                 File.Move(tmp, path, true);
             }
-            var w = new BuiltInWhisper(s, path, tools, log);
+            var w = new BuiltInWhisper(s, path, tools, log) { _words = words };
             w.Load(s.Device == "cuda" || s.Device == "gpu");
             return w;
         }
@@ -227,6 +269,7 @@ public sealed class WavToLip
             _factory = WhisperFactory.FromPath(_modelPath, new WhisperFactoryOptions { UseGpu = gpu });
             var b = _factory.CreateBuilder();
             b = _s.Language == "auto" ? b.WithLanguageDetection() : b.WithLanguage(_s.Language);
+            if (_words) { _processor = b.WithTokenTimestamps().SplitOnWord().WithMaxSegmentLength(1).WithBeamSearchSamplingStrategy(o => o.WithBeamSize(5)).Build(); return; }
             b = _s.Quick
                 ? b.WithGreedySamplingStrategy(_ => { }).WithSingleSegment().WithNoContext().WithTemperatureInc(0)
                 : b.WithBeamSearchSamplingStrategy(o => o.WithBeamSize(5));
@@ -263,6 +306,32 @@ public sealed class WavToLip
                     Build(false);
                     DeviceUsed = "CPU";
                     return await Run(tmp, ct);
+                }
+            }
+            finally { try { File.Delete(tmp); } catch { } }
+        }
+
+        public async Task<List<WordTime>> WordsAsync(string wav, CancellationToken ct)
+        {
+            var tmp = Path.Combine(TempRoot, Guid.NewGuid().ToString("N")[..8] + "_16k.wav");
+            try
+            {
+                await _tools.ToWavAsync(wav, tmp, 16000, false, 0, ct);
+                async Task<List<WordTime>> Go()
+                {
+                    var o = new List<WordTime>();
+                    await using var fs = File.OpenRead(tmp);
+                    await foreach (var seg in _processor.ProcessAsync(fs, ct))
+                        o.Add(new WordTime(seg.Text, seg.Start.TotalSeconds, seg.End.TotalSeconds));
+                    return Tidy(o);
+                }
+                try { return await Go(); }
+                catch (Exception ex) when (DeviceUsed.StartsWith("GPU") && _s.CpuFallback && ex is not OperationCanceledException)
+                {
+                    _log($"GPU inference failed on {Path.GetFileName(wav)}: {ex.Message}");
+                    Build(false);
+                    DeviceUsed = "CPU";
+                    return await Go();
                 }
             }
             finally { try { File.Delete(tmp); } catch { } }
@@ -374,6 +443,19 @@ public sealed class WavToLip
             if (r.TryGetProperty("device", out var d)) DeviceUsed = d.GetString();
             if (r.GetProperty("type").GetString() == "error") throw new InvalidOperationException(r.GetProperty("message").GetString());
             return r.GetProperty("text").GetString() ?? "";
+        }
+
+        public async Task<List<WordTime>> WordsAsync(string wav, CancellationToken ct)
+        {
+            await _p!.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new { file = wav, words = true }));
+            await _p.StandardInput.FlushAsync(ct);
+            var r = await ReadAsync(ct);
+            if (r.GetProperty("type").GetString() == "error") throw new InvalidOperationException(r.GetProperty("message").GetString());
+            var o = new List<WordTime>();
+            if (r.TryGetProperty("words", out var ws))
+                foreach (var w in ws.EnumerateArray())
+                    o.Add(new WordTime(w.GetProperty("w").GetString() ?? "", w.GetProperty("s").GetDouble(), w.GetProperty("e").GetDouble()));
+            return Tidy(o);
         }
 
         public async ValueTask DisposeAsync()

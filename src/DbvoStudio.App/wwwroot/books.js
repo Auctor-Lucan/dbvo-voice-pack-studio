@@ -6,6 +6,7 @@ import { app, go, refreshState } from './app.js';
 import { insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { creditsButton, LANGS } from './phase2.js';
 import { effectRow } from './fx.js';
+import { editTake } from './edit.js';
 
 const CERT = { Confirmed: 'CONFIRMED', Unverified: 'UNVERIFIED', Inferred: 'INFERRED', None: '' };
 const CERT_TIP = {
@@ -864,6 +865,7 @@ export async function bookProjectView(id) {
               l ? h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: v && v.hasVoice ? (l.takes.length ? 'A new take of this part' : 'Generate this part') : 'Pick a voice first', disabled: !v || !v.hasVoice, onclick: () => { inFlight.add(l.id); edAutoPlay.add(l.id); renderEd(false); generate('lines', null, { lineIds: [l.id], single: true }); } }, icon('regen')) : null,
               takeSel,
               l && l.takes.length ? h('button.icon-btn', { title: 'Delete the take in use', onclick: async () => { if (await confirmBox('Delete take?', 'Deletes this part\'s take in use and its file.', 'Delete', true)) lineAct(l.id, 'deleteTake', l.sel); } }, '🗑') : null,
+              t ? h('button.act-btn', { title: 'Edit this part\'s take: trim, cut, fade', onclick: () => editTake({ kind: 'books', id, lineId: l.id, takeId: t.id, onSaved: (r) => { d = r.result; renderEd(false); replaceBook(d.book); } }) }, icon('wrench')) : null,
               t ? h('button.icon-btn', { title: 'Play this part\'s take', onclick: () => playTake(t) }, '▶') : null),
             h('div.part-excerpt', { title: 'Click to select this part in the spoken text', onclick: () => selectRange(r.start, r.end) }, excerpt(ta.value, r.start, r.end)));
           const brk = i < breaks.length ? h('div.break-row', h('span.faint', '— break —'),

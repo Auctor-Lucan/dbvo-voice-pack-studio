@@ -129,21 +129,25 @@ export function helpButton(anchor, { label = '' } = {}) {
 
 // A dialog opened from inside another (e.g. "+ New category…" in New mod) stacks on it: the one below is put back when it closes.
 const modalStack = [];
-export function modal(title, content, buttons = [{ label: 'OK', primary: true, value: true }], { wide = false, help = null } = {}) {
+export function modal(title, content, buttons = [{ label: 'OK', primary: true, value: true }], { wide = false, help = null, onOpen = null, cls = '' } = {}) {
   const m = document.getElementById('modal');
   const cardEl = m.querySelector('.modal-card');
   if (m.classList.contains('hidden')) modalStack.length = 0; // (a dialog hidden by hand leaves nothing to restore)
-  else modalStack.push({ nodes: [...cardEl.childNodes], wide: cardEl.classList.contains('wide') });
+  else { modalStack.push({ nodes: [...cardEl.childNodes], wide: cardEl.classList.contains('wide'), cls: cardEl.dataset.cls || '' }); if (cardEl.dataset.cls) cardEl.classList.remove(cardEl.dataset.cls); }
   const level = modalStack.length;
   const card = clear(cardEl);
   card.classList.toggle('wide', wide);
+  card.dataset.cls = cls;
+  if (cls) card.classList.add(cls);
   return new Promise((resolve) => {
     let done = false;
     const close = (v) => {
       if (done) return; done = true;
       document.removeEventListener('keydown', key);
       const below = modalStack.length === level && level > 0 ? modalStack.pop() : null;
-      if (below) { clear(card).append(...below.nodes); card.classList.toggle('wide', below.wide); }
+      if (cls) card.classList.remove(cls);
+      card.dataset.cls = below ? below.cls : '';
+      if (below) { clear(card).append(...below.nodes); card.classList.toggle('wide', below.wide); if (below.cls) card.classList.add(below.cls); }
       else m.classList.add('hidden');
       resolve(v);
     };
@@ -158,6 +162,7 @@ export function modal(title, content, buttons = [{ label: 'OK', primary: true, v
     m.classList.remove('hidden');
     const first = card.querySelector('input,textarea,select');
     if (first) first.focus();
+    if (onOpen) onOpen(close);
   });
 }
 
@@ -308,6 +313,8 @@ export class VGrid {
     this.storageKey = storageKey;
     const saved = storageKey ? store.get('cols:' + storageKey, {}) : {};
     for (const c of this.columns) if (saved[c.id]) { c.width = saved[c.id]; c.flex = 0; }
+    this.defaultOrder = this.columns.map((c) => c.id);
+    if (storageKey) this.applyOrder(store.get('order:' + storageKey, null));
     this.hidden = new Set(storageKey ? store.get('hide:' + storageKey, []) : []);
     // Click a column title to sort: ascending, descending, then back to the usual order.
     const ss = storageKey ? store.get('sort:' + storageKey, null) : null;
@@ -331,6 +338,68 @@ export class VGrid {
     this.el.addEventListener('scroll', () => this.paint());
     new ResizeObserver(() => this.paint()).observe(this.el);
     this.el.addEventListener('keydown', (e) => this.key(e));
+  }
+
+  /** Columns in a saved order (dragged by their titles); columns new since then go after the one they follow by default. */
+  applyOrder(ids) {
+    if (!Array.isArray(ids) || !ids.length) return;
+    const byId = new Map(this.columns.map((c) => [c.id, c]));
+    const out = ids.filter((x) => byId.has(x)).map((x) => byId.get(x));
+    this.defaultOrder.forEach((cid, i) => {
+      if (out.some((c) => c.id === cid)) return;
+      const prev = i > 0 ? out.findIndex((c) => c.id === this.defaultOrder[i - 1]) : -1;
+      out.splice(prev + 1, 0, byId.get(cid));
+    });
+    this.columns = out;
+  }
+
+  /** Drag a column title sideways to move the column (the tick box column stays first). */
+  startMove(e, c, cell) {
+    if (e.button !== 0 || c.id === 'sel' || e.target.closest('.resizer')) return;
+    const x0 = e.clientX;
+    let ghost = null, mark = null, to = null;
+    const cells = () => [...this.head.children];
+    const move = (ev) => {
+      if (!ghost) {
+        if (Math.abs(ev.clientX - x0) < 6) return;
+        ghost = h('div.col-ghost', c.title || c.tip || 'Column');
+        mark = h('div.col-drop');
+        document.body.append(ghost, mark);
+        cell.classList.add('moving');
+        document.body.classList.add('col-dragging');
+      }
+      ghost.style.left = ev.clientX + 12 + 'px'; ghost.style.top = ev.clientY + 10 + 'px';
+      const shown = this.shown();
+      let best = null;
+      cells().forEach((el, i) => {
+        if (shown[i].id === 'sel') return;
+        const r = el.getBoundingClientRect();
+        const before = ev.clientX < r.left + r.width / 2;
+        const x = before ? r.left : r.right;
+        if (!best || Math.abs(ev.clientX - x) < Math.abs(ev.clientX - best.x)) best = { x, id: shown[i].id, before, top: r.top, h: r.height };
+      });
+      to = best;
+      if (best) { mark.style.left = best.x - 1 + 'px'; mark.style.top = best.top + 'px'; mark.style.height = this.el.getBoundingClientRect().height + 'px'; }
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      if (!ghost) return;
+      ghost.remove(); mark.remove(); cell.classList.remove('moving');
+      document.body.classList.remove('col-dragging');
+      this._moved = Date.now();
+      if (!to || to.id === c.id) return;
+      const cols = this.columns.filter((x) => x !== c);
+      let at = cols.findIndex((x) => x.id === to.id) + (to.before ? 0 : 1);
+      if (cols[0] && cols[0].id === 'sel') at = Math.max(1, at);
+      cols.splice(at, 0, c);
+      this.columns = cols;
+      if (this.storageKey) store.set('order:' + this.storageKey, cols.map((x) => x.id));
+      this.renderHead();
+      this.paint(true);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   }
 
   sizeCell(cell, c) {
@@ -362,7 +431,8 @@ export class VGrid {
       const on = sortable && this.sortId === c.id && this.sortDir;
       const cell = h('div.cell' + (c.align === 'center' ? '.center' : '') + (sortable ? '.sortable' : '') + (on ? '.sorted' : ''),
         { title: (c.tip ? c.tip + '\n' : '') + (sortable ? 'Click to sort (again: reverse, a third time: the usual order)' : '') }, c.title || '', on ? h('span.sort-ind', this.sortDir > 0 ? ' ▲' : ' ▼') : null);
-      if (sortable) cell.addEventListener('click', (e) => { if (e.target.closest('.resizer')) return; this.toggleSort(c.id); });
+      if (sortable) cell.addEventListener('click', (e) => { if (e.target.closest('.resizer') || Date.now() - (this._moved || 0) < 300) return; this.toggleSort(c.id); });
+      if (c.id !== 'sel') { cell.classList.add('movable'); cell.addEventListener('pointerdown', (e) => this.startMove(e, c, cell)); if (!c.title && c.tip) cell.title = c.tip + '\nDrag sideways to move this column'; else cell.title = (cell.title ? cell.title + '\n' : '') + 'Drag sideways to move this column'; }
       this.sizeCell(cell, c);
       if (c.resizable && c.title) {
         const grip = h('div.resizer', { title: 'Drag to resize. Double-click to reset.' });
@@ -402,8 +472,10 @@ export class VGrid {
   }
 
   resetColumns() {
-    if (this.storageKey) store.set('cols:' + this.storageKey, {});
+    if (this.storageKey) { store.set('cols:' + this.storageKey, {}); store.set('order:' + this.storageKey, null); }
     for (const c of this.columns) Object.assign(c, c._orig);
+    const pos = new Map(this.defaultOrder.map((x, i) => [x, i]));
+    this.columns.sort((a, b) => pos.get(a.id) - pos.get(b.id));
     this.renderHead();
     this.paint(true);
   }
@@ -706,10 +778,10 @@ export function columnsMenu(grid) {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.menu').forEach((m) => m.remove());
     const r = btn.getBoundingClientRect();
-    const m = h('div.menu', grid.columns.filter((c) => c.title).map((c) => {
+    const m = h('div.menu', grid.columns.filter((c) => c.title || c.menuTitle).map((c) => {
       const cb = h('input', { type: 'checkbox', checked: !grid.hidden.has(c.id) });
       cb.addEventListener('change', () => grid.setHidden(c.id, !cb.checked));
-      return h('label.menu-check', cb, c.title);
+      return h('label.menu-check', cb, c.menuTitle || c.title);
     }), h('button', { title: 'Show every column again, at its standard width and order', onclick: () => { m.remove(); grid.resetColumns(); grid.hidden.clear(); grid.setHidden('__none', false); } }, h('div', 'Reset columns')));
     document.body.append(m);
     m.style.left = Math.min(r.left, window.innerWidth - 260) + 'px';
@@ -751,6 +823,7 @@ const ICON_PATHS = {
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   export: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>',
+  wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
   scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/>',
   coins: '<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>',
 };

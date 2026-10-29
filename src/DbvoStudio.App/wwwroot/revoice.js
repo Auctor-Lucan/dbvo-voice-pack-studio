@@ -7,6 +7,7 @@ import { bulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.j
 import { recordTake } from './recorder.js';
 import { effectRow, effectIcon, postButton, softenIcon, softenRow, noiseIcon, noiseRow } from './fx.js';
 import { qaDialog } from './qa.js';
+import { editTake } from './edit.js';
 
 const CERT = { Exact: 'Speaker known', Probable: 'Probable speakers', Unknown: 'Speaker unknown' };
 
@@ -492,12 +493,15 @@ export async function revoiceView(id) {
       { id: 'text', title: 'Subtitle (in game)', flex: 1, width: 260, render: (l) => h('span.ellipsis.dim', { title: l.text }, l.text) },
       { id: 'spoken', title: 'Spoken text (tags allowed)', flex: 1.2, width: 300, render: (l) => spokenCell(l) },
       { id: 'emo', title: 'Emotion', width: 90, render: (l) => l.emo === 'Neutral' ? h('span.faint', '—') : h('span.faint', { title: `${l.emo} ${l.emoV}` }, `${l.emo} ${l.emoV}`) },
+      { id: 'pp', title: 'PP', tip: 'Post-processing on the take: effect, S = Soften peaks, N = Noise-reduced pauses. Click an icon to take it off.', width: 74, resizable: false, sortable: false,
+        render: (l) => h('span.row.pp-cell', { style: { gap: '3px' } }, effectIcon(l.effect, () => applyFx([l.id], '')), softenIcon(l.soften, () => applySoften([l.id], '')), noiseIcon(l.noise, () => applyNoise([l.id], false))) },
       { id: 'qa', title: 'QA', tip: 'Check takes: ⚠ flagged, ✓ passed, empty = not checked. Click to sort the flagged ones to the top.', width: 44, resizable: false, align: 'center',
         sort: (l) => { const t = l.takes.find((x) => x.id === l.sel); return !t || !t.qa ? 2 : t.qa.flags.length ? 0 : 1; }, render: (l) => qaBadgeRv(l) },
-      { id: 'take', title: 'Take', width: 84, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
-        h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s). Click to play, switch or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } }, l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—'),
-        effectIcon(l.effect, () => applyFx([l.id], '')), softenIcon(l.soften, () => applySoften([l.id], '')), noiseIcon(l.noise, () => applyNoise([l.id], false))) },
-      { id: 'act', title: '', width: 146, resizable: false, render: (l) => h('span.row.icon-bar', { style: { gap: '2px' } },
+      { id: 'take', title: 'Take', width: 70, resizable: false, render: (l) => h('span.row', { style: { gap: '6px' } }, statusDot(l),
+        h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s). Click to play, switch or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } }, l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.sel) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—')) },
+      { id: 'edit', title: '', menuTitle: 'Edit take', tip: 'Edit take: trim and cut the take in use', width: 36, resizable: false, align: 'center',
+        render: (l) => h('button.act-btn', { title: l.sel ? 'Edit take: trim, cut out doubled words, fade (a new .lip is made)' : 'No take yet', disabled: !l.sel, onclick: (e) => { e.stopPropagation(); editLineTake(l); } }, icon('wrench')) },
+      { id: 'act', title: '', menuTitle: 'Line actions', tip: 'Regenerate, takes folder, flag, play', width: 146, resizable: false, render: (l) => h('span.row.icon-bar', { style: { gap: '2px' } },
         h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: inFlight.has(l.id) ? 'Making a new take…' : genBlock(l) || 'Regenerate (a new take; older takes stay)', disabled: !!genBlock(l), onmousedown: keepEditing, onclick: (e) => { e.stopPropagation(); regen(l); } }, icon('regen')),
         h('button.act-btn', { title: l.takes.length ? 'Open this line\'s takes folder' : 'No takes yet', disabled: !l.takes.length, onclick: (e) => { e.stopPropagation(); rpc('revoice.openTakeFolder', { id, lineId: l.id }).catch(fail); } }, icon('folder')),
         h('button.act-btn.flag-btn' + (l.marked ? '.on.warn' : ''), { title: l.marked ? 'Flagged to revisit - click to clear' : 'Flag to revisit', onclick: (e) => { e.stopPropagation(); upd(l, 'mark'); } }, icon('flag')),
@@ -1043,12 +1047,21 @@ export async function revoiceView(id) {
         h('button.icon-btn.big', { title: 'Play this take', onclick: () => play(line, t) }, '▶'),
         h('div.grow', h('div', '#' + t.slot + (t.id === line.sel ? ' · used for export' : '')), h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.engine || ''} ${t.model || ''} · ${new Date(t.createdUtc).toLocaleString()}`)),
         t.id !== line.sel ? h('button.btn.sm', { title: 'Use this take for export', onclick: async () => { await upd(line, 'selectTake', t.id); render(); } }, 'Use') : null,
+        h('button.act-btn', { title: 'Edit this take: trim, cut out doubled words, fade (a new .lip is made)', onclick: () => editLineTake(line, t.id, render) }, icon('wrench')),
         h('button.icon-btn', { title: 'Delete this take and its files', onclick: async () => { await upd(line, 'deleteTake', t.id); render(); } }, '🗑'))));
     };
     render();
     await modal(`Takes · ${l.text}`, [list,
       h('div.row', h('button.btn.sm', { title: 'Delete every take of this line except the one in use', onclick: async () => { await upd(l, 'keepUsedTake'); render(); } }, 'Keep only the used take'),
-        h('button.btn.sm', { title: 'Play the file the game uses now', disabled: !l.original, onclick: () => playOriginal(l) }, '▶ Current file'))]);
+        h('button.btn.sm', { title: 'Play the file the game uses now', disabled: !l.original, onclick: () => playOriginal(l) }, '▶ Current file'),
+        h('button.btn.sm', { title: 'Edit the take in use: trim, cut out doubled words, fade (a new .lip is made)', onclick: () => { const line = index.get(l.id) || l; editLineTake(line, line.sel, render); } }, icon('wrench', { size: 13 }), ' Edit take'))]);
+  }
+
+  async function editLineTake(l, takeId, after) {
+    takeId = takeId || l.sel;
+    if (!takeId) return;
+    await editTake({ kind: 'revoice', id, lineId: l.id, takeId, onSaved: (r) => { replaceLine(r.result); renderInspector(); } });
+    if (after) after();
   }
 
   let autoPlay = null; // single-line generation plays the new take; batches never do

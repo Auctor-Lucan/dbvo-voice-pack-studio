@@ -5,6 +5,7 @@ import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret, findReplaceDial
 import { recordTake } from './recorder.js';
 import { effectRow, effectIcon, postButton, softenIcon, softenRow, noiseIcon, noiseRow } from './fx.js';
 import { qaDialog } from './qa.js';
+import { editTake } from './edit.js';
 
 const STATUS_TEXT = { Pending: 'Not generated', Generating: 'Generating…', Generated: 'Generated', Failed: 'Failed', Omitted: 'Omitted', Stale: 'Edited since take' };
 
@@ -335,14 +336,17 @@ export async function patchView(id) {
       { id: 'file', title: 'Filename', flex: 1, width: 240, render: (l) => h('span.faint.mono', { title: `In-game line: ${l.finalLine}\nFile: ${l.stem}.wav / .lip / .fuz` }, l.editedInPhase1 ? h('span.mark.info', { title: 'Edited in Phase 1' }, 'P1 ') : null, l.stem + '.wav') },
       vc ? { id: 'src', title: 'Source', width: 80, render: (l) => l.hasSource ? h('span.row', h('button.icon-btn', { title: 'Play the source: ' + l.sourceWav, onclick: () => playSource(l) }, '▶'), h('span.badge.b-valid', { title: l.sourceWav }, l.sourceWav.toLowerCase().endsWith('.fuz') ? '.fuz' : '✓')) : h('span.badge.b-broken', { title: `No ${l.stem}.wav or .fuz (Legacy or DBVO 2.0 name) in the source folders. New lines from a mod update have no source until the source pack has them.` }, patch.ttsForMissing ? 'TTS' : 'missing') } : null,
       { id: 'spoken', title: vc ? 'Text for the LIP (and TTS without a source)' : 'Spoken text (tags anywhere)', flex: 1.3, width: 320, render: (l) => spokenCell(l) },
+      { id: 'pp', title: 'PP', tip: 'Post-processing on the take: effect, S = Soften peaks, N = Noise-reduced pauses. Click an icon to take it off.', width: 74, resizable: false, sortable: false,
+        render: (l) => h('span.row.pp-cell', { style: { gap: '3px' } }, effectIcon(l.effect, () => applyFx([l.lineId], '')), softenIcon(l.soften, () => applySoften([l.lineId], '')), noiseIcon(l.noise, () => applyNoise([l.lineId], false))) },
       { id: 'qa', title: 'QA', tip: 'Check takes: ⚠ flagged, ✓ passed, empty = not checked. Click to sort the flagged ones to the top.', width: 44, resizable: false, align: 'center',
         sort: (l) => { const t = flaggedTake(l) || selTake(l); return !t || !t.qa ? 2 : t.qa.flags.length ? 0 : 1; }, render: (l) => qaBadge(l) },
-      { id: 'take', title: 'Take', width: 108, resizable: false, render: (l) => h('span.row', { style: { gap: '5px' } }, statusDot(l),
+      { id: 'take', title: 'Take', width: 92, resizable: false, render: (l) => h('span.row', { style: { gap: '5px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s); #${(l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot} is used. Click to play, switch, keep or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } },
           l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—'),
-        (selTake(l) || {}).original ? h('span.imp-mark', { title: 'The take in use is an imported .fuz, kept as it is' }, 'fuz') : null,
-        effectIcon(l.effect, () => applyFx([l.lineId], '')), softenIcon(l.soften, () => applySoften([l.lineId], '')), noiseIcon(l.noise, () => applyNoise([l.lineId], false))) },
-      { id: 'act', title: '', width: 176, resizable: false, render: (l) => rowIcons(l) },
+        (selTake(l) || {}).original ? h('span.imp-mark', { title: 'The take in use is an imported .fuz, kept as it is' }, 'fuz') : null) },
+      { id: 'edit', title: '', menuTitle: 'Edit take', tip: 'Edit take: trim and cut the take in use', width: 36, resizable: false, align: 'center',
+        render: (l) => h('button.act-btn', { title: selTake(l) ? 'Edit take: trim, cut out doubled words, fade (a new .lip is made)' : 'No take yet', disabled: !selTake(l), onclick: (e) => { e.stopPropagation(); editLineTake(l); } }, icon('wrench')) },
+      { id: 'act', title: '', menuTitle: 'Line actions', tip: 'Regenerate, keep, takes folder, flag, play', width: 176, resizable: false, render: (l) => rowIcons(l) },
     ].filter(Boolean),
   });
   grid.el.addEventListener('selection', () => renderActions());
@@ -419,6 +423,7 @@ export async function patchView(id) {
           t.spokenText !== line.spoken ? h('div.meta.ellipsis', { title: t.spokenText }, 'Text then: ' + t.spokenText) : null),
         h('button.act-btn' + (t.kept ? '.on' : ''), { title: t.kept ? 'Kept as a variant - click to un-keep' : 'Keep as a variant (DBVO 2.0 exports every kept take)', onclick: async () => { await keep(line, t); render(); } }, icon('star', { filled: t.kept })),
         t.id !== line.selectedTakeId ? h('button.btn.sm', { title: 'Use this take for export and .fuz', onclick: async () => { await upd(line, 'selectTake', t.id); render(); } }, 'Use') : null,
+        h('button.act-btn', { title: 'Edit this take: trim, cut out doubled words, fade (a new .lip is made)', onclick: () => editLineTake(line, t, render) }, icon('wrench')),
         h('button.icon-btn', { title: 'Delete this take and its files', onclick: async () => { await upd(line, 'deleteTake', t.id); render(); } }, '🗑'))));
     };
     render();
@@ -426,7 +431,15 @@ export async function patchView(id) {
       h('div.row', h('button.btn.sm', { title: 'Delete every take of this line except the one in use and kept ones', onclick: async () => {
         try { const r = await rpc('patch.purgeTakes', { id, lineIds: [l.lineId] }); patch = r.patch; reindex(); grid.setRows(visible()); render(); toast(`${r.removed} take(s) deleted.`); } catch (e) { fail(e); }
       } }, 'Keep only the used take'),
-      h('button.btn.sm', { title: 'Make another take of this line', onclick: () => { document.getElementById('modal').classList.add('hidden'); generate('selected', [l.lineId], { autoplay: true }); } }, vc ? 'Convert again' : 'New take'))], undefined, { help: 'takes' });
+      h('button.btn.sm', { title: 'Make another take of this line', onclick: () => { document.getElementById('modal').classList.add('hidden'); generate('selected', [l.lineId], { autoplay: true }); } }, vc ? 'Convert again' : 'New take'),
+      h('button.btn.sm', { title: 'Edit the take in use: trim, cut out doubled words, fade (a new .lip is made)', onclick: () => { const line = index.get(l.lineId) || l; editLineTake(line, selTake(line), render); } }, icon('wrench', { size: 13 }), ' Edit take'))], undefined, { help: 'takes' });
+  }
+
+  async function editLineTake(l, t, after) {
+    t = t || selTake(l);
+    if (!t) return;
+    await editTake({ kind: 'patch', id, lineId: l.lineId, takeId: t.id, onSaved: (r) => { replaceLine(r.result); renderInspector(); } });
+    if (after) after();
   }
 
   async function purge(ids) {

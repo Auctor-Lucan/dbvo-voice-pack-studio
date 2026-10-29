@@ -54,9 +54,11 @@ def main():
         if req.get("quit"):
             break
         wav = req["file"]
+        want_words = bool(req.get("words"))
         try:
             try:
-                segments, info = model.transcribe(wav, language=language, beam_size=5, vad_filter=False)
+                segments, info = model.transcribe(wav, language=language, beam_size=5, vad_filter=False, word_timestamps=want_words)
+                segments = list(segments)
                 text = " ".join(seg.text.strip() for seg in segments).strip()
             except Exception as transcribe_exc:  # noqa: BLE001
                 # CUDA can fail on first inference even if model loading succeeded.
@@ -66,9 +68,13 @@ def main():
                 send({"type": "log", "message": "Retrying this file with CPU/int8."})
                 model = load("cpu", "int8")
                 active = ("cpu", "int8")
-                segments, info = model.transcribe(wav, language=language, beam_size=5, vad_filter=False)
+                segments, info = model.transcribe(wav, language=language, beam_size=5, vad_filter=False, word_timestamps=want_words)
+                segments = list(segments)
                 text = " ".join(seg.text.strip() for seg in segments).strip()
-            send({"type": "result", "text": text, "device": f"{active[0]}/{active[1]}"})
+            out = {"type": "result", "text": text, "device": f"{active[0]}/{active[1]}"}
+            if want_words:
+                out["words"] = [{"w": w.word, "s": float(w.start), "e": float(w.end)} for seg in segments for w in (seg.words or [])]
+            send(out)
         except Exception as exc:  # noqa: BLE001
             send({"type": "error", "message": str(exc), "device": f"{active[0]}/{active[1]}"})
 

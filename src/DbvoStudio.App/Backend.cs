@@ -453,6 +453,8 @@ public sealed partial class Backend
                 if (v82 != NotHandled) return v82;
                 var gr = await DispatchGrunts(m, p, dropped);
                 if (gr != NotHandled) return gr;
+                var te = await DispatchTakeEdit(m, p);
+                if (te != NotHandled) return te;
                 throw new InvalidOperationException("Unknown action: " + m);
         }
     }
