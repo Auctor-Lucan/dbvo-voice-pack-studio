@@ -775,10 +775,13 @@ export function diffAdded(a, b) {
 /** A "Columns ▾" button: tick which grid columns are shown. */
 export function columnsMenu(grid) {
   const btn = h('button.btn.sm', { title: 'Show or hide columns' }, 'Columns ▾');
+  let open = null;
   btn.addEventListener('click', () => {
+    // a second click on Columns ▾ closes it
+    if (open && open.isConnected) { open.remove(); open = null; return; }
     document.querySelectorAll('.menu').forEach((m) => m.remove());
     const r = btn.getBoundingClientRect();
-    const m = h('div.menu', grid.columns.filter((c) => c.title || c.menuTitle).map((c) => {
+    const m = open = h('div.menu', grid.columns.filter((c) => c.title || c.menuTitle).map((c) => {
       const cb = h('input', { type: 'checkbox', checked: !grid.hidden.has(c.id) });
       cb.addEventListener('change', () => grid.setHidden(c.id, !cb.checked));
       return h('label.menu-check', cb, c.menuTitle || c.title);
@@ -786,7 +789,10 @@ export function columnsMenu(grid) {
     document.body.append(m);
     m.style.left = Math.min(r.left, window.innerWidth - 260) + 'px';
     m.style.top = r.bottom + 6 + 'px';
-    setTimeout(() => document.addEventListener('mousedown', function close(e) { if (!m.contains(e.target) && e.target !== btn) { m.remove(); document.removeEventListener('mousedown', close); } }), 0);
+    setTimeout(() => document.addEventListener('mousedown', function close(e) {
+      if (!m.isConnected) { document.removeEventListener('mousedown', close); return; }
+      if (!m.contains(e.target) && !btn.contains(e.target)) { m.remove(); document.removeEventListener('mousedown', close); }
+    }), 0);
   });
   return btn;
 }
