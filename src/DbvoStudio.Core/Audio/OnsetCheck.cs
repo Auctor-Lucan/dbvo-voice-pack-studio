@@ -10,14 +10,44 @@ public sealed record OnsetResult(bool Flagged, double BlipMs, double GapMs, doub
 /// </summary>
 public static class OnsetCheck
 {
-    private sealed record Rule(double MinGapMs, double GapDb, double PeakMarginDb);
+    // MaxBlipMs and MinSemitones keep a short first word ("What… brings you here") from counting: in the takes studied
+    // the real burst lasted 60 to 95 ms and sat 8+ semitones away from the voice, while first words followed by a pause
+    // (common when tags are sent as context, which slows the delivery) ran 100 to 200 ms at the voice's own pitch.
+    private sealed record Rule(double MinGapMs, double GapDb, double PeakMarginDb, double MaxBlipMs, double MinSemitones);
 
     private static Rule RuleFor(string sensitivity) => sensitivity switch
     {
-        "strict" => new Rule(50, -45, -8),   // shorter gaps and quieter blips count
-        "relaxed" => new Rule(120, -55, 0),  // only an obvious blip, at least as loud as the speech
-        _ => new Rule(80, -50, -4),
+        "strict" => new Rule(50, -45, -8, 130, 4),   // shorter gaps and quieter blips count
+        "relaxed" => new Rule(120, -55, 0, 100, 8),  // only an obvious blip, at least as loud as the speech
+        _ => new Rule(80, -50, -4, 110, 6),
     };
+
+    /// <summary>Median pitch (Hz) of 40 ms frames from..to (sample indexes), or 0 when none of them is voiced.</summary>
+    private static double Pitch(Func<int, float> s, int sr, int from, int to)
+    {
+        int win = sr / 25, step = sr / 100, lo = sr / 400, hi = sr / 70;
+        var found = new List<double>();
+        var x = new double[win];
+        for (int start = from; start + win <= to; start += step)
+        {
+            double mean = 0, e = 0;
+            for (int i = 0; i < win; i++) { x[i] = s(start + i); mean += x[i]; }
+            mean /= win;
+            for (int i = 0; i < win; i++) { x[i] -= mean; e += x[i] * x[i]; }
+            if (e / win < 1e-6) continue;
+            double best = 0; int lag = 0;
+            for (int k = lo; k <= hi && k < win; k++)
+            {
+                double c = 0;
+                for (int i = 0; i + k < win; i++) c += x[i] * x[i + k];
+                if (c > best) { best = c; lag = k; }
+            }
+            if (lag > 0 && best / e > 0.45) found.Add((double)sr / lag);
+        }
+        if (found.Count == 0) return 0;
+        found.Sort();
+        return found[found.Count / 2];
+    }
 
     public static OnsetResult Analyze(WavFile w, string sensitivity = "normal")
     {
@@ -50,7 +80,7 @@ public static class OnsetCheck
         int b = a;
         while (b < frames && rms[b] >= SoundDb) b++;
         double blipMs = (b - a) * Ms;
-        if (blipMs < 15 || blipMs > 200) return none;
+        if (blipMs < 15 || blipMs > rule.MaxBlipMs) return none;
 
         // Then near silence of at least MinGapMs (the blip's tail decays into it).
         int g = b;
@@ -68,6 +98,13 @@ public static class OnsetCheck
         double blipPeak = double.NegativeInfinity;
         for (int f = a; f < b; f++) blipPeak = Math.Max(blipPeak, peak[f]);
         bool flagged = blipPeak >= speechPeak + rule.PeakMarginDb;
+        if (flagged)
+        {
+            // A blip at the voice's own pitch is the first word, not a burst (an unpitched one still counts).
+            double pb = Pitch(S, sr, a * win, b * win);
+            double ps = Pitch(S, sr, g * win, Math.Min(n, g * win + sr * 6 / 10));
+            if (pb > 0 && ps > 0 && Math.Abs(12 * Math.Log2(pb / ps)) < rule.MinSemitones) flagged = false;
+        }
         return new OnsetResult(flagged, blipMs, gapMs, Math.Round(blipPeak, 1), Math.Round(speechPeak, 1));
     }
 }

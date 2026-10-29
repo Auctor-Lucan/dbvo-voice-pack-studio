@@ -50,6 +50,18 @@ public class OnsetCheckTests
         Assert.False(OnsetCheck.Analyze(Wav(s), "relaxed").Flagged);
     }
 
+    [Fact]
+    public void A_loud_short_first_word_at_the_voice_pitch_is_not_flagged()
+    {
+        var s = new List<short>();
+        Silence(s, 30);
+        Tone(s, 90, 120, -6);      // "What…"
+        Silence(s, 140);
+        Tone(s, 900, 115, -12);    // "…brings you here"
+        Assert.False(OnsetCheck.Analyze(Wav(s)).Flagged);
+        Assert.False(OnsetCheck.Analyze(Wav(s), "strict").Flagged);
+    }
+
     /// <summary>Real takes with the burst, when DBVO_ONSET_SAMPLES points at a folder of them (not shipped in the repo).</summary>
     [Fact]
     public void Real_samples_are_flagged_when_available()
