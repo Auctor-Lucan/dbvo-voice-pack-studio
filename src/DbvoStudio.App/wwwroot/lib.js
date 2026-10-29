@@ -434,7 +434,7 @@ export class VGrid {
       if (sortable) cell.addEventListener('click', (e) => { if (e.target.closest('.resizer') || Date.now() - (this._moved || 0) < 300) return; this.toggleSort(c.id); });
       if (c.id !== 'sel') { cell.classList.add('movable'); cell.addEventListener('pointerdown', (e) => this.startMove(e, c, cell)); if (!c.title && c.tip) cell.title = c.tip + '\nDrag sideways to move this column'; else cell.title = (cell.title ? cell.title + '\n' : '') + 'Drag sideways to move this column'; }
       this.sizeCell(cell, c);
-      if (c.resizable && c.title) {
+      if (c.resizable && c.id !== 'sel') {
         const grip = h('div.resizer', { title: 'Drag to resize. Double-click to reset.' });
         grip.addEventListener('mousedown', (e) => this.startResize(e, c, cell, grip));
         grip.addEventListener('dblclick', () => this.resetColumns());
