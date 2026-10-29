@@ -127,17 +127,27 @@ export function helpButton(anchor, { label = '' } = {}) {
     onclick: (e) => { e.preventDefault(); e.stopPropagation(); document.dispatchEvent(new CustomEvent('open-help', { detail: { anchor, toggle: true } })); } }, icon('help', { size: 15 }));
 }
 
+// A dialog opened from inside another (e.g. "+ New category…" in New mod) stacks on it: the one below is put back when it closes.
+const modalStack = [];
 export function modal(title, content, buttons = [{ label: 'OK', primary: true, value: true }], { wide = false, help = null } = {}) {
   const m = document.getElementById('modal');
-  const card = clear(m.querySelector('.modal-card'));
+  const cardEl = m.querySelector('.modal-card');
+  if (m.classList.contains('hidden')) modalStack.length = 0; // (a dialog hidden by hand leaves nothing to restore)
+  else modalStack.push({ nodes: [...cardEl.childNodes], wide: cardEl.classList.contains('wide') });
+  const level = modalStack.length;
+  const card = clear(cardEl);
   card.classList.toggle('wide', wide);
   return new Promise((resolve) => {
+    let done = false;
     const close = (v) => {
-      m.classList.add('hidden');
+      if (done) return; done = true;
       document.removeEventListener('keydown', key);
+      const below = modalStack.length === level && level > 0 ? modalStack.pop() : null;
+      if (below) { clear(card).append(...below.nodes); card.classList.toggle('wide', below.wide); }
+      else m.classList.add('hidden');
       resolve(v);
     };
-    const key = (e) => { if (e.key === 'Escape') close(null); };
+    const key = (e) => { if (e.key === 'Escape' && modalStack.length === level) close(null); };
     document.addEventListener('keydown', key);
     card.append(
       help ? h('div.modal-head', h('h2', title), helpButton(help)) : h('h2', title),

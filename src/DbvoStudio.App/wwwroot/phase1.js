@@ -30,8 +30,15 @@ function categorySelect(value, onchange) {
     if (sel.value === '__new') {
       const r = await prompt('New category', [{ name: 'n', label: 'Name', placeholder: 'e.g. Armor & Clothing' }]);
       if (!r || !r.n.trim()) { sel.value = value; return; }
-      onchange(r.n.trim());
-    } else onchange(sel.value);
+      const n = r.n.trim();
+      // Keep it in the category list (Global Settings), so it can be picked for other mods too.
+      if (!cats.includes(n)) {
+        try { await rpc('categories.save', { categories: [...cats, n] }); cats.push(n); } catch (e) { fail(e); }
+      }
+      if (![...sel.options].some((o) => o.value === n)) sel.insertBefore(h('option', { value: n }, n), sel.querySelector('option[value="__new"]'));
+      sel.value = n; value = n;
+      onchange(n);
+    } else { value = sel.value; onchange(sel.value); }
   });
   return sel;
 }
