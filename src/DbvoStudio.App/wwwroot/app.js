@@ -1,5 +1,5 @@
 import { applyTheme } from './themes.js';
-import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, popupMenu, pathText, pathRows, pathList, closeAllModals } from './lib.js';
+import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, popupMenu, pathText, pathRows, pathList, closeAllModals, modalsMayClose, hasGuardedModal } from './lib.js';
 import { modsView, modView } from './phase1.js';
 import { patchesView, patchView } from './phase2.js';
 import { fomodsView, fomodView } from './phase3.js';
@@ -44,8 +44,19 @@ export async function refreshState() {
   return app.state;
 }
 
+// A host error nobody caught (an action's button would otherwise seem to do nothing) is shown, not swallowed.
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e.reason;
+  if (r && r.fromHost) { e.preventDefault(); fail(r); }
+});
+
 let navigated = false; // set once the user moves, so the start-up below never overrides a click made while it loads
 export function go(view, params = {}, { history = true } = {}) {
+  // An open dialog with unsaved edits (Edit take) asks first, whatever started the move (Back button, F1, Ctrl+K…)
+  if (hasGuardedModal()) return modalsMayClose().then((ok) => (ok ? goNow(view, params, history) : undefined));
+  return goNow(view, params, history);
+}
+function goNow(view, params, history) {
   navigated = true;
   // Dialogs and the book editor belong to the page being left.
   closeAllModals();

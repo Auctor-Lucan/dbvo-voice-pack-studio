@@ -164,7 +164,7 @@ public sealed partial class Backend
         {
             try
             {
-                var q = LoadPatch(id);
+                var q = _lib.LoadPatch(id) ?? throw new InvalidOperationException(); // the saved copy: an export may be changing the open one
                 var qv = _lib.LoadVoicePacks().FirstOrDefault(v => v.Id == q.VoicePackId);
                 var theirs = new HashSet<string>(q.Exported.Keys, StringComparer.OrdinalIgnoreCase);
                 if (qv != null) theirs.UnionWith(svc.PlannedExports(q, qv, mods));
@@ -181,7 +181,7 @@ public sealed partial class Backend
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (id, _) in SharedFolderPatches(patch, voice, modNames))
-            try { foreach (var k in LoadPatch(id).Exported.Keys) set.Add(k); } catch { }
+            try { foreach (var k in (_lib.LoadPatch(id)?.Exported ?? new()).Keys) set.Add(k); } catch { }
         return set;
     }
 

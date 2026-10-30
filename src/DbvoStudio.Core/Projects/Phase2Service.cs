@@ -1142,10 +1142,12 @@ public sealed partial class Phase2Service
     }
 
     /// <summary>Delete the stale exported files (and empty folders they leave). Returns how many were removed.</summary>
-    public int RemoveStaleExports(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods, List<string>? errors = null)
+    /// <param name="only">The files the user saw and approved: only those are removed (a build queued behind another job
+    /// may find more stale files by the time it runs).</param>
+    public int RemoveStaleExports(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods, List<string>? errors = null, ISet<string>? only = null)
     {
         int n = 0;
-        foreach (var f in StaleExports(patch, voice, mods))
+        foreach (var f in StaleExports(patch, voice, mods).Where(f => only == null || only.Contains(f)))
         {
             try
             {

@@ -260,7 +260,7 @@ export async function patchView(id) {
   try {
     const r = await withBusy(rpc('patch.sync', { id }), 'Loading voice lines', 'Reading the lines, takes and WAV + LIP files…'); // pull in Phase 1 edits automatically
     patch = r.patch;
-    if (r.report.adopted) setTimeout(() => toast(`${r.report.adopted} line(s) already had WAV + LIP files in the WAV + LIP folder: added as take #1.`), 300);
+    if (r.report && r.report.adopted) setTimeout(() => toast(`${r.report.adopted} line(s) already had WAV + LIP files in the WAV + LIP folder: added as take #1.`), 300);
   } catch {
     patch = await rpc('patch.get', { id });
   }
@@ -1305,7 +1305,7 @@ export async function patchView(id) {
         h('summary', h('b', `${paths.length} file(s)`), `: ${why}`),
         pathList(paths.slice(0, 300), { more: paths.length - 300 })))),
     ], [{ label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' }, { label: `Delete these ${stale.length} .fuz file(s)`, primary: true, value: 'delete' }], { wide: true, help: 'exporting' });
-    return v == null ? null : { removeStale: v === 'delete' };
+    return v == null ? null : { removeStale: v === 'delete', stalePaths: stale.map((f) => f.path) };
   }
 
   async function exportWavLip(audioOnly) {
@@ -1340,10 +1340,13 @@ export async function patchView(id) {
     } catch (e) { fail(e); }
   }
 
+  let bannerTicket = 0;
   async function renderBanners() {
+    const ticket = ++bannerTicket;
     clear(banners);
     try {
       const c = await rpc('patch.checks', { id });
+      if (ticket !== bannerTicket) return; // a newer call draws them (two quick calls would add every banner twice)
       const t = c.tools;
       const eng = engine();
       const cloudKey = isCloud(eng) && !(app.state.settings.engineKeys || {})[eng] && !(eng === 'openai' && /^https?:\/\/(localhost|127\.|192\.168\.|10\.)/i.test(((voice.openAi || {}).baseUrl) || ''));
@@ -1353,7 +1356,7 @@ export async function patchView(id) {
       if (unset.length) banners.append(h('div.banner.warn', h('span', 'Not set for this patch: ' + unset.join(', ') + '.'), h('div.spacer'), h('button.btn.sm', { title: 'Choose where files go for this patch', onclick: openOptions }, 'Set folders')));
       // Patches writing the very same files (checked after the page is up: it reads the other patches).
       if (!store.get('shared-banner-off:' + id, false)) rpc('patch.sharedFiles', { id }).then((list) => {
-        if (!list || !list.length || !banners.isConnected) return;
+        if (!list || !list.length || !banners.isConnected || ticket !== bannerTicket) return;
         const who = list.map((x) => `${x.name} (${x.files.toLocaleString()} file${x.files === 1 ? '' : 's'})`).join(', ');
         banners.prepend(h('div.banner.warn', h('span', h('b', 'Same files as another patch: '), `${who} export${list.length === 1 ? 's' : ''} files with the same names to the same place as this patch (e.g. ${list[0].sample}), so whichever exports last wins. When they are the same lines (the same text in both mods), that is usually harmless; otherwise give each patch its own folder, or omit those lines in one patch with a reference. Files the other patch exported are never removed as this one's.`),
           h('div.spacer'), h('button.btn.sm', { title: 'Choose where files go for this patch', onclick: openOptions }, 'Folders & options'),
@@ -1397,7 +1400,7 @@ export async function patchView(id) {
       h('span.badge.b-skip', { title: voice.naming === 'Legacy' ? 'File names: Legacy (DBVO 1.0.1), from the line text. Set per voice pack.' : voice.naming === 'Dbrev' ? 'Pack format: DBReV (Dragonborn ReVoiced). Files are named by plugin and FormID: Sound\\DBReV\\<pack ID>\\<plugin>\\dbrev_line_<FormID>.fuz. Set per voice pack.' : 'File names: DBVO 2.0 hashes. Set per voice pack.' }, voice.naming === 'Legacy' ? 'Legacy names' : voice.naming === 'Dbrev' ? 'DBReV pack' : 'DBVO 2.0 names'),
       foldersMenu(),
       h('button.btn.sm.ghost', { title: 'Re-read Phase 1 now (also happens every time you open this patch)', onclick: sync }, '⟳ Refresh'),
-      h('button.btn.sm.ghost.danger', { title: 'Delete this patch and its takes', onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes the patch and every take it made (their WAV and LIP files in the Library). Stays: the Phase 1 mods, the voice pack, and every WAV + LIP, .fuz and DBVO Fix file already exported to your folders; a new patch with the same WAV + LIP folder picks those WAV + LIP files up again as takes. A backup of the project files is made first (backups hold no audio).', 'Delete', true)) { await rpc('patch.delete', { id }); go('patches'); } } }, 'Delete'));
+      h('button.btn.sm.ghost.danger', { title: 'Delete this patch and its takes', onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes the patch and every take it made (their WAV and LIP files in the Library). Stays: the Phase 1 mods, the voice pack, and every WAV + LIP, .fuz and DBVO Fix file already exported to your folders; a new patch with the same WAV + LIP folder picks those WAV + LIP files up again as takes. A backup of the project files is made first (backups hold no audio).', 'Delete', true)) { try { await rpc('patch.delete', { id }); go('patches'); } catch (e) { fail(e); } } } }, 'Delete'));
   }
 
   async function sync() {
@@ -1409,6 +1412,7 @@ export async function patchView(id) {
       renderCounts();
       renderActions();
       const rep = r.report;
+      if (!rep) { toast('Phase 1 changes come in when the running task has finished.'); return; }
       toast(`${rep.total} lines · ${rep.added} new · ${rep.removed} removed${rep.parked ? ` (takes of ${rep.parked} kept in case they come back)` : ''} · ${rep.omitted} omitted${rep.stale ? ` · ${rep.stale} edited since take` : ''}`);
     } catch (e) { fail(e); }
   }

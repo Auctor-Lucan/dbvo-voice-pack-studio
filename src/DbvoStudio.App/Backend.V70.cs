@@ -165,7 +165,7 @@ public sealed partial class Backend
         var lineIds = p.TryGetProperty("lineIds", out var li) && li.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds").ToHashSet() : null;
         var o = QaOptionsFrom(p);
         if (!o.Words && !o.Levels && !o.Onset && !o.Peaks) throw new InvalidOperationException("Pick at least one check: the words, loudness and clipping, sharp peaks, or the start of each take.");
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         string kind = revoice ? "revoice-qa" : "qa";
         _ = Task.Run(async () =>
@@ -327,7 +327,7 @@ public sealed partial class Backend
     {
         if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         if (!Directory.Exists(folder)) throw new InvalidOperationException("That folder was not found.");
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {

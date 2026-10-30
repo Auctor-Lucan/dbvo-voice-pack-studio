@@ -33,6 +33,21 @@ public sealed partial class Backend
     private readonly AppSettings _settings;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CancellationTokenSource? _jobCts;
+
+    /// <summary>
+    /// Claims the one job slot: a queued job (started from the timer) and a job the user starts can check _jobCts at the
+    /// same moment, and two jobs at once would let the first one's end re-enable Undo and Edit take while the other writes.
+    /// </summary>
+    private CancellationTokenSource NewJob()
+    {
+        var c = new CancellationTokenSource();
+        if (Interlocked.CompareExchange(ref _jobCts, c, null) != null)
+        {
+            c.Dispose();
+            throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
+        }
+        return c;
+    }
     private List<ElevenVoice>? _voices;
     private List<ElevenModel>? _models;
 
@@ -160,6 +175,11 @@ public sealed partial class Backend
                 {
                     var cats = Strings(p, "categories").Select(c => c.Trim()).Where(c => c.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                     if (cats.Count == 0) cats = AppSettings.DefaultCategories.ToList();
+                    // A renamed category takes its mods along (otherwise the next mod edit would add the old name back).
+                    var from = S(p, "renameFrom").Trim(); var to = S(p, "renameTo").Trim();
+                    if (from.Length > 0 && to.Length > 0 && !from.Equals(to, StringComparison.Ordinal))
+                        foreach (var m in _lib.LoadMods().Where(m => string.Equals(m.Category, from, StringComparison.OrdinalIgnoreCase)))
+                        { m.Category = to; _lib.Save(m); }
                     _settings.Categories = cats;
                     _lib.Save(_settings);
                     return State();
@@ -194,7 +214,9 @@ public sealed partial class Backend
                     var vid = S(p, "id");
                     // Patches and FOMODs that use the voice pack would be left without one (their takes can't move to another).
                     var users = _lib.LoadPatches().Where(x => x.VoicePackId == vid).Select(x => x.Name)
-                        .Concat(_lib.LoadFomods().Where(f => f.VoicePackId == vid).Select(f => f.Name + " (FOMOD)")).ToList();
+                        .Concat(_lib.LoadFomods().Where(f => f.VoicePackId == vid).Select(f => f.Name + " (FOMOD)"))
+                        .Concat(_lib.LoadRevoiceProjects().Where(r => r.Speakers.Values.Any(a => a.VoiceId == null && a.VoicePackId == vid)).Select(r => r.Name + " (NPC Revoice)"))
+                        .Concat(_lib.LoadGruntProjects().Where(g => g.VoicePackId == vid).Select(g => g.Name + " (Player Grunts)")).ToList();
                     if (users.Count > 0)
                         throw new InvalidOperationException($"This voice pack is used by {string.Join(", ", users.Take(6))}{(users.Count > 6 ? $" and {users.Count - 6} more" : "")}. Delete those first, or keep the voice pack.");
                     _lib.Backup("before-delete-voice-pack", _settings.BackupsToKeep);
@@ -260,6 +282,7 @@ public sealed partial class Backend
             case "mod.delete":
                 return await Locked(() =>
                 {
+                    if (_jobCts != null) throw new InvalidOperationException("A task is running (see the bar at the top). Wait for it to finish, or press Cancel there, before deleting a mod.");
                     _lib.Backup("before-delete-mod", _settings.BackupsToKeep);
                     Directory.Delete(_lib.ModFolder(S(p, "id")), true);
                     return State();
@@ -439,8 +462,11 @@ public sealed partial class Backend
                 return await Locked(() =>
                 {
                     var patch = LoadPatch(S(p, "id"));
+                    // Not while a task runs: a line being generated could be swapped for a new one by a Phase 1 change,
+                    // and its paid-for take would land on the old one. The page syncs again when the task ends.
+                    if (_jobCts != null) return new { patch = PatchDto(patch), report = (object?)null };
                     var rep = new Phase2Service(_lib, Runtime()).Sync(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods());
-                    return new { patch = PatchDto(patch), report = rep };
+                    return new { patch = PatchDto(patch), report = (object?)rep };
                 });
             case "line2.update": return await Locked(() => UpdatePhase2Line(p));
             case "line2.bulkTags": return await Locked(() => BulkTags(p));
@@ -1193,7 +1219,7 @@ public sealed partial class Backend
         var id = S(p, "id");
         var mode = S(p, "mode", "missing");
         List<string>? ids = p.TryGetProperty("lineIds", out var li) && li.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds") : null;
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
@@ -1263,7 +1289,9 @@ public sealed partial class Backend
         var custom = S(p, "customFolder");
         var keepFix = B(p, "keepFix");
         var removeStale = B(p, "removeStale");
-        _jobCts = new CancellationTokenSource();
+        var approved = p.TryGetProperty("stalePaths", out var sp) && sp.ValueKind == JsonValueKind.Array
+            ? new HashSet<string>(Strings(p, "stalePaths"), StringComparer.OrdinalIgnoreCase) : null;
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
@@ -1278,7 +1306,7 @@ public sealed partial class Backend
                 try
                 {
                     files = string.IsNullOrWhiteSpace(custom) ? WriteFixAndTopics(patch, keepFix) : new List<string>();
-                    if (removeStale && string.IsNullOrWhiteSpace(custom)) { svc.KeepFiles = SharedFolderFiles(patch, voice, PatchModNames(patch)); removed = svc.RemoveStaleExports(patch, voice, _lib.LoadMods()); _lib.Save(patch); }
+                    if (removeStale && string.IsNullOrWhiteSpace(custom)) { svc.KeepFiles = SharedFolderFiles(patch, voice, PatchModNames(patch)); removed = svc.RemoveStaleExports(patch, voice, _lib.LoadMods(), null, approved); _lib.Save(patch); }
                 }
                 finally { _gate.Release(); }
                 if (removed > 0) files.Insert(0, $"{removed} file(s) from earlier exports removed (lines no longer exported).");

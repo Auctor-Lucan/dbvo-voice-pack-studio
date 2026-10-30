@@ -25,7 +25,7 @@ if (webview) {
     const p = pending.get(msg.id);
     if (!p) return;
     pending.delete(msg.id);
-    if ('error' in msg && msg.error) p.reject(new Error(msg.error));
+    if ('error' in msg && msg.error) { const err = new Error(msg.error); err.fromHost = true; err.method = p.method; p.reject(err); }
     else p.resolve(msg.result);
   });
 }
@@ -35,7 +35,7 @@ export function rpc(method, params = {}) {
   if (!webview) return Promise.reject(new Error('Not running inside DBVO Studio.'));
   const id = nextId++;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    pending.set(id, { resolve, reject, method });
     webview.postMessage({ id, method, params });
   });
 }
@@ -45,7 +45,7 @@ export function droppedPaths(fileList) {
   if (!webview || !webview.postMessageWithAdditionalObjects) return Promise.resolve([]);
   const id = nextId++;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    pending.set(id, { resolve, reject, method });
     webview.postMessageWithAdditionalObjects({ id, method: 'dropped', params: {} }, fileList);
   });
 }
@@ -161,7 +161,7 @@ export function modal(title, content, buttons = [{ label: 'OK', primary: true, v
   card.classList.toggle('wide', wide);
   if (cls) card.classList.add(cls);
   return new Promise((resolve) => {
-    const me = { title, wide, cls, resolve, nodes: null, scroll: null, close: null, at: Date.now() };
+    const me = { title, wide, cls, resolve, nodes: null, scroll: null, close: null, at: Date.now(), guard };
     // Escape and the dialog's own buttons ask first when the dialog has a guard (e.g. unsaved edits); closing by code doesn't.
     me.ask = async (v) => { if (guard && !(await guard(v))) return; me.close(v); };
     me.close = (v) => {
@@ -197,6 +197,16 @@ export function modal(title, content, buttons = [{ label: 'OK', primary: true, v
 
 /** Close every open dialog (their callers get null): before going to another page. */
 export function closeAllModals() { while (dialogs.length) dialogs[dialogs.length - 1].close(null); }
+
+/**
+ * Before leaving the page: every open dialog with a guard (unsaved edits, e.g. Edit take) is asked, top first.
+ * False when one says to stay; the dialogs are then left open as they were.
+ */
+export async function modalsMayClose() {
+  for (const d of [...dialogs].reverse()) if (d.guard && !(await d.guard(null))) return false;
+  return true;
+}
+export const hasGuardedModal = () => dialogs.some((d) => d.guard);
 
 /** Close the dialog that holds el (and any dialog on top of it). */
 export function closeDialogOf(el, value = null) {
@@ -480,7 +490,7 @@ export class VGrid {
       if (c.id !== 'sel') { cell.classList.add('movable'); cell.addEventListener('pointerdown', (e) => this.startMove(e, c, cell)); if (!c.title && c.tip) cell.title = c.tip + '\nDrag sideways to move this column'; else cell.title = (cell.title ? cell.title + '\n' : '') + 'Drag sideways to move this column'; }
       this.sizeCell(cell, c);
       if (c.resizable && c.id !== 'sel') {
-        const grip = h('div.resizer', { title: 'Drag to resize. Double-click to reset.' });
+        const grip = h('div.resizer', { title: 'Drag to resize. Double-click: put every column back (widths and order).' });
         grip.addEventListener('mousedown', (e) => this.startResize(e, c, cell, grip));
         grip.addEventListener('dblclick', () => this.resetColumns());
         cell.append(grip);

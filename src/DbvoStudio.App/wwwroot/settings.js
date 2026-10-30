@@ -544,7 +544,7 @@ async function voices(selectedId, rerender, onSelect) {
         srow('Lock engine settings', 'Prevents accidental changes in the Phase 2 toolbar.', switchEl(v.settingsLocked, (x) => { v.settingsLocked = x; persistSoon(); })),
         packs.some((x) => x.id === v.id) ? srow('Delete', null, h('button.btn.danger.sm', { title: 'Delete this voice pack (asks first)', onclick: async () => {
           if (!(await confirmBox('Delete voice pack?', `Delete "${v.name}"? DBVO Patches using it stop working.`, 'Delete', true))) return;
-          await rpc('voice.delete', { id: v.id });
+          try { await rpc('voice.delete', { id: v.id }); } catch (e) { fail(e); return; }
           await refreshState();
           go('settings', { tab: 'voices' });
         } }, 'Delete voice pack')) : null),
@@ -687,10 +687,10 @@ async function references(_, rerender) {
 async function categories(_, rerender) {
   const cats = [...app.state.settings.categories];
   const list = h('div.col');
-  const save = async () => { app.state = await rpc('categories.save', { categories: cats }); rerender(); };
+  const save = async (rename = {}) => { try { app.state = await rpc('categories.save', { categories: cats, ...rename }); } catch (e) { fail(e); } rerender(); };
   cats.forEach((c, i) => {
-    const inp = h('input', { type: 'text', value: c, style: { width: '320px' } });
-    inp.addEventListener('change', () => { cats[i] = inp.value.trim(); save(); });
+    const inp = h('input', { type: 'text', value: c, style: { width: '320px' }, title: 'Renaming a category moves its mods along' });
+    inp.addEventListener('change', () => { const to = inp.value.trim(); if (!to) { inp.value = c; return; } cats[i] = to; save({ renameFrom: c, renameTo: to }); });
     list.append(h('div.row', inp,
       h('button.icon-btn', { title: 'Move up', disabled: i === 0, onclick: () => { [cats[i - 1], cats[i]] = [cats[i], cats[i - 1]]; save(); } }, '↑'),
       h('button.icon-btn', { title: 'Move down', disabled: i === cats.length - 1, onclick: () => { [cats[i + 1], cats[i]] = [cats[i], cats[i + 1]]; save(); } }, '↓'),

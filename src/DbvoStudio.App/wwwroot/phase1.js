@@ -960,7 +960,7 @@ export async function modView(id) {
       h('div.faint', 'A backup of the project files is made first (backups hold no audio).'),
     ], [{ label: 'Cancel', value: false }, { label: 'Delete', danger: true, value: true }]);
     if (!ok) return;
-    await rpc('mod.delete', { id });
+    try { await rpc('mod.delete', { id }); } catch (e) { fail(e); return; }
     go('mods');
   }
 

@@ -67,7 +67,7 @@ public sealed class LocalEngineClient : IDisposable
             bool loaded = r.TryGetProperty("model_loaded", out var ml)
                 ? ml.ValueKind == JsonValueKind.True
                 : r.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.String && st.GetString() is "ok" or "ready";
-            string phase = loaded ? "ready" : r.TryGetProperty("phase", out var ph) ? ph.GetString() ?? "starting" : "starting";
+            string phase = loaded ? "ready" : r.TryGetProperty("phase", out var ph) && ph.ValueKind == JsonValueKind.String ? ph.GetString() ?? "starting" : "starting";
             return new EngineHealth(loaded, phase,
                 r.TryGetProperty("device", out var d) ? d.ToString() : null,
                 r.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.String ? e.GetString() : null,

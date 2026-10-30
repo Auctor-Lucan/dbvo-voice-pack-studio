@@ -36,6 +36,9 @@ public sealed partial class Backend
         if (m.StartsWith("take.edit.")) return false; // the audio and .lip files change too, which Undo can't put back
         var a = m.Contains('.') ? m[(m.IndexOf('.') + 1)..] : m;
         if (a is "get" or "list" or "paths" or "audio" or "draft" or "estimate" or "checks" or "check" or "recordTarget" or "transcribe" or "stringsDiff") return false;
+        // Opening a page brings it up to date (patch.sync) and reads around it: not something the user did, and undoing it
+        // would only make the page sync again (Ctrl+Z would never get past it).
+        if (a is "sync" or "sharedFiles" or "staleExports" or "fixConflicts" or "health" or "voices" or "models" or "stsModels" or "subscription") return false;
         foreach (var bad in new[] { "delete", "Delete", "reverb", "effect", "record", "export", "Export", "generate", "build", "Build", "discard", "commit", "try", "scan", "qa", "measure", "whisper", "Whisper", "open", "Open", "pick", "backup", "restore", "Restore", "library", "settings" })
             if (m.Contains(bad, StringComparison.Ordinal)) return false;
         return true;

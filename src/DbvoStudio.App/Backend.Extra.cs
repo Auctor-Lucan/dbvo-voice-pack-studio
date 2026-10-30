@@ -563,7 +563,7 @@ public sealed partial class Backend
     {
         if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         if (files.Count == 0) throw new InvalidOperationException("Add at least one WAV file first.");
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         var settings = JsonSerializer.Deserialize<WavToLipSettings>(JsonSerializer.Serialize(_settings.WavToLip))!;
         _ = Task.Run(async () =>
@@ -621,7 +621,7 @@ public sealed partial class Backend
     private object StartImportFuz(string id)
     {
         if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
@@ -649,7 +649,7 @@ public sealed partial class Backend
         if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         var proj = p.GetProperty("project").Deserialize<FomodProject>(JsonOptions)!;
         bool package = !p.TryGetProperty("package", out var pk) || pk.ValueKind != JsonValueKind.False;
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
@@ -665,8 +665,23 @@ public sealed partial class Backend
                 var res = await svc.BuildAsync(proj, voice?.Naming ?? NamingMode.Legacy, package, progress, ct);
                 foreach (var o in orphans) res.Warnings.Add($"\"{o}\" is no longer linked to a DBVO Patch (deleted, or its mod was removed): built as it was.");
                 await _gate.WaitAsync();
-                try { _lib.Save(proj); } finally { _gate.Release(); }
-                Emit("jobDone", new { kind = "fomod", ok = true, report = res, project = proj });
+                FomodProject saved;
+                try
+                {
+                    // The project may have been edited while it built: keep those edits and add only what the build
+                    // changed (build info, and the refreshed files of options linked to a DBVO Patch).
+                    saved = _lib.LoadFomod(proj.Id) ?? proj;
+                    if (saved != proj)
+                    {
+                        saved.LastBuildUtc = proj.LastBuildUtc; saved.LastArchive = proj.LastArchive;
+                        var fresh = proj.Steps.SelectMany(st => st.Groups).SelectMany(g => g.Options).GroupBy(o => o.Id).ToDictionary(g => g.Key, g => g.First());
+                        foreach (var o in saved.Steps.SelectMany(st => st.Groups).SelectMany(g => g.Options))
+                            if (o.PatchId != null && fresh.TryGetValue(o.Id, out var f)) o.Files = f.Files;
+                    }
+                    _lib.Save(saved);
+                }
+                finally { _gate.Release(); }
+                Emit("jobDone", new { kind = "fomod", ok = true, report = res, project = saved });
             }
             catch (OperationCanceledException)
             {

@@ -629,7 +629,7 @@ public sealed partial class Backend
     private object StartRvScan(string id)
     {
         if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         _ = Task.Run(async () =>
         {
             try
@@ -668,7 +668,7 @@ public sealed partial class Backend
     private object StartRvWhisper(string id)
     {
         if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
@@ -773,7 +773,7 @@ public sealed partial class Backend
         var groups = all.Select(l => (Line: l, Voice: RvVoiceFor(proj, l, voicePacks))).Where(x => x.Voice != null)
             .GroupBy(x => { voices[x.Voice!.Id] = x.Voice!; return x.Voice!.Id; }, x => x.Line).ToList();
         if (groups.Count == 0) throw new InvalidOperationException("Pick a voice for the speakers first (Speakers tab).");
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
@@ -837,7 +837,7 @@ public sealed partial class Backend
         var proj = LoadRv(id);
         bool overwrite = !p.TryGetProperty("overwrite", out var ow) || ow.ValueKind != JsonValueKind.False;
         bool removeStale = B(p, "removeStale");
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {

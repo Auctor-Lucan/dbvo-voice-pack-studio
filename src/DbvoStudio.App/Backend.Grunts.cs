@@ -592,7 +592,7 @@ public sealed partial class Backend
         if (plan.HasErrors) return new { started = false, check = GrPlanDto(proj, plan) };
         if (plan.WouldOverwrite.Count > 0 && !B(p, "overwrite")) return new { started = false, confirm = true, check = GrPlanDto(proj, plan) };
         var (cat, _) = GrCatalog(proj.Target);
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
@@ -838,7 +838,7 @@ public sealed partial class Backend
         var proj = LoadGr(id);
         var tools = GrExternal();
         bool all = B(p, "all");
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
@@ -868,7 +868,7 @@ public sealed partial class Backend
         var todo = proj.Events.Where(kv => eventId.Length == 0 || kv.Key == eventId).SelectMany(kv => kv.Value.Lines)
             .Where(l => l.Text.Trim().Length == 0 && File.Exists(GruntService.SourcePath(l, folder))).ToList();
         if (todo.Count == 0) throw new InvalidOperationException("Every line there has a subtitle already.");
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {

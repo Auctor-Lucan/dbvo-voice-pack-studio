@@ -600,7 +600,7 @@ public sealed partial class Backend
         var groups = all.GroupBy(l => (l.Voice, SpeedOf(l))).Select(g => (Voice: WithSpeed(BooksService.VoicePackFor(proj, g.Key.Voice), g.Key.Item2), Key: g.Key.Voice, Lines: g.ToList())).Where(g => g.Voice != null).ToList();
         if (groups.Count == 0) throw new InvalidOperationException(all.Count == 0 ? "Nothing to generate." : "Pick a voice for the narrator or voice types first (Voices tab).");
         var tools = BooksTools();
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
@@ -640,7 +640,7 @@ public sealed partial class Backend
     private object StartBkScan(string id)
     {
         if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         _ = Task.Run(async () =>
         {
             try
@@ -694,7 +694,7 @@ public sealed partial class Backend
             throw new InvalidOperationException("Exporting books needs xWMAEncode.exe, and it isn't set. Pick it in " + FriendlyError.ToolsPlace + " (it comes with the Creation Kit or Yakitori Audio Converter).");
         var tools = BooksTools();
         bool fomod = !p.TryGetProperty("fomod", out var fm) || fm.ValueKind != JsonValueKind.False;
-        _jobCts = new CancellationTokenSource();
+        _jobCts = NewJob();
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {

@@ -596,7 +596,7 @@ export async function fomodView(id) {
     if (!document.body.contains(view)) { document.removeEventListener('job-done', onJobDone); return; }
     if (e.detail.kind !== 'fomod') return;
     const built = e.detail.project;
-    if (built) {
+    if (built && built.id === id) {
       // The build refreshed the linked options and saved its copy: take its files and build info into this copy
       // (which may have edits made during the build) and save that, so neither is lost.
       proj.lastBuildUtc = built.lastBuildUtc; proj.lastArchive = built.lastArchive;
