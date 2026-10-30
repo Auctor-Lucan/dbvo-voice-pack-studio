@@ -60,7 +60,10 @@ public sealed class LocalEngineClient : IDisposable
         {
             using var doc = JsonDocument.Parse(body);
             var r = doc.RootElement;
-            bool loaded = r.TryGetProperty("model_loaded", out var ml) && ml.ValueKind == JsonValueKind.True;
+            // Voice Pack Maker 2.7.0 sends model_loaded; DBReV's OmniVoice server sends {"status":"ok","voices":n} instead.
+            bool loaded = r.TryGetProperty("model_loaded", out var ml)
+                ? ml.ValueKind == JsonValueKind.True
+                : r.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.String && st.GetString() is "ok" or "ready";
             string phase = loaded ? "ready" : r.TryGetProperty("phase", out var ph) ? ph.GetString() ?? "starting" : "starting";
             return new EngineHealth(loaded, phase,
                 r.TryGetProperty("device", out var d) ? d.ToString() : null,

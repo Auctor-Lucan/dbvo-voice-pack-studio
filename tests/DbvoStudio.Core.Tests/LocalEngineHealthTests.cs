@@ -29,4 +29,11 @@ public class LocalEngineHealthTests
         Assert.Equal("offline", r.Phase);
         Assert.Contains("HTTP 404", r.Error);
     }
+
+    [Fact]
+    public async Task A_dbrev_style_health_answer_counts_as_ready()
+    {
+        var h = new Fake(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"status\":\"ok\",\"voices\":0,\"failed_voices\":0}") });
+        Assert.True((await new LocalEngineClient("http://127.0.0.1:8001", new HttpClient(h)).HealthAsync()).Ok);
+    }
 }
