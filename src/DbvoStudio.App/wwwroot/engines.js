@@ -17,6 +17,16 @@ export const ENGINE_NAMES = Object.fromEntries(ENGINES);
 export const CLOUD = ['fish', 'inworld', 'cartesia', 'minimax', 'openai'];
 export const isCloud = (e) => CLOUD.includes(e);
 
+/** An address on this PC or the local network (an OpenAI-compatible server there needs no key); same test as the app's. */
+export function isLocalUrl(url) {
+  let t = (url || '').trim();
+  if (t && !t.includes('://')) t = 'http://' + t;
+  try {
+    const h = new URL(t).hostname.replace(/^\[|\]$/g, '');
+    return h === 'localhost' || h === '::1' || /^127\./.test(h) || h.endsWith('.local') || /^192\.168\./.test(h) || /^10\./.test(h) || /^172\.(1[6-9]|2[0-9]|3[01])\./.test(h);
+  } catch { return false; }
+}
+
 /** The voice pack's settings object for an engine (JSON names: fish, inworld, cartesia, miniMax, openAi …). */
 export function engineObj(voice, eng) {
   return { elevenlabs: voice.eleven, voxcpm: voice.voxCpm, omnivoice: voice.omniVoice, fish: voice.fish, inworld: voice.inworld, cartesia: voice.cartesia, minimax: voice.miniMax, openai: voice.openAi }[eng];
@@ -72,7 +82,7 @@ function controlsOf(eng, o, { grp, numIn, setIn, locked, noVoice = false }) {
   const txt = (key, label, opts = {}) => {
     if (noVoice && (key === 'voiceId' || key === 'voice')) return null; // the voice is picked elsewhere (NPC Revoice speakers, Voiced Books)
     const i = h('input', { type: 'text', value: o[key] ?? '', placeholder: opts.placeholder || '', disabled: locked, title: opts.title || '', style: { width: opts.width || '150px' } });
-    i.addEventListener('change', () => setIn(o, key, i.value.trim()));
+    i.addEventListener('change', () => { if (key === 'voiceId') o.voiceName = ''; setIn(o, key, i.value.trim()); }); // a typed ID replaces any remembered name
     return grp(label, i);
   };
   const pick = (key, label, options, opts = {}) => grp(label, h('select', { disabled: locked, title: opts.title || '', onchange: (ev) => setIn(o, key, ev.target.value) },

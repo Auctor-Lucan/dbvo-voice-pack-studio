@@ -324,8 +324,11 @@ export async function bookProjectView(id) {
       return grp(label, i);
     };
     const used = new Set([...proj.narrators, ...proj.voiceTypes].filter((x) => x.voiceId).map((x) => x.engine || 'elevenlabs'));
-    const eng = used.size === 1 ? [...used][0] : 'elevenlabs';
+    // every engine in use gets its settings (narrators and voice types can each use another engine)
+    const engs = used.size ? [...used].sort((x, y) => (x === 'elevenlabs' ? -1 : y === 'elevenlabs' ? 1 : 0)) : ['elevenlabs'];
     const kids = [];
+    for (const eng of engs) {
+    if (engs.length > 1) kids.push(h('b', { style: { alignSelf: 'center', marginLeft: kids.length ? '10px' : 0 } }, ENGINE_NAMES[eng] || eng));
     if (eng === 'elevenlabs') {
       const e = v.eleven;
       const tag = /^eleven_v[34]/i.test(e.modelId || '');
@@ -354,6 +357,7 @@ export async function bookProjectView(id) {
     } else {
       const o = v.omniVoice;
       kids.push(num(o, 'numStep', 'Steps', { min: 1 }), num(o, 'speed', 'Speed', { step: 0.05 }), num(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
+    }
     }
     const needs = () => proj.narrators.concat(proj.voiceTypes).reduce((a, x) => a + ((x.stats && x.stats.charactersLeft) || 0), 0);
     return h('div.toolbar', ...kids.filter(Boolean), h('div.spacer'), grp('Credits', creditsButton(needs, 'This project')));

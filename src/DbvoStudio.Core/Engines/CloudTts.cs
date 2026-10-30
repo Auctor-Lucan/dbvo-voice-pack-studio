@@ -118,8 +118,16 @@ public static class TtsEngines
 
     /// <summary>Whether an OpenAI-compatible address is this PC or the local network (no key needed).</summary>
     public static bool IsLocalAddress(string url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out var u) && (u.IsLoopback || u.Host.EndsWith(".local", StringComparison.OrdinalIgnoreCase)
-            || u.Host.StartsWith("192.168.") || u.Host.StartsWith("10."));
+        Uri.TryCreate(WithScheme(url), UriKind.Absolute, out var u) && (u.IsLoopback || u.Host.EndsWith(".local", StringComparison.OrdinalIgnoreCase)
+            || u.Host.StartsWith("192.168.") || u.Host.StartsWith("10.")
+            || System.Text.RegularExpressions.Regex.IsMatch(u.Host, @"^172\.(1[6-9]|2[0-9]|3[01])\."));
+
+    /// <summary>"localhost:5123" as typed → http://localhost:5123.</summary>
+    public static string WithScheme(string url)
+    {
+        var t = (url ?? "").Trim();
+        return t.Length == 0 || t.Contains("://") ? t : "http://" + t;
+    }
 
     /// <summary>Cartesia's emotion values (docs.cartesia.ai, Volume, Speed and Emotion; English only).</summary>
     public static readonly string[] CartesiaEmotions =
@@ -283,7 +291,7 @@ public sealed class CloudTtsClient : IDisposable
         _ => throw new InvalidOperationException($"Unknown voice engine '{_engine}'."),
     };
 
-    private static string Base(string? url, string fallback) => (string.IsNullOrWhiteSpace(url) ? fallback : url.Trim()).TrimEnd('/');
+    private static string Base(string? url, string fallback) => TtsEngines.WithScheme(string.IsNullOrWhiteSpace(url) ? fallback : url.Trim()).TrimEnd('/');
 
     private async Task<HttpResponseMessage> PostAsync(string url, JsonNode body, Action<HttpRequestMessage> headers, CancellationToken ct)
     {
@@ -319,6 +327,17 @@ public sealed class CloudTtsClient : IDisposable
     internal static bool NotSent(HttpRequestException ex) =>
         ex.HttpRequestError is HttpRequestError.NameResolutionError or HttpRequestError.SecureConnectionError
         || ex.InnerException is System.Net.Sockets.SocketException { SocketErrorCode: System.Net.Sockets.SocketError.ConnectionRefused or System.Net.Sockets.SocketError.HostUnreachable or System.Net.Sockets.SocketError.NetworkUnreachable or System.Net.Sockets.SocketError.HostNotFound };
+
+    /// <summary>A billed-characters figure, whatever form the reply gives it in (never fails a take that was paid for).</summary>
+    private static int? Num(JsonNode? n)
+    {
+        if (n is not JsonValue v) return null;
+        if (v.TryGetValue<int>(out var i)) return i;
+        if (v.TryGetValue<long>(out var l)) return (int)Math.Min(int.MaxValue, l);
+        if (v.TryGetValue<double>(out var d)) return (int)Math.Round(d);
+        if (v.TryGetValue<string>(out var s) && int.TryParse(s, out var p)) return p;
+        return null;
+    }
 
     private string Explain(int code, string body)
     {
@@ -372,7 +391,7 @@ public sealed class CloudTtsClient : IDisposable
         using var resp = await PostAsync("https://api.inworld.ai/tts/v1/voice", body, m => m.Headers.Authorization = new AuthenticationHeaderValue("Basic", key), ct);
         var json = JsonNode.Parse(await resp.Content.ReadAsStringAsync(ct));
         var b64 = json?["audioContent"]?.GetValue<string>() ?? throw new CloudTtsException("Inworld: no audio in the reply.", true);
-        int? used = json?["usage"]?["processedCharactersCount"]?.GetValue<int>();
+        int? used = Num(json?["usage"]?["processedCharactersCount"]);
         return new CloudAudio(Pcm.ToMono44100(Convert.FromBase64String(b64), 44100, Name), used);
     }
 
@@ -438,7 +457,7 @@ public sealed class CloudTtsClient : IDisposable
             throw new CloudTtsException(Explain(http, $"MiniMax status {status}: {msg}"), http == 429);
         }
         var hex = json?["data"]?["audio"]?.GetValue<string>() ?? throw new CloudTtsException("MiniMax: no audio in the reply.", true);
-        int? used = json?["extra_info"]?["usage_characters"]?.GetValue<int>();
+        int? used = Num(json?["extra_info"]?["usage_characters"]);
         return new CloudAudio(Pcm.ToMono44100(Convert.FromHexString(hex), 44100, Name), used);
     }
 
@@ -480,7 +499,9 @@ public static class Pcm
     public static byte[] ToMono44100(byte[] data, int rawRate, string engine = "The engine")
     {
         if (data.Length < 2) throw new CloudTtsException($"{engine} sent no audio.", true);
-        if (data[0] == '{' || data[0] == '[') throw new CloudTtsException($"{engine} sent text instead of audio: {Encoding.UTF8.GetString(data, 0, Math.Min(data.Length, 200))}", false);
+        // A JSON error in place of audio (raw PCM may start with the byte of '{' too, so only when it really is JSON)
+        if ((data[0] == '{' || data[0] == '[') && data.Length < 100_000 && LooksLikeJson(data))
+            throw new CloudTtsException($"{engine} sent text instead of audio: {Encoding.UTF8.GetString(data, 0, Math.Min(data.Length, 200))}", false);
         float[] mono;
         int rate;
         if (data.Length >= 12 && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' && data[8] == 'W') (mono, rate) = ReadWav(data);
@@ -498,6 +519,11 @@ public static class Pcm
             o[2 * i] = (byte)s; o[2 * i + 1] = (byte)(s >> 8);
         }
         return o;
+    }
+
+    private static bool LooksLikeJson(byte[] data)
+    {
+        try { using var _ = JsonDocument.Parse(data); return true; } catch (JsonException) { return false; }
     }
 
     public static (float[] Mono, int Rate) ReadWav(byte[] b)

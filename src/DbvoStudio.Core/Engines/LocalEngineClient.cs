@@ -136,6 +136,7 @@ public sealed class LocalEngineClient : IDisposable
             ["speed"] = s.Speed,
             ["guidance_scale"] = s.GuidanceScale,
             ["denoise"] = s.Denoise,
+            ["response_format"] = "wav", // as OpenAI-style servers default to MP3 (ignored where it isn't known)
         };
         if (!string.IsNullOrWhiteSpace(s.Language)) dbrev["language"] = s.Language.Trim();
         bool openAi = OpenAiStyle.TryGetValue(_base, out var known) && known;

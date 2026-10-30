@@ -501,7 +501,7 @@ public sealed partial class Backend
         if (voice != null && voice.Naming == NamingMode.Legacy && !string.IsNullOrWhiteSpace(x.FinalRoot))
         {
             var fuz = its.Select(m => Path.Combine(x.FinalRoot, Phase2Service.ExpandTemplate(
-                Phase2Service.ResolveFuzTemplate(x, voice), m.Name, voice, x)));
+                Phase2Service.PackFolderTemplate(x, voice), m.Name, voice, x)));
             var pw = PathChecks.Check(x.Lines.Where(l => !l.IsOmitted).Select(l => l.FinalLine), voice.Naming, x.WavLipFolder, fuz, Path.Combine(_lib.PatchFolder(x.Id), "takes"));
             if (pw.Count > 0) warnings.Add("Path too long: " + string.Join(", ", pw.Select(w => w.Where).Distinct()));
         }

@@ -326,7 +326,7 @@ public sealed class FomodService
         if (string.IsNullOrWhiteSpace(p.Info.Version)) Add("warning", "info.xml", "No version.");
         if (p.Json.Enabled)
         {
-            if (string.IsNullOrWhiteSpace(p.Json.VoicePackId)) Add("error", "DBVO JSON", "No voice_pack_id: the voice pack would be invisible to DBVO.");
+            if (string.IsNullOrWhiteSpace(p.Json.VoicePackId)) Add("error", "DBVO JSON", "No voice_pack_id: the voice pack would be invisible in game (DBVO or Dragonborn ReVoiced).");
             int carriers = p.AllOptions().Count(o => o.CarriesJson);
             if (carriers == 0) Add("error", "DBVO JSON", "No option carries the DBVO voice pack JSON. Tick \"Carries the DBVO JSON\" on a required option.");
             if (carriers > 1) Add("warning", "DBVO JSON", $"{carriers} options carry the DBVO JSON; one is enough.");

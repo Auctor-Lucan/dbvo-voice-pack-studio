@@ -1043,7 +1043,7 @@ public sealed partial class Backend
                 stability = v?.Eleven.Stability ?? 0.5, speed = engineSpeed,
                 seed = v?.Eleven.Seed, discrete = ModelCapabilities.HasDiscreteStability(v?.Eleven.ModelId ?? ""),
                 hasKey = engine == "elevenlabs" ? !string.IsNullOrWhiteSpace(Secrets.Unprotect(_settings.ElevenLabsApiKey))
-                    : !Core.Engines.TtsEngines.IsCloud(engine) || _settings.EngineKeys.ContainsKey(engine) || engine == "openai" && Core.Engines.TtsEngines.IsLocalAddress(v!.OpenAi.BaseUrl),
+                    : !Core.Engines.TtsEngines.IsCloud(engine) || HasEngineKey(engine) || engine == "openai" && Core.Engines.TtsEngines.IsLocalAddress(v!.OpenAi.BaseUrl),
             },
             label = ev.Label, slotLabel = ev.Slots.FirstOrDefault(x => x.Id == d.Slot)?.Label ?? "", words = ev.Slots.FirstOrDefault(x => x.Id == d.Slot)?.Text ?? "",
             target = proj.Target,

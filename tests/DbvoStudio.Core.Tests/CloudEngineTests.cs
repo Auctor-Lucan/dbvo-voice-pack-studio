@@ -103,4 +103,27 @@ public class CloudEngineTests
         Assert.Contains("voice ID", ex.Message);
         Assert.Empty(h.Seen);
     }
+
+    [Theory]
+    [InlineData("localhost:5123", true)]
+    [InlineData("http://172.20.1.5:8000", true)]
+    [InlineData("https://api.openai.com", false)]
+    public void Local_servers_need_no_key_even_typed_without_http(string url, bool local) => Assert.Equal(local, TtsEngines.IsLocalAddress(url));
+
+    [Fact]
+    public void Raw_pcm_starting_like_json_is_still_audio()
+    {
+        var pcm = new byte[] { (byte)'{', 0x10, 0x20, 0x30 };
+        Assert.Equal(4, DbvoStudio.Core.Engines.Pcm.ToMono44100(pcm, 44100).Length);
+    }
+
+    [Fact]
+    public void Books_split_for_the_smallest_limit_of_the_engines_in_use()
+    {
+        var p = new Books.BooksProject();
+        p.Narrators.Add(new Books.BookNarrator { Engine = "elevenlabs", VoiceId = "a" });
+        Assert.True(Books.BooksService.Ceiling(p) > 2000);
+        p.Narrators.Add(new Books.BookNarrator { Engine = "inworld", VoiceId = "b" });
+        Assert.Equal(2000, Books.BooksService.Ceiling(p));
+    }
 }

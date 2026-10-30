@@ -13,7 +13,7 @@ export const LANGS = [['', 'Auto'], ['en', 'en · English'], ['de', 'de · Germa
   ['pt', 'pt · Portuguese'], ['pl', 'pl · Polish'], ['ru', 'ru · Russian'], ['ja', 'ja · Japanese'], ['zh', 'zh · Chinese'], ['ko', 'ko · Korean'],
   ['nl', 'nl · Dutch'], ['sv', 'sv · Swedish'], ['cs', 'cs · Czech'], ['tr', 'tr · Turkish'], ['uk', 'uk · Ukrainian'], ['hu', 'hu · Hungarian']];
 
-import { ENGINES, ENGINE_NAMES as ENGINE_NAME, isCloud, cloudControls, tagNote, keyBadge, engineObj } from './engines.js';
+import { ENGINES, ENGINE_NAMES as ENGINE_NAME, isCloud, isLocalUrl, cloudControls, tagNote, keyBadge, engineObj } from './engines.js';
 
 const pct = (p) => { const n = p.total - p.omitted - (p.excluded || 0); return n ? Math.round((100 * p.generated) / n) : 0; };
 
@@ -1349,7 +1349,7 @@ export async function patchView(id) {
       if (ticket !== bannerTicket) return; // a newer call draws them (two quick calls would add every banner twice)
       const t = c.tools;
       const eng = engine();
-      const cloudKey = isCloud(eng) && !(app.state.settings.engineKeys || {})[eng] && !(eng === 'openai' && /^https?:\/\/(localhost|127\.|192\.168\.|10\.)/i.test(((voice.openAi || {}).baseUrl) || ''));
+      const cloudKey = isCloud(eng) && !(app.state.settings.engineKeys || {})[eng] && !(eng === 'openai' && isLocalUrl((voice.openAi || {}).baseUrl));
       const missing = [(eng === 'elevenlabs' || eng === 'sts') && !t.apiKey && ['ElevenLabs API key', 'elevenlabs'], cloudKey && [`${ENGINE_NAME[eng]} API key`, 'engine-' + eng], !t.ffmpeg && ['ffmpeg.exe', null], !t.faceFx && ['FaceFXWrapper.exe', 'facefx'], !t.fonix && ['FonixData.cdf', 'fonix'], !t.xwma && ['xWMAEncode.exe (for .fuz)', 'xwma']].filter(Boolean);
       if (missing.length) banners.append(h('div.banner.bad', h('span.row', { style: { gap: '6px', flexWrap: 'wrap' } }, 'Missing:', ...missing.map(([n, k], i) => h('span.row', { style: { gap: '2px' } }, n + (i < missing.length - 1 ? ',' : ''), k ? needInfo(k) : null))), h('div.spacer'), h('button.btn.sm', { title: 'Set the tool paths', onclick: () => go('settings', { tab: 'general' }) }, 'Open Global Settings')));
       const unset = [!patch.wavLipFolder && 'WAV + LIP folder', !patch.finalRoot && 'final folder', !patch.fixFolder && 'DBVO Fix folder', vc && !patch.sourceFolders.length && 'source WAV folder'].filter(Boolean);

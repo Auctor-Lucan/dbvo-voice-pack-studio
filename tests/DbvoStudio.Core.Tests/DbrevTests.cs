@@ -45,7 +45,7 @@ public class DbrevTests : IDisposable
         }
         Take T(Phase2Line l, bool kept = false) { var t = new Take { Slot = l.Takes.Count + 1, Kept = kept }; l.Takes.Add(t); return t; }
 
-        var a = Line("Follow me.", 0x02000D63, 0x02000D64);   // one text, two FormIDs
+        var a = Line("Follow me.", 0x02000D63, 0x02000D64, 0x02000D64);   // one text, two FormIDs (one listed twice)
         var a1 = T(a, kept: true); var a2 = T(a, kept: true); a.SelectedTakeId = a2.Id;
         var v = Line("Follow me, friend.", 0x02000D63);         // a text variant of the first FormID
         var v1 = T(v); v.SelectedTakeId = v1.Id;

@@ -304,8 +304,20 @@ public sealed class BooksService
         return p.Narrators.Select(n => BooksProject.NarratorKey(n.Id)).ToList();
     }
 
-    /// <summary>The longest text one request may have for this project's engine.</summary>
-    public static int Ceiling(BooksProject p) => p.Voice.Engine switch
+    /// <summary>
+    /// The longest text one request may have: the smallest limit of the engines the narrators and voice types use
+    /// (each picks its own engine), so a part fits whichever voice reads it.
+    /// </summary>
+    public static int Ceiling(BooksProject p)
+    {
+        var engines = p.Narrators.Where(n => !string.IsNullOrEmpty(n.VoiceId)).Select(n => n.Engine)
+            .Concat(p.VoiceTypes.Values.Where(v => !string.IsNullOrEmpty(v.VoiceId)).Select(v => v.Engine))
+            .Select(e => string.IsNullOrEmpty(e) ? "elevenlabs" : e).Distinct().ToList();
+        if (engines.Count == 0) engines.Add(string.IsNullOrEmpty(p.Voice.Engine) ? "elevenlabs" : p.Voice.Engine);
+        return engines.Min(e => CeilingOf(p, e));
+    }
+
+    private static int CeilingOf(BooksProject p, string engine) => engine switch
     {
         "voxcpm" or "omnivoice" => Math.Max(p.PartMax, 3000),
         // the cloud engines' request limits, kept on the safe side (Inworld takes 2,000 characters, OpenAI 4,096)

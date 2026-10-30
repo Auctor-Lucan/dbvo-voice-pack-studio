@@ -617,6 +617,9 @@ public sealed partial class Backend
         return State();
     }
 
+    /// <summary>A key is saved for this engine and can still be read (a key copied from another PC can't).</summary>
+    private bool HasEngineKey(string engine) => _settings.EngineKeys.TryGetValue(engine, out var k) && !string.IsNullOrEmpty(Secrets.Unprotect(k));
+
     /// <summary>The engine settings object of a voice pack's current engine (for summaries).</summary>
     private static object EngineSettingsOf(VoicePack v) => v.Engine switch
     {
@@ -1176,7 +1179,7 @@ public sealed partial class Backend
                 sentCharacters = lines.Sum(l => Core.Engines.TtsEngines.EngineText(voice.Engine, Phase2Service.ApplyPronunciations(l.Spoken, prons, "local"),
                     voice.MiniMax.Model).Text.Length),
                 cloud = Core.Engines.TtsEngines.IsCloud(voice.Engine),
-                hasKey = !Core.Engines.TtsEngines.IsCloud(voice.Engine) || _settings.EngineKeys.ContainsKey(voice.Engine)
+                hasKey = !Core.Engines.TtsEngines.IsCloud(voice.Engine) || HasEngineKey(voice.Engine)
                     || voice.Engine == "openai" && Core.Engines.TtsEngines.IsLocalAddress(voice.OpenAi.BaseUrl),
                 voiceId = voice.CurrentVoice(false).Name,
                 engineSettings = EngineSettingsOf(voice),
@@ -1462,7 +1465,7 @@ public sealed partial class Backend
         var root = svc.FinalRoot(patch, voice);
         var fuzFolders = string.IsNullOrWhiteSpace(root) ? new List<string>()
             : patch.ModIds.Select(mid => mods.FirstOrDefault(m => m.Id == mid)?.Name ?? "Mod")
-                .Select(n => Path.Combine(root, Phase2Service.ExpandTemplate(svc.FuzTemplate(patch, voice), n, voice, patch))).ToList();
+                .Select(n => Path.Combine(root, Phase2Service.ExpandTemplate(Phase2Service.PackFolderTemplate(patch, voice), n, voice, patch))).ToList();
         var warnings = PathChecks.Check(patch.Lines.Where(l => !l.IsOmitted).Select(l => l.FinalLine), voice.Naming, svc.WavLipFolder(patch, voice), fuzFolders, svc.TakesFolder(patch));
         var unreviewed = mods.Where(m => patch.ModIds.Contains(m.Id))
             .SelectMany(m => m.Plugins.Select(pl => new { mod = m.Name, plugin = pl.FileName, count = Phase1Service.UnreviewedFlags(pl).Count }))

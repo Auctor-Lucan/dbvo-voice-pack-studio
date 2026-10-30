@@ -64,6 +64,10 @@ public sealed partial class Phase2Service
     /// <summary>Sub-folder for .fuz files under the final folder, e.g. Sound\DBVO\{packId}.</summary>
     public string FuzTemplate(DbvoPatch p, VoicePack v) => ResolveFuzTemplate(p, v);
 
+    /// <summary>The folder a pack's .fuz files go in (as a template): the .fuz sub-folder, or its DBReV form for DBReV packs.</summary>
+    public static string PackFolderTemplate(DbvoPatch p, VoicePack v) =>
+        v.Naming == NamingMode.Dbrev ? DbrevTemplate(ResolveFuzTemplate(p, v)) : ResolveFuzTemplate(p, v);
+
     public const string DefaultFuzTemplate = @"Sound\DBVO\{packId}";
 
     /// <summary>The patch's .fuz sub-folder (or the voice pack's), made valid: see <see cref="NormalizeFuzTemplate"/>.</summary>
@@ -262,11 +266,34 @@ public sealed partial class Phase2Service
         return Words(a).SequenceEqual(Words(b));
     }
 
-    /// <summary>Stems a line's files may have: the voice pack's naming first, then the other one.</summary>
-    private static IEnumerable<string> Stems(Phase2Line l, VoicePack v)
+    /// <summary>
+    /// Names a line's files may have: for a DBReV pack &lt;plugin&gt;\dbrev_line_&lt;FormID&gt; per source first; then the
+    /// voice pack's DBVO naming, then the other one.
+    /// </summary>
+    private IEnumerable<string> Stems(Phase2Line l, VoicePack v)
     {
-        yield return LineNaming.Stem(l.FinalLine, v.Naming);
-        yield return LineNaming.Stem(l.FinalLine, v.Naming == NamingMode.Legacy ? NamingMode.Dbvo2Hash : NamingMode.Legacy);
+        if (v.Naming == NamingMode.Dbrev)
+        {
+            var mods = _mods ??= _lib.LoadMods();
+            foreach (var src in l.Sources.Where(x => !string.IsNullOrWhiteSpace(x.Plugin)))
+            {
+                var pl = mods.FirstOrDefault(m => m.Id == src.ModId)?.Plugins.FirstOrDefault(x => string.Equals(x.FileName, src.Plugin, StringComparison.OrdinalIgnoreCase));
+                yield return Path.Combine(src.Plugin, LineNaming.DbrevName(LineNaming.DbrevFormId(src.FormId, pl != null && IsLight(pl), pl?.Masters.Count ?? 0), 0));
+            }
+        }
+        var naming = v.Naming == NamingMode.Dbrev ? NamingMode.Dbvo2Hash : v.Naming;
+        yield return LineNaming.Stem(l.FinalLine, naming);
+        yield return LineNaming.Stem(l.FinalLine, naming == NamingMode.Legacy ? NamingMode.Dbvo2Hash : NamingMode.Legacy);
+    }
+    private IReadOnlyList<Mod>? _mods;
+
+    /// <summary>A file's lookup names: its stem, and for a DBReV file also &lt;plugin folder&gt;\dbrev_line_….</summary>
+    private static void AddFileKeys(Dictionary<string, string> into, string file)
+    {
+        var stem = Path.GetFileNameWithoutExtension(file);
+        into.TryAdd(stem, file);
+        if (stem.StartsWith("dbrev_line_", StringComparison.OrdinalIgnoreCase))
+            into.TryAdd(Path.Combine(Path.GetFileName(Path.GetDirectoryName(file)) ?? "", stem), file);
     }
 
     /// <summary>
@@ -278,7 +305,7 @@ public sealed partial class Phase2Service
     {
         if (string.IsNullOrWhiteSpace(patch.WavLipFolder) || !Directory.Exists(patch.WavLipFolder)) return 0;
         var wavs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var f in Directory.EnumerateFiles(patch.WavLipFolder, "*.wav", SearchOption.AllDirectories)) wavs.TryAdd(Path.GetFileNameWithoutExtension(f), f);
+        foreach (var f in Directory.EnumerateFiles(patch.WavLipFolder, "*.wav", SearchOption.AllDirectories)) AddFileKeys(wavs, f);
         if (wavs.Count == 0) return 0;
         int n = 0;
         foreach (var line in patch.Lines.Where(l => l.Takes.Count == 0 && !l.NoAdopt))
@@ -304,7 +331,7 @@ public sealed partial class Phase2Service
     {
         if (string.IsNullOrWhiteSpace(patch.WavLipFolder) || !Directory.Exists(patch.WavLipFolder)) return (0, 0);
         var wavs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var f in Directory.EnumerateFiles(patch.WavLipFolder, "*.wav", SearchOption.AllDirectories)) wavs.TryAdd(Path.GetFileNameWithoutExtension(f), f);
+        foreach (var f in Directory.EnumerateFiles(patch.WavLipFolder, "*.wav", SearchOption.AllDirectories)) AddFileKeys(wavs, f);
         if (wavs.Count == 0) return (0, 0);
         var root = _lib.PatchFolder(patch.Id);
         int adopted = 0, added = 0;
@@ -409,11 +436,11 @@ public sealed partial class Phase2Service
         var root = FinalRoot(patch, voice);
         if (string.IsNullOrWhiteSpace(root)) return list;
         var folders = patch.ModIds.Select(id => mods.FirstOrDefault(m => m.Id == id)?.Name ?? "Mod")
-            .Select(n => Path.Combine(root, ExpandTemplate(FuzTemplate(patch, voice), n, voice, patch))).Where(Directory.Exists).Distinct().ToList();
+            .Select(n => Path.Combine(root, ExpandTemplate(PackFolderTemplate(patch, voice), n, voice, patch))).Where(Directory.Exists).Distinct().ToList();
         if (folders.Count == 0) return list;
         var fuz = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var d in folders)
-            foreach (var f in Directory.EnumerateFiles(d, "*.fuz")) fuz.TryAdd(Path.GetFileNameWithoutExtension(f), f);
+            foreach (var f in Directory.EnumerateFiles(d, "*.fuz", voice.Naming == NamingMode.Dbrev ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly)) AddFileKeys(fuz, f);
         foreach (var line in patch.Lines.Where(l => l.Takes.Count == 0 && !l.IsOmitted && !l.NoAdopt))
             foreach (var stem in Stems(line, voice))
                 if (fuz.TryGetValue(stem, out var f)) { list.Add((line, f)); break; }
@@ -937,6 +964,7 @@ public sealed partial class Phase2Service
             if (main == null) continue;
             var takes = new List<Take> { main };
             takes.AddRange(kept.Where(t => t != main));
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // a source listed twice gives one file, not two
             foreach (var src in line.Sources)
             {
                 var mod = mods.FirstOrDefault(m => m.Id == src.ModId);
@@ -944,18 +972,22 @@ public sealed partial class Phase2Service
                 if (plugin is { IsTopicFile: true } || string.IsNullOrWhiteSpace(src.Plugin)) continue; // a topic .txt has no FormIDs
                 var id = LineNaming.DbrevFormId(src.FormId, plugin != null && IsLight(plugin), plugin?.Masters.Count ?? 0);
                 var key = (mod?.Name ?? "Mod") + "|" + src.Plugin + "|" + id;
+                if (!seen.Add(key)) continue;
                 next.TryGetValue(key, out int n);
                 foreach (var t in takes)
                 {
                     if (n >= 20) break; // DBReV: up to 20 versions of a line
-                    var item = (t, mod?.Name ?? "Mod", Path.Combine(SafeName(src.Plugin), LineNaming.DbrevName(id, n)));
-                    if (!list.Contains(item)) { list.Add(item); n++; }
+                    list.Add((t, mod?.Name ?? "Mod", Path.Combine(SafeName(src.Plugin), LineNaming.DbrevName(id, n))));
+                    n++;
                 }
                 next[key] = n;
             }
         }
         return plan;
     }
+
+    /// <summary>plugin\dbrev_line_00000D63(2) → plugin\dbrev_line_00000D63: which FormID a file belongs to, whatever its version.</summary>
+    private static string DbrevBase(string rel) => System.Text.RegularExpressions.Regex.Replace(rel, @"\(\d+\)$", "");
 
     private static string SafeName(string s) => string.Concat(s.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
 
@@ -1083,7 +1115,7 @@ public sealed partial class Phase2Service
         if (!string.IsNullOrWhiteSpace(patch.WavLipFolder)) set.Add(Norm(patch.WavLipFolder));
         if (!string.IsNullOrWhiteSpace(patch.FinalRoot))
         {
-            var template = ResolveFuzTemplate(patch, voice);
+            var template = PackFolderTemplate(patch, voice);
             foreach (var n in modNames) set.Add(Norm(Path.Combine(patch.FinalRoot, ExpandTemplate(template, n, voice, patch))));
         }
         return set;
@@ -1110,7 +1142,7 @@ public sealed partial class Phase2Service
         var dbrev = new Dictionary<string, Phase2Line>(StringComparer.OrdinalIgnoreCase);
         if (voice.Naming == NamingMode.Dbrev)
             foreach (var (l, items) in DbrevPlan(patch.Lines, mods))
-                foreach (var it in items) dbrev.TryAdd(it.Rel, l);
+                foreach (var it in items) dbrev.TryAdd(DbrevBase(it.Rel), l);
         foreach (var f in StaleExports(patch, voice, mods))
         {
             var stem = System.IO.Path.GetFileNameWithoutExtension(f);
@@ -1118,11 +1150,11 @@ public sealed partial class Phase2Service
             {
                 var rel = System.IO.Path.Combine(System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(f)) ?? "", stem);
                 string w;
-                if (!dbrev.TryGetValue(rel, out var dl)) w = "its line is no longer in this patch, or has fewer versions now (removed in Phase 1, or fewer ★ takes kept)";
+                if (!dbrev.TryGetValue(DbrevBase(rel), out var dl)) w = "its line is no longer in this patch, or has fewer versions now (removed in Phase 1, or fewer ★ takes kept)";
                 else if (dl.Excluded) w = "the line is excluded";
                 else if (dl.IsOmitted) w = "the line is omitted (players already have it)";
                 else if (patch.ExportApprovedOnly && !dl.Approved) w = "the line isn't approved, and Export is set to approved lines only";
-                else w = "the line is now exported under another name or folder";
+                else w = "the line has fewer versions now (fewer ★ takes kept), or is exported under another name";
                 list.Add((f, w));
                 continue;
             }
@@ -1193,7 +1225,7 @@ public sealed partial class Phase2Service
             catch (Exception ex)
             {
                 rep.Failed++;
-                rep.Errors.Add($"{Path.GetFileName(stem)}: {FriendlyError.From(ex)}");
+                rep.Errors.Add($"{Path.GetRelativePath(folder, stem)}: {FriendlyError.From(ex)}");
             }
         }
         _lib.Save(patch);
@@ -1319,6 +1351,12 @@ public sealed partial class Phase2Service
     public static List<string> EndOfPhaseReminders(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods)
     {
         var list = new List<string>();
+        if (voice.Naming == NamingMode.Dbrev)
+        {
+            // DBReV finds a line by plugin and FormID: a line that only comes from a topic .txt has none
+            int noId = DbrevPlan(ExportLines(patch), mods).Count(kv => kv.Value.Count == 0 && kv.Key.SelectedTake != null);
+            if (noId > 0) list.Add($"{noId} line(s) only come from topic files, so they have no FormID and Dragonborn ReVoiced can't play them. They were left out of the DBReV export.");
+        }
         foreach (var mod in mods.Where(m => patch.ModIds.Contains(m.Id)))
         foreach (var p in mod.Plugins)
         {

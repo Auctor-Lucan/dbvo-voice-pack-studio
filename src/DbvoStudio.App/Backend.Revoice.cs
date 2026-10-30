@@ -170,7 +170,7 @@ public sealed partial class Backend
                 bool ready = !string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey) && !string.IsNullOrWhiteSpace(voiceId) && (v?.Engine ?? "elevenlabs") == "elevenlabs";
                 return new { ready, voiceName = string.IsNullOrWhiteSpace(voiceName) ? (l.SpeakerName ?? "") : voiceName,
                     why = string.IsNullOrWhiteSpace(_settings.ElevenLabsApiKey) ? "Add your ElevenLabs API key in Global Settings to convert recordings."
-                        : v == null || string.IsNullOrWhiteSpace(voiceId) ? "Pick an ElevenLabs voice for this speaker (Speakers tab) to convert recordings." : (v.Engine ?? "elevenlabs") != "elevenlabs" ? "Converting needs an ElevenLabs voice; this speaker uses a local engine." : "" };
+                        : v == null || string.IsNullOrWhiteSpace(voiceId) ? "Pick an ElevenLabs voice for this speaker (Speakers tab) to convert recordings." : (v.Engine ?? "elevenlabs") != "elevenlabs" ? "Converting needs an ElevenLabs voice; this speaker uses another engine." : "" };
             }
             case "revoice.record":
             {
