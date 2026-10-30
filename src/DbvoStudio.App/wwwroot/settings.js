@@ -3,7 +3,7 @@ import { VOICE_COLORS, voiceChip } from './phase2.js';
 import { THEMES, applyTheme } from './themes.js';
 import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, switchEl, segmented, popupMenu, needInfo, helpButton, pathText, pathRows, pathList, namingLabel } from './lib.js';
 import { app, go, refreshState, applyBackground, noteNav } from './app.js';
-import { ENGINES, CLOUD, ENGINE_NAMES, ENGINE_DEFAULTS, engineObj, tagNote, isCloud } from './engines.js';
+import { ENGINES, CLOUD, ENGINE_NAMES, ENGINE_DEFAULTS, engineObj, tagNote, isCloud, engineLabel } from './engines.js';
 
 const TABS = [
   ['general', 'General & tools'],
@@ -139,6 +139,7 @@ async function credits() {
         h('li', 'The mod authors of the many wonderful mods whose characters DBVO Studio helps give a voice.'),
         h('li', link(pf('Idrinth?gameId=1704'), 'Idrinth'), ', whose ', link('https://www.nexusmods.com/skyrimspecialedition/mods/182009', 'DBVO text export script'),
           ' Phase 1 is built on. Helping develop it was a pleasure, and DBVO Studio would not read a single plugin line without it. Heartfelt thanks!'),
+        h('li', 'The ', link('https://www.nexusmods.com/skyrimspecialedition/mods/184221', 'Dragonborn ReVoiced (DBReV)'), ' pack format is supported from v10 with the consent of ', link(pf('Raynor1511?gameId=1704'), 'Raynor'), '.'),
         h('li', link(nx('2716809'), 'isophe'), ', whose DBVO2 Tool served as a great crutch for handling all the WAV files before DBVO Studio existed.'),
         h('li', 'I built DBVO Studio with ', link('https://claude.ai/', 'Claude'), ' (Anthropic), which wrote the code to my designs, testing and feedback. (AI-Assisted Tag)'),
         h('li', link('https://elevenlabs.io/', 'ElevenLabs'), ' for the voices generated in Phase 2. (AI Generation Tag)'),
@@ -353,13 +354,13 @@ async function general(_, rerender) {
       } }, 'Test connection'), aiResult))),
     section('WAV to LIP (Other Tools)', null, wlBox),
     section('Voice engines', null,
-      h('div.help', { style: { margin: '10px 0' } }, 'Besides ElevenLabs, a voice pack can use Fish Audio, Inworld, Cartesia, MiniMax or an OpenAI-compatible engine (OpenAI, or a free server on your PC such as Chatterbox or Kokoro). Save the engine\'s API key here, then pick the engine for a voice pack (Voice packs → Engine, or the Phase 2 toolbar) and type its voice ID. ', helpButton('voice-engines', { label: 'voice engines' }),
+      h('div.help', { style: { margin: '10px 0' } }, 'Besides ElevenLabs, a voice pack can use Fish Audio, Inworld, Cartesia, MiniMax or an OpenAI-compatible engine (OpenAI, or a free server on your PC such as Chatterbox or Kokoro). These five are new in 10.0 and still in beta testing: they follow each engine\'s published API but haven\'t been tried with real accounts yet, so please report what works and what doesn\'t. Save the engine\'s API key here, then pick the engine for a voice pack (Voice packs → Engine, or the Phase 2 toolbar) and type its voice ID. ', helpButton('voice-engines', { label: 'voice engines' }),
         h('div', { style: { marginTop: '6px' } }, h('b', 'Your own voices only. '), 'Clone voices from recordings you have the right to use. A voice made with ElevenLabs can\'t be used to build a voice on another engine (ElevenLabs\' terms).')),
       CLOUD.map((eng) => {
         const has = (st.engineKeys || {})[eng];
         const inp = h('input', { type: 'password', placeholder: has ? '•••••••• saved (type a new one to replace it)' : 'paste the API key', style: { width: '280px' }, autocomplete: 'off' });
         const saveKey = async (key) => { try { await rpc('settings.setEngineKey', { engine: eng, key }); inp.value = ''; await refreshState(); rerender(); toast(key ? 'Saved.' : 'Key removed.'); } catch (e) { fail(e); } };
-        return srow(h('span.row', { style: { gap: '4px' } }, ENGINE_NAMES[eng], needInfo('engine-' + eng)), eng === 'openai' ? 'OpenAI\'s key. Not needed for a server on this PC or your network.' : 'Stored encrypted for your Windows user.',
+        return srow(h('span.row', { style: { gap: '4px' } }, engineLabel(eng), needInfo('engine-' + eng)), eng === 'openai' ? 'OpenAI\'s key. Not needed for a server on this PC or your network.' : 'Stored encrypted for your Windows user.',
           h('div.row', inp,
             h('button.btn.sm.primary', { title: 'Save the key encrypted for your Windows user', onclick: () => saveKey(inp.value.trim()) }, 'Save key'),
             has ? h('button.btn.sm.ghost', { title: 'Forget this key', onclick: () => saveKey('') }, 'Remove') : null,
@@ -507,7 +508,7 @@ async function voices(selectedId, rerender, onSelect) {
         srow('DBVO voice pack ID', 'The folder name under Sound\\DBVO\\ (Sound\\DBReV\\ for DBReV packs) and the voice_pack_id in the voice pack JSON.', txt(v, 'packId', { placeholder: 'e.g. vampira', after: renderPreview })),
         srow('Author', null, txt(v, 'author')),
         srow(h('span.row', { style: { gap: '4px' } }, 'Pack format', helpButton('pack-formats', { label: 'pack formats' })), 'Which mod plays the pack, and how its files are named. Legacy names are readable, so you can see which line each file is. DBVO 2.0 names are hashes of the line, identical to DBVO Voice Pack Maker 2.7.0. DBReV packs are for Dragonborn ReVoiced: files are named by plugin and FormID, so a changed line text never breaks a file. Switch any time; the next export writes the new names.',
-          segmented([['Legacy', 'DBVO 1 (Legacy names)'], ['Dbvo2Hash', 'DBVO 2.0 (hash names)'], ['Dbrev', 'DBReV (Dragonborn ReVoiced)']], v.naming, (x) => { v.naming = x; persistSoon(); renderEditor(); })),
+          segmented([['Legacy', 'DBVO 1 (Legacy names)'], ['Dbvo2Hash', 'DBVO 2.0 (hash names)'], ['Dbrev', 'DBReV (Dragonborn ReVoiced) (BETA TESTING)']], v.naming, (x) => { v.naming = x; persistSoon(); renderEditor(); })),
         srow(h('span.row', { style: { gap: '4px' } }, 'Engine', helpButton('voice-engines', { label: 'voice engines' })), 'ElevenLabs, another online engine (keys in Global Settings → General & tools → Voice engines), or a local VoxCPM / OmniVoice server. Voice, model and the engine\'s settings are picked in the Phase 2 toolbar and remembered here.',
           h('div.col', h('select', { style: { maxWidth: '240px' }, onchange: (ev) => { v.engine = ev.target.value; persistSoon(); renderEditor(); } },
               ENGINES.map(([x, t]) => h('option', { value: x, selected: x === (v.engine || 'elevenlabs') }, t))),

@@ -1,4 +1,5 @@
 // The landing page: a welcome, what to do next, the state of the studio and the work to pick up again.
+import { ENGINE_NAMES, isCloud, isLocalUrl } from './engines.js';
 import { rpc, h, store, icon } from './lib.js';
 import { app, go, refreshState } from './app.js';
 
@@ -109,9 +110,17 @@ export async function homeView() {
   const missing = tools.filter(([, ok]) => !ok).map(([n]) => n);
   checks.append(chip(!missing.length, missing.length ? `${missing.length} of 5 tools missing` : 'All 5 tools found', missing.length ? 'Missing: ' + missing.join(', ') : 'FonixData, xWMAEncode, ffmpeg, FaceFXWrapper and 7-Zip are all set (Global Settings → General & tools)', settings));
   if (!s.voicePacks.length) checks.append(chip(false, 'No voice pack yet', 'Create one in Global Settings → Voice packs', () => go('settings', { tab: 'voices', id: 'new' })));
-  const eleven = chip(s.settings.hasApiKey, s.settings.hasApiKey ? 'ElevenLabs key saved' : 'ElevenLabs key not set', 'Your ElevenLabs API key (Global Settings → General & tools)', settings);
-  checks.append(eleven);
-  if (s.settings.hasApiKey) {
+  // The key check follows the engines the voice packs use: no red ElevenLabs chip for someone on another engine.
+  const used = new Set(s.voicePacks.map((v) => v.engine || 'elevenlabs'));
+  const needEleven = !s.voicePacks.length || used.has('elevenlabs');
+  const keys = s.settings.engineKeys || {};
+  for (const e of [...used].filter(isCloud)) {
+    const ok = !!keys[e] || (e === 'openai' && s.voicePacks.some((v) => v.engine === 'openai' && isLocalUrl((v.openAi || {}).baseUrl)));
+    checks.append(chip(ok, ok ? `${ENGINE_NAMES[e]} ready` : `${ENGINE_NAMES[e]} key not set`, `The ${ENGINE_NAMES[e]} API key (Global Settings → General & tools → Voice engines)`, settings));
+  }
+  const eleven = needEleven ? chip(s.settings.hasApiKey, s.settings.hasApiKey ? 'ElevenLabs key saved' : 'ElevenLabs key not set', 'Your ElevenLabs API key (Global Settings → General & tools)', settings) : null;
+  if (eleven) checks.append(eleven);
+  if (eleven && s.settings.hasApiKey) {
     rpc('eleven.subscriptionInfo').then((c) => {
       const left = Math.max(0, c.characterLimit - c.characterCount);
       eleven.lastChild.textContent = `ElevenLabs · ${left.toLocaleString()} credits left`;

@@ -1,6 +1,6 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
-import { ENGINE_NAMES, CLOUD, isCloud, engineObj, cloudControls, keyBadge, tagNote, VOICE_HINT } from './engines.js';
+import { ENGINES, ENGINE_NAMES, CLOUD, isCloud, engineObj, cloudControls, keyBadge, tagNote, VOICE_HINT } from './engines.js';
 import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips, closeAllModals } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
@@ -377,7 +377,8 @@ export async function revoiceView(id) {
       }
       if (used.has('omnivoice')) {
         const o = v.omniVoice;
-        rows.push(h('div.tool-row', h('b', 'OmniVoice'), num(o, 'numStep', 'Steps', { min: 1 }), num(o, 'speed', 'Speed', { step: 0.05 }), num(o, 'guidanceScale', 'Guidance', { step: 0.1 }),
+        rows.push(h('div.tool-row', h('b', 'OmniVoice'), num(o, 'numStep', 'Steps', { min: 1 }), num(o, 'speed', 'Speed', { step: 0.05 }), num(o, 'guidanceScale', 'Guidance', { step: 0.1 }), grp('Language', (() => { const i = h('input', { type: 'text', value: o.language || '', placeholder: 'auto', style: { width: '64px' }, title: 'DBReV\'s OmniVoice server: spoken language; empty = detected' }); i.addEventListener('change', () => set(o, 'language', i.value.trim())); return i; })()),
+          grp('Denoise', switchEl(o.denoise !== false, (x) => set(o, 'denoise', x), '', { title: 'DBReV\'s OmniVoice server: noise reduction on the reference audio' })),
           num(o, 'concurrency', 'Concurrent', { min: 1, width: '56px' })));
       }
       for (const e of CLOUD) if (used.has(e)) {
@@ -392,7 +393,7 @@ export async function revoiceView(id) {
   function voicePick(sp) {
     const eng = sp.engine || 'elevenlabs';
     const engSel = h('select', { style: { width: '118px' }, title: proj.voiceChanger ? 'The Voice Changer only works with ElevenLabs voices' : 'Engine for this speaker' },
-      Object.entries(ENGINE_NAMES).map(([k, t]) => h('option', { value: k, selected: k === eng, disabled: proj.voiceChanger && k !== 'elevenlabs' }, t)));
+      ENGINES.map(([k, t]) => h('option', { value: k, selected: k === eng, disabled: proj.voiceChanger && k !== 'elevenlabs' }, t)));
     engSel.addEventListener('change', async () => {
       try { proj.speakers = await rpc('revoice.speaker', { id, key: sp.key, engine: engSel.value, voiceId: '' }); renderAll(); loadVoices(); } catch (e) { fail(e); }
     });
@@ -888,7 +889,8 @@ export async function revoiceView(id) {
         if (o) kids.push(...cloudControls(eng, o, { grp, numIn: num, setIn: set, locked: false, noVoice: true }), keyBadge(eng, app.state.settings));
       } else {
         const o = v.omniVoice;
-        kids.push(num(o, 'numStep', 'Steps', { min: 1 }), num(o, 'speed', 'Speed', { step: 0.05 }), num(o, 'guidanceScale', 'Guidance', { step: 0.1 }),
+        kids.push(num(o, 'numStep', 'Steps', { min: 1 }), num(o, 'speed', 'Speed', { step: 0.05 }), num(o, 'guidanceScale', 'Guidance', { step: 0.1 }), grp('Language', (() => { const i = h('input', { type: 'text', value: o.language || '', placeholder: 'auto', style: { width: '64px' }, title: 'DBReV\'s OmniVoice server: spoken language; empty = detected' }); i.addEventListener('change', () => set(o, 'language', i.value.trim())); return i; })()),
+          grp('Denoise', switchEl(o.denoise !== false, (x) => set(o, 'denoise', x), '', { title: 'DBReV\'s OmniVoice server: noise reduction on the reference audio' })),
           num(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
       }
     }

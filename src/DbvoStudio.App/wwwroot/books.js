@@ -1,7 +1,7 @@
 // Other Tools → Voiced Books Tool: narrate Skyrim's books, letters and journals (or a mod's) for Voiced Books of Skyrim.
 // Books are split into parts the engine can read, each part gets takes, and export joins them, adds the IVBOS
 // reverb and loudness chain, encodes xWMA and packs archives, the VBoS .ini and a FOMOD.
-import { ENGINE_NAMES, isCloud, engineObj, cloudControls, keyBadge, VOICE_HINT } from './engines.js';
+import { ENGINES, ENGINE_NAMES, isCloud, engineObj, cloudControls, keyBadge, VOICE_HINT } from './engines.js';
 import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { insertTagAtCaret, findReplaceDialog } from './tagtools.js';
@@ -279,7 +279,7 @@ export async function bookProjectView(id) {
   function voicePick(row, kind) {
     const eng = row.engine || 'elevenlabs';
     const list = voiceLists[eng];
-    const engSel = h('select', { title: 'Engine for this voice' }, Object.entries(ENGINE_NAMES).map(([k, t]) => h('option', { value: k, selected: k === eng }, t)));
+    const engSel = h('select', { title: 'Engine for this voice' }, ENGINES.map(([k, t]) => h('option', { value: k, selected: k === eng }, t)));
     engSel.addEventListener('change', () => setVoice(row, kind, { engine: engSel.value, voiceId: '' }).then(loadVoices));
     if (isCloud(eng)) {
       const inp = h('input', { type: 'text', value: row.voiceId || '', placeholder: eng === 'openai' ? 'voice, e.g. marin' : 'voice ID', title: VOICE_HINT[eng] || '', style: { width: '190px' } });
@@ -356,7 +356,8 @@ export async function bookProjectView(id) {
       if (o) kids.push(...cloudControls(eng, o, { grp, numIn: num, setIn: set, locked: false, noVoice: true }), keyBadge(eng, app.state.settings));
     } else {
       const o = v.omniVoice;
-      kids.push(num(o, 'numStep', 'Steps', { min: 1 }), num(o, 'speed', 'Speed', { step: 0.05 }), num(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
+      kids.push(num(o, 'numStep', 'Steps', { min: 1 }), num(o, 'speed', 'Speed', { step: 0.05 }), grp('Language', (() => { const i = h('input', { type: 'text', value: o.language || '', placeholder: 'auto', style: { width: '64px' }, title: 'DBReV\'s OmniVoice server: spoken language; empty = detected' }); i.addEventListener('change', () => set(o, 'language', i.value.trim())); return i; })()),
+          grp('Denoise', switchEl(o.denoise !== false, (x) => set(o, 'denoise', x), '', { title: 'DBReV\'s OmniVoice server: noise reduction on the reference audio' })), num(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
     }
     }
     const needs = () => proj.narrators.concat(proj.voiceTypes).reduce((a, x) => a + ((x.stats && x.stats.charactersLeft) || 0), 0);

@@ -631,7 +631,11 @@ export async function patchView(id) {
           o.referenceMode ? numIn(o, 'controlCfgValue', 'Control CFG', { step: 0.1 }) : null,
           numIn(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
       } else {
+        const lang = h('input', { type: 'text', value: o.language || '', placeholder: 'auto', disabled: locked, style: { width: '70px' }, title: 'DBReV\'s OmniVoice server: the spoken language (e.g. en, de, ja). Empty: detected from the text. Voice Pack Maker 2.7.0\'s server ignores it.' });
+        lang.addEventListener('change', () => setIn(o, 'language', lang.value.trim()));
         tb.append(numIn(o, 'numStep', 'Steps', { min: 1 }), numIn(o, 'speed', 'Speed', { step: 0.05 }), numIn(o, 'guidanceScale', 'Guidance', { step: 0.1 }),
+          grp('Language', lang),
+          grp('Denoise', switchEl(o.denoise !== false, (v) => setIn(o, 'denoise', v), '', { disabled: locked, title: 'DBReV\'s OmniVoice server: noise reduction on the reference audio before it speaks (on by default). Voice Pack Maker 2.7.0\'s server ignores it.' })),
           numIn(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
       }
     } else if (isCloud(eng)) {
@@ -1399,7 +1403,7 @@ export async function patchView(id) {
       creditsSlot,
       voiceSel,
       h('button.icon-btn', { title: 'Edit this voice pack (Global Settings)', onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, '✎'),
-      h('span.badge.b-skip', { title: voice.naming === 'Legacy' ? 'File names: Legacy (DBVO 1.0.1), from the line text. Set per voice pack.' : voice.naming === 'Dbrev' ? 'Pack format: DBReV (Dragonborn ReVoiced). Files are named by plugin and FormID: Sound\\DBReV\\<pack ID>\\<plugin>\\dbrev_line_<FormID>.fuz. Set per voice pack.' : 'File names: DBVO 2.0 hashes. Set per voice pack.' }, voice.naming === 'Legacy' ? 'Legacy names' : voice.naming === 'Dbrev' ? 'DBReV pack' : 'DBVO 2.0 names'),
+      h('span.badge.b-skip', { title: voice.naming === 'Legacy' ? 'File names: Legacy (DBVO 1.0.1), from the line text. Set per voice pack.' : voice.naming === 'Dbrev' ? 'Pack format: DBReV (Dragonborn ReVoiced). Files are named by plugin and FormID: Sound\\DBReV\\<pack ID>\\<plugin>\\dbrev_line_<FormID>.fuz. Set per voice pack.' : 'File names: DBVO 2.0 hashes. Set per voice pack.' }, voice.naming === 'Legacy' ? 'Legacy names' : voice.naming === 'Dbrev' ? 'DBReV pack (BETA TESTING)' : 'DBVO 2.0 names'),
       foldersMenu(),
       h('button.btn.sm.ghost', { title: 'Re-read Phase 1 now (also happens every time you open this patch)', onclick: sync }, '⟳ Refresh'),
       h('button.btn.sm.ghost.danger', { title: 'Delete this patch and its takes', onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes the patch and every take it made (their WAV and LIP files in the Library). Stays: the Phase 1 mods, the voice pack, and every WAV + LIP, .fuz and DBVO Fix file already exported to your folders; a new patch with the same WAV + LIP folder picks those WAV + LIP files up again as takes. A backup of the project files is made first (backups hold no audio).', 'Delete', true)) { try { await rpc('patch.delete', { id }); go('patches'); } catch (e) { fail(e); } } } }, 'Delete'));

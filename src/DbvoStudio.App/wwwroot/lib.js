@@ -1191,4 +1191,4 @@ export async function withBusy(promise, title, sub) {
 }
 
 /** A voice pack's pack format, in words. */
-export function namingLabel(n) { return n === 'Legacy' ? 'DBVO 1, Legacy names' : n === 'Dbrev' ? 'DBReV' : 'DBVO 2.0'; }
+export function namingLabel(n) { return n === 'Legacy' ? 'DBVO 1, Legacy names' : n === 'Dbrev' ? 'DBReV (BETA TESTING)' : 'DBVO 2.0'; }

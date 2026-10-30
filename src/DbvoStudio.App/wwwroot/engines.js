@@ -1,9 +1,9 @@
-// Voice engines: names, how each uses [tags], and the toolbar controls of the cloud engines added in 9.0
+// Voice engines: names, how each uses [tags], and the toolbar controls of the cloud engines added in 10.0
 // (Fish Audio, Inworld, Cartesia, MiniMax, OpenAI-compatible). Shared by Phase 2, NPC Revoice, Voiced Books, Player
 // Grunts and the voice pack editor, so every place says the same thing.
 import { h } from './lib.js';
 
-export const ENGINES = [
+const NAMES = [
   ['elevenlabs', 'ElevenLabs'],
   ['fish', 'Fish Audio'],
   ['inworld', 'Inworld'],
@@ -13,8 +13,14 @@ export const ENGINES = [
   ['omnivoice', 'OmniVoice (local)'],
   ['voxcpm', 'VoxCPM (local)'],
 ];
-export const ENGINE_NAMES = Object.fromEntries(ENGINES);
+/** Plain names, for sentences ("Fish Audio needs your API key"). */
+export const ENGINE_NAMES = Object.fromEntries(NAMES);
 export const CLOUD = ['fish', 'inworld', 'cartesia', 'minimax', 'openai'];
+/** The engines added in 10.0 haven't been tried with real accounts yet: every picker says so. */
+export const BETA = ' (BETA TESTING)';
+export const engineLabel = (e) => (ENGINE_NAMES[e] || e) + (CLOUD.includes(e) ? BETA : '');
+/** [id, label] for engine pickers. */
+export const ENGINES = NAMES.map(([id]) => [id, engineLabel(id)]);
 export const isCloud = (e) => CLOUD.includes(e);
 
 /** An address on this PC or the local network (an OpenAI-compatible server there needs no key); same test as the app's. */
@@ -32,7 +38,7 @@ export function engineObj(voice, eng) {
   return { elevenlabs: voice.eleven, voxcpm: voice.voxCpm, omnivoice: voice.omniVoice, fish: voice.fish, inworld: voice.inworld, cartesia: voice.cartesia, minimax: voice.miniMax, openai: voice.openAi }[eng];
 }
 
-/** Defaults of the cloud engines' settings (as the app saves them), for voice packs made before 9.0. */
+/** Defaults of the cloud engines' settings (as the app saves them), for voice packs made before 10.0. */
 export const ENGINE_DEFAULTS = {
   fish: { voiceId: '', voiceName: '', model: 's2.1-pro', speed: 1, temperature: 0, concurrency: 2 },
   inworld: { voiceId: '', voiceName: '', modelId: 'inworld-tts-2', speakingRate: 1, concurrency: 2 },
