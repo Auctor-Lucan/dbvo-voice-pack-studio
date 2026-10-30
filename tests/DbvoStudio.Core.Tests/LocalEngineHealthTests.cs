@@ -36,4 +36,19 @@ public class LocalEngineHealthTests
         var h = new Fake(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"status\":\"ok\",\"voices\":0,\"failed_voices\":0}") });
         Assert.True((await new LocalEngineClient("http://127.0.0.1:8001", new HttpClient(h)).HealthAsync()).Ok);
     }
+
+    [Fact]
+    public async Task OmniVoice_switches_to_dbrevs_api_when_tts_to_audio_is_missing()
+    {
+        var h = new Fake(q => q.RequestUri!.AbsolutePath == "/v1/audio/speech"
+            ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[] { 1, 2, 3 }) }
+            : new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("{\"detail\":\"Not Found\"}") });
+        var c = new LocalEngineClient("http://localhost:8002/v1/audio/speech", new HttpClient(h));
+        var wav = await c.OmniVoiceAsync("Hello.", new Core.Projects.OmniVoiceSettings { Voice = "Danis" });
+        Assert.Equal(3, wav.Length);
+        Assert.Equal("http://127.0.0.1:8002/tts_to_audio/", h.Urls[0]);
+        Assert.Equal("http://127.0.0.1:8002/v1/audio/speech", h.Urls[1]);
+        await c.OmniVoiceAsync("Again.", new Core.Projects.OmniVoiceSettings { Voice = "Danis" });
+        Assert.Equal("http://127.0.0.1:8002/v1/audio/speech", h.Urls[2]); // remembered
+    }
 }

@@ -23,6 +23,9 @@ public sealed class LocalEngineClient : IDisposable
     {
         _base = (string.IsNullOrWhiteSpace(baseUrl) ? "http://localhost:7861" : baseUrl.Trim()).TrimEnd('/');
         if (!_base.Contains("://")) _base = "http://" + _base; // "localhost:7862" or "127.0.0.1:7862" as typed
+        // DBReV shows its full endpoint (http://localhost:8001/v1/audio/speech); the server address is the part before it.
+        foreach (var tail in new[] { "/v1/audio/speech", "/tts_to_audio", "/health", "/voices", "/docs" })
+            if (_base.EndsWith(tail, StringComparison.OrdinalIgnoreCase)) { _base = _base[..^tail.Length]; break; }
         // Python servers usually listen on IPv4 only, and on Windows "localhost" tries IPv6 first (a refused try there
         // costs about 2 s each time), so localhost goes straight to 127.0.0.1.
         if (Uri.TryCreate(_base, UriKind.Absolute, out var u) && u.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
@@ -41,7 +44,7 @@ public sealed class LocalEngineClient : IDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(8));
             using var resp = await _http.GetAsync(baseUrl + "/health", cts.Token);
             if (!resp.IsSuccessStatusCode)
-                return Offline($"{baseUrl} answers, but {baseUrl}/health gave HTTP {(int)resp.StatusCode}. DBVO Studio needs the OmniVoice / VoxCPM server from DBVO Voice Pack Maker (it has /health, /voices and /tts_to_audio/), not a Gradio web page or another server.");
+                return Offline($"{baseUrl} answers, but {baseUrl}/health gave HTTP {(int)resp.StatusCode}. DBVO Studio needs the OmniVoice / VoxCPM server from DBVO Voice Pack Maker or DBReV Voice Pack Maker (DBReV's runs on port 8001), not a Gradio web page or another server.");
             body = await resp.Content.ReadAsStringAsync(cts.Token);
         }
         catch (HttpRequestException ex)
@@ -107,24 +110,61 @@ public sealed class LocalEngineClient : IDisposable
             ["retry_badcase"] = s.RetryBadcase,
         }, ct);
 
-    /// <summary>OmniVoice text-to-speech; returns WAV bytes.</summary>
-    public Task<byte[]> OmniVoiceAsync(string text, OmniVoiceSettings s, CancellationToken ct = default) =>
-        PostTtsAsync(new Dictionary<string, object?>
+    // Servers known to speak DBReV's OpenAI-style API (POST /v1/audio/speech), by address.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> OpenAiStyle = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// OmniVoice text-to-speech; returns WAV bytes. Works with Voice Pack Maker 2.7.0's server (POST /tts_to_audio/) and
+    /// with DBReV Voice Pack Maker's omnivoice_server.py (POST /v1/audio/speech, port 8001): the first answers 404 on the
+    /// other's endpoint, so a 404 switches to the other API and the address is remembered.
+    /// </summary>
+    public async Task<byte[]> OmniVoiceAsync(string text, OmniVoiceSettings s, CancellationToken ct = default)
+    {
+        var old = new Dictionary<string, object?>
         {
             ["text"] = text,
             ["speaker_wav"] = s.Voice,
             ["inference_timesteps"] = s.NumStep,
             ["speed"] = s.Speed,
             ["cfg_value"] = s.GuidanceScale,
-        }, ct);
+        };
+        var dbrev = new Dictionary<string, object?>
+        {
+            ["input"] = text,
+            ["voice"] = s.Voice,
+            ["num_step"] = s.NumStep,
+            ["speed"] = s.Speed,
+            ["guidance_scale"] = s.GuidanceScale,
+        };
+        bool openAi = OpenAiStyle.TryGetValue(_base, out var known) && known;
+        try
+        {
+            return openAi ? await PostTtsAsync(dbrev, ct, "/v1/audio/speech") : await PostTtsAsync(old, ct);
+        }
+        catch (EndpointMissingException)
+        {
+            OpenAiStyle[_base] = !openAi;
+            return !openAi ? await PostTtsAsync(dbrev, ct, "/v1/audio/speech") : await PostTtsAsync(old, ct);
+        }
+    }
 
-    private async Task<byte[]> PostTtsAsync(Dictionary<string, object?> body, CancellationToken ct)
+    private sealed class EndpointMissingException() : Exception("The local voice engine at this address has no text-to-speech endpoint Studio knows (/tts_to_audio/ or /v1/audio/speech). Check the address in Global Settings → General & tools → Local voice engines.");
+
+    private async Task<byte[]> PostTtsAsync(Dictionary<string, object?> body, CancellationToken ct, string path = "/tts_to_audio/")
     {
-        using var msg = new HttpRequestMessage(HttpMethod.Post, _base + "/tts_to_audio/") { Content = JsonContent.Create(body) };
+        using var msg = new HttpRequestMessage(HttpMethod.Post, _base + path) { Content = JsonContent.Create(body) };
         msg.Headers.Accept.ParseAdd("audio/wav");
         using var resp = await _http.SendAsync(msg, ct);
         if (!resp.IsSuccessStatusCode)
         {
+            // FastAPI's own 404 for a path it doesn't have (not DBReV's "Voice '…' not found")
+            if ((int)resp.StatusCode is 404 or 405)
+            {
+                var d = "";
+                try { d = await resp.Content.ReadAsStringAsync(ct); } catch { }
+                if (d.Contains("\"Not Found\"") || d.Contains("Method Not Allowed")) throw new EndpointMissingException();
+                throw new InvalidOperationException(FriendlyError.Http("The local voice engine", (int)resp.StatusCode, d, "Global Settings → General & tools → Local voice engines"));
+            }
             var detail = "";
             try { detail = await resp.Content.ReadAsStringAsync(ct); } catch { }
             throw new InvalidOperationException(FriendlyError.Http("The local voice engine", (int)resp.StatusCode, detail, "Global Settings → General & tools → Local voice engines"));
