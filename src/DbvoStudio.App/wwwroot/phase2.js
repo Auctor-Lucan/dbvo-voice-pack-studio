@@ -1277,29 +1277,29 @@ export async function patchView(id) {
     return ow == null ? null : { keepFix: !ow };
   }
 
-  // Files from earlier exports whose lines are no longer exported (excluded, removed or renamed in Phase 1):
-  // left in place they still play in game and end up in the FOMOD. Ask once per export. null = cancelled.
+  // .fuz files from earlier exports whose lines are no longer exported (excluded, removed or renamed in Phase 1):
+  // left in the final folder they still play in game and end up in the FOMOD. Ask once per .fuz build. null = cancelled.
   async function staleChoice() {
     const stale = await rpc('patch.staleExports', { id }).catch(() => []);
     if (!stale.length) return { removeStale: false };
     const groups = new Map();
     for (const f of stale) { if (!groups.has(f.why)) groups.set(f.why, []); groups.get(f.why).push(f.path); }
-    const v = await modal('Files from earlier exports', [
-      h('div', `This patch exported ${stale.length} file(s) earlier for lines it no longer exports. Left in place they still play in game and go into the FOMOD.`),
-      h('div', h('b', 'Delete these files'), ' removes exactly the files listed below, and nothing else: no takes, no other files in those folders. ', h('b', 'Keep them'), ' leaves them where they are; this export still writes everything else.'),
+    const v = await modal('.fuz files from earlier exports', [
+      h('div', `The final folder has ${stale.length} .fuz file(s) this patch built earlier for lines it no longer exports. Left in place they still play in game and go into the FOMOD.`),
+      h('div', h('b', 'Delete these files'), ' removes exactly the .fuz files listed below, and nothing else: no takes, no WAV + LIP files, no other files in those folders. ', h('b', 'Keep them'), ' leaves them where they are; this build still writes everything else.'),
       patch.exportApprovedOnly ? h('div.banner.warn', { style: { margin: 0 } }, 'Export is set to approved lines only (Folders & options), so lines you haven\'t approved count as not exported. Turn that off to export every line; approving is optional.') : null,
       h('div.stale-groups', [...groups].map(([why, paths]) => h('details', { open: groups.size === 1 },
         h('summary', h('b', `${paths.length} file(s)`), `: ${why}`),
         pathList(paths.slice(0, 300), { more: paths.length - 300 })))),
-    ], [{ label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' }, { label: `Delete these ${stale.length} file(s)`, primary: true, value: 'delete' }], { wide: true, help: 'exporting' });
+    ], [{ label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' }, { label: `Delete these ${stale.length} .fuz file(s)`, primary: true, value: 'delete' }], { wide: true, help: 'exporting' });
     return v == null ? null : { removeStale: v === 'delete' };
   }
 
   async function exportWavLip(audioOnly) {
     try {
       const fc = audioOnly ? {} : await fixChoice(); if (!fc) return;
-      const sc = await staleChoice(); if (!sc) return;
-      const r = await rpc('patch.exportWavLip', { id, audioOnly, ...fc, ...sc });
+      // the WAV + LIP folder keeps earlier files (an archive of past takes); only .fuz exports ask about them
+      const r = await rpc('patch.exportWavLip', { id, audioOnly, ...fc });
       await filesModal(audioOnly ? 'WAV + LIP exported (DBVO Fix plugins and topic file left as they were)' : 'WAV + LIP exported', h('div.kv',
         h('div', 'Written'), h('div', r.written), r.removed ? [h('div', 'Removed (no longer exported)'), h('div', r.removed)] : null, h('div', 'Skipped (up to date, or not ours and Overwrite is off)'), h('div', r.skipped), h('div', 'Failed'), h('div', r.failed),
         r.errors && r.errors.length ? [h('div', 'Errors'), h('div.mono', r.errors.slice(0, 10).join('\n'))] : null), r.files);

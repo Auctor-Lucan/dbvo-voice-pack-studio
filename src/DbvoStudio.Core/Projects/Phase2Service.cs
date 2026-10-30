@@ -938,7 +938,6 @@ public sealed partial class Phase2Service
         return set;
     }
 
-    /// <summary>Files from earlier exports that a full export would no longer write (still on disk).</summary>
     /// <summary>Files another patch exported to the same folders: never removed as this patch's stale files.</summary>
     public ISet<string>? KeepFiles { get; set; }
 
@@ -956,11 +955,15 @@ public sealed partial class Phase2Service
         return set;
     }
 
+    /// <summary>.fuz files from earlier exports that a full export would no longer write (still on disk).</summary>
     public List<string> StaleExports(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods)
     {
         ExportMap(patch);
         var planned = PlannedExports(patch, voice, mods);
-        return patch.Exported.Keys.Where(k => !planned.Contains(k) && File.Exists(k) && (KeepFiles == null || !KeepFiles.Contains(k))).OrderBy(k => k).ToList();
+        // Only .fuz files: they are what plays in game and goes into the FOMOD. The WAV + LIP folder is a working copy that
+        // many keep as an archive of past takes, so its files are never offered for removal.
+        return patch.Exported.Keys.Where(k => k.EndsWith(".fuz", StringComparison.OrdinalIgnoreCase) && !planned.Contains(k) && File.Exists(k)
+            && (KeepFiles == null || !KeepFiles.Contains(k))).OrderBy(k => k).ToList();
     }
 
     /// <summary>Each stale file with the reason its line is no longer exported, in plain words.</summary>
@@ -1003,7 +1006,7 @@ public sealed partial class Phase2Service
             }
             catch (Exception ex) { errors?.Add($"{f}: not removed ({FriendlyError.From(ex)})"); }
         }
-        // forget entries whose files are gone
+        // forget entries whose files are gone (stale .wav/.lip stay on record, so they're never taken for another patch's)
         foreach (var k in patch.Exported.Keys.Where(k => !File.Exists(k)).ToList()) patch.Exported.Remove(k);
         return n;
     }

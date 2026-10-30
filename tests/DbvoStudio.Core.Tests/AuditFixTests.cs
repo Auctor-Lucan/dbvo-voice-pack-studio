@@ -232,7 +232,7 @@ public class ExportTrackingTests : IDisposable
     public void Dispose() { try { Directory.Delete(_dir, true); } catch { } }
 
     [Fact]
-    public void New_take_replaces_our_export_but_foreign_files_stay_and_excluded_lines_are_stale()
+    public void New_take_replaces_our_export_but_foreign_files_stay_and_excluded_lines_wavs_are_kept()
     {
         var lib = new Library(Path.Combine(_dir, "lib"));
         var svc = new Phase2Service(lib, lib.LoadSettings());
@@ -275,10 +275,10 @@ public class ExportTrackingTests : IDisposable
         Assert.Equal(0, svc.ExportWavLip(patch, voice).Written); // up to date now
 
         a.Excluded = true;
-        var stale = svc.StaleExports(patch, voice, Array.Empty<Mod>());
-        Assert.Contains(aWav, stale);
-        Assert.Equal(2, svc.RemoveStaleExports(patch, voice, Array.Empty<Mod>()));
-        Assert.False(File.Exists(aWav));
+        // WAV + LIP files are an archive of past takes: never offered for removal (only .fuz files are)
+        Assert.Empty(svc.StaleExports(patch, voice, Array.Empty<Mod>()));
+        Assert.Equal(0, svc.RemoveStaleExports(patch, voice, Array.Empty<Mod>()));
+        Assert.True(File.Exists(aWav));
         Assert.True(File.Exists(foreignWav));
     }
 }
