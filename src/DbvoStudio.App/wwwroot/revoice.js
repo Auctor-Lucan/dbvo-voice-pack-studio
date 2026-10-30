@@ -469,7 +469,7 @@ export async function revoiceView(id) {
       })));
     wrap.append(
       h('div.help', { style: { maxWidth: '1180px', marginBottom: '12px' } },
-        h('p', h('b', 'Each speaker gets its own voice. '), 'Pick the engine and a voice from your ElevenLabs account or your local VoxCPM / OmniVoice server. A speaker is one NPC when a line belongs to a single character, or a voice type when several NPCs share the line (generic lines). Two NPCs sharing a vanilla voice type can still get different voices for their own lines; only the lines they share have to share a voice.')),
+        h('p', h('b', 'Each speaker gets its own voice. '), 'Pick the engine and a voice: from your ElevenLabs account or your local VoxCPM / OmniVoice server, or type the voice ID for Fish Audio, Inworld, Cartesia, MiniMax or an OpenAI-compatible engine (keys in Global Settings → General & tools → Voice engines). A speaker is one NPC when a line belongs to a single character, or a voice type when several NPCs share the line (generic lines). Two NPCs sharing a vanilla voice type can still get different voices for their own lines; only the lines they share have to share a voice.')),
       voiceSettings(),
       h('div.row.speaker-totals', { style: { maxWidth: '1180px', marginBottom: '8px', gap: '14px' } },
         h('b', `${list.length} speaker${list.length === 1 ? '' : 's'}`),

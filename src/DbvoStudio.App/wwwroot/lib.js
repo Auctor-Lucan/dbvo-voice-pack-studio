@@ -1086,7 +1086,16 @@ export function generateButton({ running, items, onPick, unit = 'line', label = 
 
 /** Hover texts for the engine settings in the Phase 2 and NPC Revoice toolbars, by their label. */
 export const TOOL_TIPS = {
-  'Engine': 'Which voice engine makes the takes: ElevenLabs online, or VoxCPM / OmniVoice running on this PC',
+  'Engine': 'Which voice engine makes the takes: ElevenLabs, Fish Audio, Inworld, Cartesia, MiniMax or OpenAI-compatible online (keys in Global Settings → Voice engines), or VoxCPM / OmniVoice running on this PC. Each handles [tags] its own way: see the line under the tag bar',
+  'Voice ID': 'The voice to speak with, as the engine names it. Hover the box for where to find it',
+  'Temperature': 'Fish Audio: how much takes vary; 0 = the engine\'s default',
+  'Emotion': 'The emotion of lines whose leading [tags] name none; "from the tags" leaves those lines to the model',
+  'Instructions': 'Delivery instructions sent with every line; the words of each line\'s [tags] are added',
+  'Extra fields': 'JSON sent as it is, for settings only your server knows (e.g. Chatterbox: exaggeration, cfg_weight)',
+  'Server': 'https://api.openai.com, or the address of an OpenAI-compatible server on your PC',
+  'API key': 'Whether this engine\'s key is saved (Global Settings → General & tools → Voice engines)',
+  'Volume': 'Loudness the engine renders at (1 = normal)',
+  'Pitch': 'MiniMax: semitones up or down (−12 to 12)',
   'Voice': 'The voice that speaks the lines',
   'Target voice': 'The voice the recordings are converted into',
   'Engine · voice': 'This speaker\'s engine and voice',
