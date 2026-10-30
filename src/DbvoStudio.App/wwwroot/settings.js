@@ -1,7 +1,7 @@
 // Global Settings: tools, voice packs, pronunciation, omit references, categories, library. Saved as you change them.
 import { VOICE_COLORS, voiceChip } from './phase2.js';
 import { THEMES, applyTheme } from './themes.js';
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, switchEl, segmented, popupMenu, needInfo, helpButton, pathText, pathRows, pathList } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, switchEl, segmented, popupMenu, needInfo, helpButton, pathText, pathRows, pathList, namingLabel } from './lib.js';
 import { app, go, refreshState, applyBackground, noteNav } from './app.js';
 
 const TABS = [
@@ -106,7 +106,7 @@ export async function settingsView(tab, selectedId) {
           h('button.btn.primary.sm', { title: 'Create a new voice pack', style: { justifyContent: 'center', margin: '4px 0 6px' }, onclick: () => show('voices', 'new') }, '+ New voice pack'),
           app.state.voicePacks.map((v) => h('button.nav-item' + (tab === 'voices' && voiceSel === v.id ? '.active' : ''), { title: `Edit the voice pack ${v.name}`, style: { padding: '5px 10px' }, onclick: () => show('voices', v.id) },
             h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: v.color || '#58a6ff', flexShrink: 0 } }),
-            h('div', { style: { minWidth: 0 } }, h('div.ellipsis', v.name), h('div.faint', { style: { fontSize: '11px' } }, (v.packId || 'no pack ID') + ' · ' + (v.naming === 'Legacy' ? 'Legacy' : 'DBVO 2.0')))))));
+            h('div', { style: { minWidth: 0 } }, h('div.ellipsis', v.name), h('div.faint', { style: { fontSize: '11px' } }, (v.packId || 'no pack ID') + ' · ' + namingLabel(v.naming)))))));
       }
     }
   }
@@ -483,8 +483,8 @@ async function voices(selectedId, rerender, onSelect) {
         srow('Colour', 'The voice pack label takes this colour everywhere, so you always see which voice you are working with.', colorIn),
         srow('DBVO voice pack ID', 'The folder name under Sound\\DBVO\\ and the voice_pack_id in the DBVO JSON.', txt(v, 'packId', { placeholder: 'e.g. vampira', after: renderPreview })),
         srow('Author', null, txt(v, 'author')),
-        srow('File naming', 'Legacy names are readable, so you can see which line each file is. DBVO 2.0 names are hashes of the line, identical to DBVO Voice Pack Maker 2.7.0.',
-          segmented([['Legacy', 'Legacy (DBVO 1.0.1)'], ['Dbvo2Hash', 'DBVO 2.0 hash']], v.naming, (x) => { v.naming = x; persistSoon(); renderEditor(); })),
+        srow(h('span.row', { style: { gap: '4px' } }, 'Pack format', helpButton('pack-formats', { label: 'pack formats' })), 'Which mod plays the pack, and how its files are named. Legacy names are readable, so you can see which line each file is. DBVO 2.0 names are hashes of the line, identical to DBVO Voice Pack Maker 2.7.0. DBReV packs are for Dragonborn ReVoiced: files are named by plugin and FormID, so a changed line text never breaks a file. Switch any time; the next export writes the new names.',
+          segmented([['Legacy', 'DBVO 1 (Legacy names)'], ['Dbvo2Hash', 'DBVO 2.0 (hash names)'], ['Dbrev', 'DBReV (Dragonborn ReVoiced)']], v.naming, (x) => { v.naming = x; persistSoon(); renderEditor(); })),
         srow('Engine', 'ElevenLabs, or a local VoxCPM / OmniVoice server (Global Settings → General & tools). Voice, model and the engine\'s settings are picked in the Phase 2 toolbar and remembered here.',
           h('div.col', segmented([['elevenlabs', 'ElevenLabs'], ['voxcpm', 'VoxCPM'], ['omnivoice', 'OmniVoice']], v.engine || 'elevenlabs', (x) => { v.engine = x; persistSoon(); renderEditor(); }),
             h('span.dim', v.engine === 'voxcpm' ? `VoxCPM · ${v.voxCpm.voice || 'no reference voice yet'}` : v.engine === 'omnivoice' ? `OmniVoice · ${v.omniVoice.voice || 'no reference voice yet'}` : `${v.eleven.voiceName || '— no voice picked yet —'} · ${v.eleven.modelId}`))),

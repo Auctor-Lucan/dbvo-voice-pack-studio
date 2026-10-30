@@ -10,6 +10,11 @@ public enum NamingMode
     Legacy,
     /// <summary>DBVO 2.0: xxHash64 of the in-game line.</summary>
     Dbvo2Hash,
+    /// <summary>
+    /// Dragonborn ReVoiced: files named by plugin and FormID (Sound\DBReV\&lt;pack id&gt;\&lt;plugin&gt;\dbrev_line_&lt;FormID&gt;.fuz),
+    /// not by text. Inside DBVO Studio a line is still keyed by its text (as with DBVO 2.0); only the exported names differ.
+    /// </summary>
+    Dbrev,
 }
 
 /// <summary>Turns an in-game line into the file stem DBVO looks up (no extension).</summary>
@@ -40,6 +45,16 @@ public static partial class LineNaming
     }
 
     public static string Stem(string line, NamingMode mode) => mode == NamingMode.Legacy ? Legacy(line) : Dbvo2(line);
+
+    /// <summary>
+    /// A DBReV FormID: the load-order byte stripped (FormID &amp; 0x00FFFFFF), and for an ESL-flagged plugin's own records
+    /// the light index too (&amp; 0x00000FFF). Records a plugin overrides from a master keep their own ID.
+    /// </summary>
+    public static string DbrevFormId(uint raw, bool lightPlugin, int masterCount) =>
+        (lightPlugin && (raw >> 24) >= masterCount ? raw & 0xFFF : raw & 0xFFFFFF).ToString("X8");
+
+    /// <summary>dbrev_line_00000D63, and dbrev_line_00000D63(1), (2)… for variations.</summary>
+    public static string DbrevName(string formId, int variation) => "dbrev_line_" + formId + (variation > 0 ? $"({variation})" : "");
 
     /// <summary>
     /// Key for duplicate detection and reference matching. Legacy keys ignore case because Windows file

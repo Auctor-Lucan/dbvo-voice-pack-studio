@@ -375,6 +375,8 @@ public sealed class ModPlugin
     /// <summary>Copy of the plugin inside the library.</summary>
     public string StoredFile { get; set; } = "";
     public List<string> Masters { get; set; } = new();
+    /// <summary>ESL-flagged (light) plugin; null for plugins imported before 9.0 (read from the stored copy when needed).</summary>
+    public bool? Light { get; set; }
     public bool Localized { get; set; }
     public string FixPrefix { get; set; } = FixPluginWriter.DefaultPrefix;
     public List<Phase1Line> Lines { get; set; } = new();

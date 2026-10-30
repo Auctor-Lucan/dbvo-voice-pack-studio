@@ -1,5 +1,5 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats, withBusy, pathText, pathRows, pathList, searchLamp, dragSource, dragTarget, closeAllModals } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats, withBusy, pathText, pathRows, pathList, searchLamp, dragSource, dragTarget, closeAllModals, namingLabel } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
@@ -1086,7 +1086,7 @@ export async function patchView(id) {
           h('div', 'Still to generate'), h('div', s.missing),
           h('div', 'Already have takes (left as they are)'), h('div', s.haveTakes),
           h('div', 'Files in the pack that match no line'), h('div', s.unmatched ? h('span', { title: s.unmatchedExamples.join('\n') }, `${s.unmatched} (another mod's lines, or another version of this one)`) : '0')),
-        h('div.help', h('p', 'Each found line gets a take. A .fuz is unpacked so it can be played and checked, and kept as it is: building .fuz files later uses the original, so the audio is never encoded twice. Export writes the names of this voice pack (', voice.naming === 'Legacy' ? 'Legacy' : 'DBVO 2.0', ').'),
+        h('div.help', h('p', 'Each found line gets a take. A .fuz is unpacked so it can be played and checked, and kept as it is: building .fuz files later uses the original, so the audio is never encoded twice. Export writes the names of this voice pack (', namingLabel(voice.naming), ').'),
           h('p', 'No credits are used. A backup is made first.')),
         !found && s.unmatched ? h('div.banner.warn', { style: { margin: 0 } }, 'Nothing in this folder matches this patch\'s lines. Is it the pack for this mod, and this version of it?') : null,
       ], [{ label: 'Cancel', value: false }, { label: `Import ${found} line(s)`, primary: true, value: found > 0 }], { help: 'importing-an-earlier-pack' });
@@ -1380,7 +1380,7 @@ export async function patchView(id) {
       creditsSlot,
       voiceSel,
       h('button.icon-btn', { title: 'Edit this voice pack (Global Settings)', onclick: () => go('settings', { tab: 'voices', id: voice.id }) }, '✎'),
-      h('span.badge.b-skip', { title: voice.naming === 'Legacy' ? 'File names: Legacy (DBVO 1.0.1), from the line text. Set per voice pack.' : 'File names: DBVO 2.0 hashes. Set per voice pack.' }, voice.naming === 'Legacy' ? 'Legacy names' : 'DBVO 2.0 names'),
+      h('span.badge.b-skip', { title: voice.naming === 'Legacy' ? 'File names: Legacy (DBVO 1.0.1), from the line text. Set per voice pack.' : voice.naming === 'Dbrev' ? 'Pack format: DBReV (Dragonborn ReVoiced). Files are named by plugin and FormID: Sound\\DBReV\\<pack ID>\\<plugin>\\dbrev_line_<FormID>.fuz. Set per voice pack.' : 'File names: DBVO 2.0 hashes. Set per voice pack.' }, voice.naming === 'Legacy' ? 'Legacy names' : voice.naming === 'Dbrev' ? 'DBReV pack' : 'DBVO 2.0 names'),
       foldersMenu(),
       h('button.btn.sm.ghost', { title: 'Re-read Phase 1 now (also happens every time you open this patch)', onclick: sync }, '⟳ Refresh'),
       h('button.btn.sm.ghost.danger', { title: 'Delete this patch and its takes', onclick: async () => { if (await confirmBox('Delete patch?', 'Deletes the patch and every take it made (their WAV and LIP files in the Library). Stays: the Phase 1 mods, the voice pack, and every WAV + LIP, .fuz and DBVO Fix file already exported to your folders; a new patch with the same WAV + LIP folder picks those WAV + LIP files up again as takes. A backup of the project files is made first (backups hold no audio).', 'Delete', true)) { await rpc('patch.delete', { id }); go('patches'); } } }, 'Delete'));

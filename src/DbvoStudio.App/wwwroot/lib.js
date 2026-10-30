@@ -1120,3 +1120,6 @@ export async function withBusy(promise, title, sub) {
   const close = busyOverlay(title, sub);
   try { return await promise; } finally { close(); }
 }
+
+/** A voice pack's pack format, in words. */
+export function namingLabel(n) { return n === 'Legacy' ? 'DBVO 1, Legacy names' : n === 'Dbrev' ? 'DBReV' : 'DBVO 2.0'; }

@@ -97,6 +97,7 @@ public sealed class Phase1Service
         var oldMasters = mp.Masters.ToList();
         mp.StoredFile = stored;
         mp.Masters = plugin.Masters.ToList();
+        mp.Light = (plugin.HeaderFlags & PluginFile.HeaderFlagLight) != 0 || plugin.FileName.EndsWith(".esl", StringComparison.OrdinalIgnoreCase);
         mp.Localized = plugin.IsLocalized;
         mp.ImportedUtc = DateTime.UtcNow;
         mp.Notices.Clear();

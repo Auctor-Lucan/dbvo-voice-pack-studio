@@ -884,6 +884,109 @@ public sealed partial class Phase2Service
         return kept.Select((t, i) => (t, Path.Combine(stem, i.ToString()))).ToList();
     }
 
+    // ------------------------------------------------------------------ DBReV (Dragonborn ReVoiced) packs
+
+    /// <summary>
+    /// Every DBReV file an export writes, per line: one per source of the line (plugin + FormID), as
+    /// &lt;plugin&gt;\dbrev_line_&lt;FormID&gt; without extension, with the mod each source belongs to. A line's selected take is
+    /// the line itself; its other kept (★) takes become variations (1), (2)… which DBReV picks from at random. Lines that
+    /// share a FormID (a line's text variants in Phase 1) add their takes as further variations of that FormID, up to 20.
+    /// Format and FormID rules confirmed by DBReV's author: the load-order byte is stripped, an ESL plugin's own records
+    /// keep 3 digits, and a record a mod overrides from a master goes in the overriding plugin's own folder.
+    /// </summary>
+    public static Dictionary<Phase2Line, List<(Take Take, string ModName, string Rel)>> DbrevPlan(IEnumerable<Phase2Line> lines, IReadOnlyList<Mod> mods)
+    {
+        var plan = new Dictionary<Phase2Line, List<(Take, string, string)>>();
+        var next = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase); // next variation number per plugin\FormID
+        foreach (var line in lines)
+        {
+            var list = new List<(Take, string, string)>();
+            plan[line] = list;
+            var kept = line.Takes.Where(t => t.Kept).ToList();
+            var main = line.SelectedTake ?? kept.LastOrDefault();
+            if (main == null) continue;
+            var takes = new List<Take> { main };
+            takes.AddRange(kept.Where(t => t != main));
+            foreach (var src in line.Sources)
+            {
+                var mod = mods.FirstOrDefault(m => m.Id == src.ModId);
+                var plugin = mod?.Plugins.FirstOrDefault(pl => string.Equals(pl.FileName, src.Plugin, StringComparison.OrdinalIgnoreCase));
+                if (plugin is { IsTopicFile: true } || string.IsNullOrWhiteSpace(src.Plugin)) continue; // a topic .txt has no FormIDs
+                var id = LineNaming.DbrevFormId(src.FormId, plugin != null && IsLight(plugin), plugin?.Masters.Count ?? 0);
+                var key = (mod?.Name ?? "Mod") + "|" + src.Plugin + "|" + id;
+                next.TryGetValue(key, out int n);
+                foreach (var t in takes)
+                {
+                    if (n >= 20) break; // DBReV: up to 20 versions of a line
+                    var item = (t, mod?.Name ?? "Mod", Path.Combine(SafeName(src.Plugin), LineNaming.DbrevName(id, n)));
+                    if (!list.Contains(item)) { list.Add(item); n++; }
+                }
+                next[key] = n;
+            }
+        }
+        return plan;
+    }
+
+    private static string SafeName(string s) => string.Concat(s.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+
+    /// <summary>Whether a plugin is ESL-flagged; read from its stored copy for plugins imported before this was recorded.</summary>
+    public static bool IsLight(ModPlugin p)
+    {
+        if (p.Light is { } known) return known;
+        bool light = p.FileName.EndsWith(".esl", StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            if (!light && File.Exists(p.StoredFile))
+            {
+                using var fs = File.OpenRead(p.StoredFile);
+                var h = new byte[12];
+                if (fs.Read(h, 0, 12) == 12 && h[0] == 'T' && h[1] == 'E' && h[2] == 'S' && h[3] == '4')
+                    light = (BitConverter.ToUInt32(h, 8) & PluginFile.HeaderFlagLight) != 0;
+            }
+        }
+        catch { }
+        p.Light = light;
+        return light;
+    }
+
+    /// <summary>The .fuz folder of a DBReV pack: the part of the template above Sound\, then Sound\DBReV\{packId}.</summary>
+    public static string DbrevTemplate(string template)
+    {
+        var t = template.Replace('/', '\\');
+        int i = t.IndexOf(@"Sound\", StringComparison.OrdinalIgnoreCase);
+        var prefix = i < 0 ? "" : t[..i];
+        return prefix + @"Sound\DBReV\{packId}";
+    }
+
+    /// <summary>
+    /// Every .fuz an export writes for a line, grouped by take (one encode per take): DBVO names in each source mod's
+    /// folder, or DBReV names per source. customFolder: everything below that one folder instead.
+    /// </summary>
+    public List<(Take Take, List<string> Targets)> FuzTargets(Phase2Line line, VoicePack voice, DbvoPatch patch, IReadOnlyList<Mod> mods, string root,
+        string? customFolder = null, Dictionary<Phase2Line, List<(Take Take, string ModName, string Rel)>>? plan = null)
+    {
+        var template = FuzTemplate(patch, voice);
+        if (voice.Naming == NamingMode.Dbrev)
+        {
+            var tpl = DbrevTemplate(template);
+            var mine = plan != null && plan.TryGetValue(line, out var l) ? l : DbrevPlan(new[] { line }, mods)[line];
+            return mine.GroupBy(x => x.Take)
+                .Select(g => (g.Key, g.Select(x => Path.Combine(customFolder ?? Path.Combine(root, ExpandTemplate(tpl, x.ModName, voice, patch)), x.Rel + ".fuz"))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).ToList())).ToList();
+        }
+        var folders = customFolder != null ? new List<string> { customFolder }
+            : line.Sources.Select(s => mods.FirstOrDefault(m => m.Id == s.ModId)?.Name ?? "Mod").Distinct()
+                .Select(name => Path.Combine(root, ExpandTemplate(template, name, voice, patch))).ToList();
+        return ExportTakes(line, voice.Naming).Select(x => (x.Take, folders.Select(f => Path.Combine(f, x.Stem + ".fuz")).ToList())).ToList();
+    }
+
+    /// <summary>Every WAV + LIP pair an export writes for a line, as (take, path without extension).</summary>
+    public static List<(Take Take, string Path)> WavLipTargets(Phase2Line line, VoicePack voice, IReadOnlyList<Mod> mods, string folder,
+        Dictionary<Phase2Line, List<(Take Take, string ModName, string Rel)>>? plan = null) =>
+        voice.Naming == NamingMode.Dbrev
+            ? (plan != null && plan.TryGetValue(line, out var l) ? l : DbrevPlan(new[] { line }, mods)[line]).Select(x => (x.Take, Path.Combine(folder, x.Rel))).Distinct().ToList()
+            : ExportTakes(line, voice.Naming).Select(x => (x.Take, Path.Combine(folder, x.Stem))).ToList();
+
     private static string ExportKey(string path) => Path.GetFullPath(path);
 
     /// <summary>Files already in the patch's own export folders that a take was adopted from: recorded as that take's export.</summary>
@@ -927,14 +1030,15 @@ public sealed partial class Phase2Service
         var wl = WavLipFolder(patch, voice);
         var root = FinalRoot(patch, voice);
         var template = FuzTemplate(patch, voice);
+        var plan = voice.Naming == NamingMode.Dbrev ? DbrevPlan(ExportLines(patch), mods) : null;
         foreach (var line in ExportLines(patch))
-            foreach (var (_, stem) in ExportTakes(line, voice.Naming))
-            {
-                if (!string.IsNullOrWhiteSpace(wl)) { set.Add(ExportKey(Path.Combine(wl, stem + ".wav"))); set.Add(ExportKey(Path.Combine(wl, stem + ".lip"))); }
-                if (!string.IsNullOrWhiteSpace(root))
-                    foreach (var name in line.Sources.Select(x => mods.FirstOrDefault(m => m.Id == x.ModId)?.Name ?? "Mod").Distinct())
-                        set.Add(ExportKey(Path.Combine(root, ExpandTemplate(template, name, voice, patch), stem + ".fuz")));
-            }
+        {
+            if (!string.IsNullOrWhiteSpace(wl))
+                foreach (var (_, path) in WavLipTargets(line, voice, mods, wl, plan)) { set.Add(ExportKey(path + ".wav")); set.Add(ExportKey(path + ".lip")); }
+            if (!string.IsNullOrWhiteSpace(root))
+                foreach (var (_, targets) in FuzTargets(line, voice, patch, mods, root, null, plan))
+                    foreach (var t in targets) set.Add(ExportKey(t));
+        }
         return set;
     }
 
@@ -972,9 +1076,26 @@ public sealed partial class Phase2Service
         var byStem = new Dictionary<string, Phase2Line>(StringComparer.OrdinalIgnoreCase);
         foreach (var l in patch.Lines) byStem.TryAdd(l.FileStem ?? LineNaming.Stem(l.FinalLine, voice.Naming), l);
         var list = new List<(string, string)>();
+        // DBReV names carry no text: find each file's line by its plugin\dbrev_line_… name across every line with a take
+        var dbrev = new Dictionary<string, Phase2Line>(StringComparer.OrdinalIgnoreCase);
+        if (voice.Naming == NamingMode.Dbrev)
+            foreach (var (l, items) in DbrevPlan(patch.Lines, mods))
+                foreach (var it in items) dbrev.TryAdd(it.Rel, l);
         foreach (var f in StaleExports(patch, voice, mods))
         {
             var stem = System.IO.Path.GetFileNameWithoutExtension(f);
+            if (voice.Naming == NamingMode.Dbrev && stem.StartsWith("dbrev_line_", StringComparison.OrdinalIgnoreCase))
+            {
+                var rel = System.IO.Path.Combine(System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(f)) ?? "", stem);
+                string w;
+                if (!dbrev.TryGetValue(rel, out var dl)) w = "its line is no longer in this patch, or has fewer versions now (removed in Phase 1, or fewer ★ takes kept)";
+                else if (dl.Excluded) w = "the line is excluded";
+                else if (dl.IsOmitted) w = "the line is omitted (players already have it)";
+                else if (patch.ExportApprovedOnly && !dl.Approved) w = "the line isn't approved, and Export is set to approved lines only";
+                else w = "the line is now exported under another name or folder";
+                list.Add((f, w));
+                continue;
+            }
             var variant = false;
             if (!byStem.ContainsKey(stem) && int.TryParse(stem, out _)) { stem = System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(f)) ?? stem; variant = true; }
             string why;
@@ -1011,20 +1132,22 @@ public sealed partial class Phase2Service
         return n;
     }
 
-    public ExportReport ExportWavLip(DbvoPatch patch, VoicePack voice)
+    public ExportReport ExportWavLip(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod>? mods = null)
     {
         var rep = new ExportReport();
         var folder = WavLipFolder(patch, voice);
         if (string.IsNullOrWhiteSpace(folder)) throw new InvalidOperationException("Set the WAV + LIP folder first.");
+        mods ??= _lib.LoadMods();
         ExportMap(patch);
-        foreach (var (line, t, stem) in ExportLines(patch).SelectMany(l => ExportTakes(l, voice.Naming).Select(x => (l, x.Take, x.Stem))))
+        var plan = voice.Naming == NamingMode.Dbrev ? DbrevPlan(ExportLines(patch), mods) : null;
+        foreach (var (line, t, stem) in ExportLines(patch).SelectMany(l => WavLipTargets(l, voice, mods, folder, plan).Select(x => (l, x.Take, x.Path))))
         {
             try
             {
                 bool any = false;
                 foreach (var (srcRel, ext) in new[] { (t.WavPath, ".wav"), (t.LipPath, ".lip") })
                 {
-                    var target = Path.Combine(folder, stem + ext);
+                    var target = stem + ext;
                     if (!ShouldWrite(patch, target, t, patch.OverwriteWavLip)) continue;
                     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                     FileLinks.LinkOrCopy(Path.Combine(_lib.PatchFolder(patch.Id), srcRel), target, true);
@@ -1038,7 +1161,7 @@ public sealed partial class Phase2Service
             catch (Exception ex)
             {
                 rep.Failed++;
-                rep.Errors.Add($"{stem}: {FriendlyError.From(ex)}");
+                rep.Errors.Add($"{Path.GetFileName(stem)}: {FriendlyError.From(ex)}");
             }
         }
         _lib.Save(patch);
@@ -1058,7 +1181,9 @@ public sealed partial class Phase2Service
         var template = FuzTemplate(patch, voice);
         if (customFolder == null && string.IsNullOrWhiteSpace(root)) throw new InvalidOperationException("Set the final folder first.");
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
-        var lines = ExportLines(patch).SelectMany(l => ExportTakes(l, voice.Naming).Select(x => (Line: l, x.Take, x.Stem))).ToList();
+        var plan = voice.Naming == NamingMode.Dbrev ? DbrevPlan(ExportLines(patch), mods) : null;
+        var lines = ExportLines(patch).SelectMany(l => FuzTargets(l, voice, patch, mods, root, customFolder, plan).Select(x => (Line: l, x.Take, x.Targets)))
+            .Where(x => x.Targets.Count > 0).ToList();
         var cache = new FuzCache(_lib.FuzCacheFolder);
         var encoder = FuzCache.EncoderId(tools.XwmaEncodePath, 48000);
         int done = 0;
@@ -1071,15 +1196,10 @@ public sealed partial class Phase2Service
         {
         await Task.WhenAll(lines.Select(async item =>
         {
-            var (line, take, stem) = item;
+            var (line, take, targets) = item;
             await gate.WaitAsync(ct);
             try
             {
-                var folders = customFolder != null
-                    ? new List<string> { customFolder }
-                    : line.Sources.Select(s => mods.FirstOrDefault(m => m.Id == s.ModId)?.Name ?? "Mod").Distinct()
-                        .Select(name => Path.Combine(root, ExpandTemplate(template, name, voice, patch))).ToList();
-                var targets = folders.Select(f => Path.Combine(f, stem + ".fuz")).ToList();
                 List<string> needed;
                 lock (rep) needed = targets.Where(t => track ? ShouldWrite(patch, t, take, patch.OverwriteFuz) : patch.OverwriteFuz || !File.Exists(t)).ToList();
                 if (needed.Count == 0)

@@ -366,7 +366,7 @@ export async function fomodView(id) {
     upd();
     return h('div', sec('DBVO voice pack JSON', h('div.row', helpButton('4-the-dbvo-json'), switchEl(j.enabled, (x) => { j.enabled = x; changed(true); renderEditor(); }, 'Add to the installer')),
       h('div.help', { style: { margin: '10px 0' } }, 'This small file makes the voice selectable in DBVO\'s MCM. It is written when you build and installed by the option marked "Carries the DBVO JSON" (normally a Required core option).',
-        h('p', 'Location in the game\'s Data folder: ', h('span.mono', dto.jsonPath), ' (', dto.naming === 'Legacy' ? 'Legacy / DBVO 1' : 'DBVO 2.0', ', from the voice pack\'s naming).')),
+        h('p', 'Location in the game\'s Data folder: ', h('span.mono', dto.jsonPath), ' (', dto.naming === 'Legacy' ? 'Legacy / DBVO 1' : dto.naming === 'Dbrev' ? 'DBReV' : 'DBVO 2.0', ', from the voice pack\'s pack format).')),
       srow('voice_pack_name', 'Shown in DBVO\'s menu.', txt(j, 'voicePackName', { after: upd })),
       srow('voice_pack_id', 'Must match the folder under Sound\\DBVO\\.', txt(j, 'voicePackId', { after: upd })),
       srow('Carried by', null, carriers.length ? h('div.col', carriers.map(({ s, g, o }) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); select(o.id); } }, `${s.name} › ${g.name} › ${o.name}`)))

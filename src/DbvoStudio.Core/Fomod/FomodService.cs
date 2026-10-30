@@ -147,10 +147,13 @@ public sealed class FomodService
         return rel.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(rel) ? absolute : rel;
     }
 
-    /// <summary>The DBVO JSON location inside the game's Data folder (Legacy vs DBVO 2.0).</summary>
-    public static string JsonDestination(NamingMode mode, string packId) =>
-        (mode == NamingMode.Dbvo2Hash ? @"SKSE\Plugins\DBVO2\voice_packs\" : @"DragonbornVoiceOver\voice_packs\")
-            + packId.ToLowerInvariant() + "_voice_pack.json";
+    /// <summary>The voice pack JSON location inside the game's Data folder (Legacy, DBVO 2.0 or DBReV).</summary>
+    public static string JsonDestination(NamingMode mode, string packId) => mode switch
+    {
+        NamingMode.Dbrev => @"DBReV\voice_packs\" + packId + ".json",
+        NamingMode.Dbvo2Hash => @"SKSE\Plugins\DBVO2\voice_packs\" + packId.ToLowerInvariant() + "_voice_pack.json",
+        _ => @"DragonbornVoiceOver\voice_packs\" + packId.ToLowerInvariant() + "_voice_pack.json",
+    };
 
     public static string JsonText(DbvoJsonSettings j)
     {
@@ -253,11 +256,15 @@ public sealed class FomodService
             },
         };
         // "DBVO Vampira" + " DBVO Voice Pack" would say DBVO twice
-        var packTitle = voice.Name.Contains("DBVO", StringComparison.OrdinalIgnoreCase) ? $"{voice.Name} Voice Pack" : $"{voice.Name} DBVO Voice Pack";
+        bool dbrev = voice.Naming == NamingMode.Dbrev;
+        var packTitle = dbrev
+            ? (voice.Name.Contains("DBReV", StringComparison.OrdinalIgnoreCase) ? $"{voice.Name} Voice Pack" : $"{voice.Name} DBReV Voice Pack")
+            : voice.Name.Contains("DBVO", StringComparison.OrdinalIgnoreCase) ? $"{voice.Name} Voice Pack" : $"{voice.Name} DBVO Voice Pack";
         var core = new FomodOption
         {
             Name = $"{packTitle} (Required)",
-            Description = "Always installed: the DBVO voice pack file that makes this voice selectable in DBVO's MCM.",
+            Description = dbrev ? "Always installed: the voice pack file that makes this voice selectable in Dragonborn ReVoiced."
+                : "Always installed: the DBVO voice pack file that makes this voice selectable in DBVO's MCM.",
             Mode = DetectMode.Required,
             CarriesJson = true,
         };
