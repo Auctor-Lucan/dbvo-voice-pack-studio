@@ -26,6 +26,8 @@ public sealed partial class Backend
     private const int UndoDepth = 10;
     private readonly List<UndoEntry> _undo = new();
     private static readonly AsyncLocal<UndoEntry?> UndoCapture = new();
+    /// <summary>Set while a page brings itself up to date (patch.sync): its save neither is an undo step nor drops the earlier ones.</summary>
+    private static readonly AsyncLocal<bool> UndoQuiet = new();
     private bool _undoHooked;
 
     /// <summary>Methods that never become an undo step: reads, and changes to audio files a project can't take back.</summary>
@@ -64,6 +66,7 @@ public sealed partial class Backend
             _undoHooked = true;
             Library.BeforeSave = path =>
             {
+                if (UndoQuiet.Value) return;
                 var e = UndoCapture.Value;
                 // Saved by a job or an action that isn't undoable: earlier undo steps for this file would now put back
                 // an old copy over that work (and lose takes made since), so they are dropped.
@@ -221,6 +224,13 @@ public sealed partial class Backend
                 // A start that needs an answer first (an export asking to replace files) can't run unattended.
                 var notStarted = r != null && JsonSerializer.SerializeToElement(r, JsonOptions) is { ValueKind: JsonValueKind.Object } el && el.TryGetProperty("started", out var st) && st.ValueKind == JsonValueKind.False;
                 if (notStarted) Emit("jobDone", new { kind = "queue", ok = false, message = $"{next.Label} (queued) didn't start: it needs your answer. Open it and start it again." });
+            }
+            catch (Exception ex) when (_jobCts != null)
+            {
+                // Another job claimed the slot in the meantime: this one waits its turn again instead of being dropped.
+                lock (_queue) _queue.Insert(0, next);
+                EmitQueue();
+                _ = ex;
             }
             catch (Exception ex) { Emit("jobDone", new { kind = "queue", ok = false, message = $"{next.Label} (queued) didn't start: {FriendlyError.From(ex)}" }); }
         }

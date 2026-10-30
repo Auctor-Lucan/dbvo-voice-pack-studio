@@ -676,7 +676,9 @@ public sealed partial class Backend
                         saved.LastBuildUtc = proj.LastBuildUtc; saved.LastArchive = proj.LastArchive;
                         var fresh = proj.Steps.SelectMany(st => st.Groups).SelectMany(g => g.Options).GroupBy(o => o.Id).ToDictionary(g => g.Key, g => g.First());
                         foreach (var o in saved.Steps.SelectMany(st => st.Groups).SelectMany(g => g.Options))
-                            if (o.PatchId != null && fresh.TryGetValue(o.Id, out var f)) o.Files = f.Files;
+                            if (o.PatchId != null && fresh.TryGetValue(o.Id, out var f))
+                                // the build's linked files, plus files added by hand meanwhile
+                                o.Files = f.Files.Concat(o.Files.Where(x => !x.Linked && !f.Files.Any(y => y.Destination.Equals(x.Destination, StringComparison.OrdinalIgnoreCase)))).ToList();
                     }
                     _lib.Save(saved);
                 }

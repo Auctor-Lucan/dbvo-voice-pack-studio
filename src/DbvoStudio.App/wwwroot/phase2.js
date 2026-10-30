@@ -257,9 +257,11 @@ async function newPatch(kind = 'tts') {
 export async function patchView(id) {
   await refreshState();
   let patch;
+  let syncSkipped = false; // Phase 1 changes wait while a task runs; the page syncs when it ends
   try {
     const r = await withBusy(rpc('patch.sync', { id }), 'Loading voice lines', 'Reading the lines, takes and WAV + LIP files…'); // pull in Phase 1 edits automatically
     patch = r.patch;
+    syncSkipped = !r.report;
     if (r.report && r.report.adopted) setTimeout(() => toast(`${r.report.adopted} line(s) already had WAV + LIP files in the WAV + LIP folder: added as take #1.`), 300);
   } catch {
     patch = await rpc('patch.get', { id });
@@ -1412,6 +1414,7 @@ export async function patchView(id) {
       renderCounts();
       renderActions();
       const rep = r.report;
+      syncSkipped = !rep;
       if (!rep) { toast('Phase 1 changes come in when the running task has finished.'); return; }
       toast(`${rep.total} lines · ${rep.added} new · ${rep.removed} removed${rep.parked ? ` (takes of ${rep.parked} kept in case they come back)` : ''} · ${rep.omitted} omitted${rep.stale ? ` · ${rep.stale} edited since take` : ''}`);
     } catch (e) { fail(e); }
@@ -1599,6 +1602,7 @@ export async function patchView(id) {
   document.addEventListener('job-done', async (e) => {
     jobSeen = false;
     if (!document.body.contains(view)) return;
+    if (syncSkipped) { syncSkipped = false; sync(); } // Phase 1 changes held back while the task ran
     // The last take's line can arrive just after the job ends: it still flashes.
     if (inFlight.size) { for (const x of inFlight) finishing.add(x); setTimeout(() => finishing.clear(), 5000); markInFlight(null); }
     if (e.detail && (e.detail.kind === 'import' || e.detail.kind === 'qa') && e.detail.patchId === id) {

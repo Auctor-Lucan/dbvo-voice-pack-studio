@@ -465,8 +465,13 @@ public sealed partial class Backend
                     // Not while a task runs: a line being generated could be swapped for a new one by a Phase 1 change,
                     // and its paid-for take would land on the old one. The page syncs again when the task ends.
                     if (_jobCts != null) return new { patch = PatchDto(patch), report = (object?)null };
-                    var rep = new Phase2Service(_lib, Runtime()).Sync(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods());
-                    return new { patch = PatchDto(patch), report = (object?)rep };
+                    UndoQuiet.Value = true; // opening a page isn't an edit, and must not wipe the patch's undo steps
+                    try
+                    {
+                        var rep = new Phase2Service(_lib, Runtime()).Sync(patch, LoadVoice(patch.VoicePackId), _lib.LoadMods());
+                        return new { patch = PatchDto(patch), report = (object?)rep };
+                    }
+                    finally { UndoQuiet.Value = false; }
                 });
             case "line2.update": return await Locked(() => UpdatePhase2Line(p));
             case "line2.bulkTags": return await Locked(() => BulkTags(p));

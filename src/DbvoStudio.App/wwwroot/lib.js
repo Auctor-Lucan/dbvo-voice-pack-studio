@@ -45,7 +45,7 @@ export function droppedPaths(fileList) {
   if (!webview || !webview.postMessageWithAdditionalObjects) return Promise.resolve([]);
   const id = nextId++;
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject, method });
+    pending.set(id, { resolve, reject, method: 'dropped' });
     webview.postMessageWithAdditionalObjects({ id, method: 'dropped', params: {} }, fileList);
   });
 }

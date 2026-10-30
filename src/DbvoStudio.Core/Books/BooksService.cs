@@ -304,17 +304,16 @@ public sealed class BooksService
         return p.Narrators.Select(n => BooksProject.NarratorKey(n.Id)).ToList();
     }
 
-    /// <summary>
-    /// The longest text one request may have: the smallest limit of the engines the narrators and voice types use
-    /// (each picks its own engine), so a part fits whichever voice reads it.
-    /// </summary>
-    public static int Ceiling(BooksProject p)
+    /// <summary>The longest text one request may have, for the project's own engine (how the books are split).</summary>
+    public static int Ceiling(BooksProject p) => CeilingOf(p, string.IsNullOrEmpty(p.Voice.Engine) ? "elevenlabs" : p.Voice.Engine);
+
+    /// <summary>The limit of the engine one voice (n:… or vt:…) uses; a voice on an engine with a lower limit gets shorter parts.</summary>
+    public static int VoiceCeiling(BooksProject p, string voice)
     {
-        var engines = p.Narrators.Where(n => !string.IsNullOrEmpty(n.VoiceId)).Select(n => n.Engine)
-            .Concat(p.VoiceTypes.Values.Where(v => !string.IsNullOrEmpty(v.VoiceId)).Select(v => v.Engine))
-            .Select(e => string.IsNullOrEmpty(e) ? "elevenlabs" : e).Distinct().ToList();
-        if (engines.Count == 0) engines.Add(string.IsNullOrEmpty(p.Voice.Engine) ? "elevenlabs" : p.Voice.Engine);
-        return engines.Min(e => CeilingOf(p, e));
+        string? engine = null;
+        if (voice.StartsWith("n:")) engine = p.Narrators.FirstOrDefault(n => BooksProject.NarratorKey(n.Id) == voice)?.Engine;
+        else if (voice.StartsWith("vt:") && p.VoiceTypes.TryGetValue(voice[3..], out var vt)) engine = vt.Engine;
+        return CeilingOf(p, string.IsNullOrEmpty(engine) ? "elevenlabs" : engine);
     }
 
     private static int CeilingOf(BooksProject p, string engine) => engine switch
@@ -348,7 +347,12 @@ public sealed class BooksService
             foreach (var v in b.Variants.Where(v => v.Spoken.Trim().Length > 0))
                 texts.Add((v.Id, v.Spoken, BookSplitter.Split(v.Spoken, p.PartTarget, p.PartMax, Ceiling(p))));
             foreach (var voice in voices)
-                foreach (var (variant, text, parts) in texts)
+                foreach (var (variant, text, shared) in texts)
+                {
+                    // Only a voice whose engine takes less than these parts gets its own, shorter split; every other voice
+                    // keeps the book's parts (and its line ids and takes).
+                    int vc = VoiceCeiling(p, voice);
+                    var parts = shared.Any(x => x.Length > vc) ? BookSplitter.Split(text, p.PartTarget, Math.Min(p.PartMax, vc), vc) : shared;
                     for (int i = 0; i < parts.Count; i++)
                     {
                         var part = parts[i];
@@ -363,6 +367,7 @@ public sealed class BooksService
                         l.FileStem = $"{b.Stem}_p{i + 1:00}";
                         fresh.Add(l);
                     }
+                }
         }
         // Orphans: lines with takes that are no longer needed are kept (excluded) so the work isn't lost.
         var ids = fresh.Select(l => l.LineId).ToHashSet();

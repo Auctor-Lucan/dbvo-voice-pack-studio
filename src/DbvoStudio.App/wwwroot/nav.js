@@ -1,6 +1,6 @@
 // Back / Forward between pages (with their scroll positions), Undo of the last 10 edits, the Ctrl+K command palette,
 // and the background job queue shown in the top bar.
-import { rpc, on, h, clear, toast, fail, popupMenu } from './lib.js';
+import { rpc, on, h, clear, toast, fail, popupMenu, hasGuardedModal, modalsMayClose } from './lib.js';
 import { app, go, render, refreshState } from './app.js';
 
 // ------------------------------------------------------------------ back / forward
@@ -46,8 +46,10 @@ export function beforeNavigate(next) {
 }
 
 async function travel(from, to) {
+  if (!from.length) return;
+  // An open dialog with unsaved edits asks before anything moves; Stay leaves the history as it was.
+  if (hasGuardedModal() && !(await modalsMayClose())) return;
   const e = from.pop();
-  if (!e) return;
   to.push({ route: { ...app.route }, scroll: snapScroll() });
   paintNav();
   await go(e.route.view, (({ view, ...rest }) => rest)(e.route), { history: false });

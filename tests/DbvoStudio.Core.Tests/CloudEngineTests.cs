@@ -118,12 +118,11 @@ public class CloudEngineTests
     }
 
     [Fact]
-    public void Books_split_for_the_smallest_limit_of_the_engines_in_use()
+    public void Books_voices_on_an_engine_with_a_lower_limit_get_their_own_shorter_parts()
     {
         var p = new Books.BooksProject();
-        p.Narrators.Add(new Books.BookNarrator { Engine = "elevenlabs", VoiceId = "a" });
-        Assert.True(Books.BooksService.Ceiling(p) > 2000);
         p.Narrators.Add(new Books.BookNarrator { Engine = "inworld", VoiceId = "b" });
-        Assert.Equal(2000, Books.BooksService.Ceiling(p));
+        Assert.Equal(2000, Books.BooksService.VoiceCeiling(p, Books.BooksProject.NarratorKey(p.Narrators[0].Id)));
+        Assert.True(Books.BooksService.Ceiling(p) > 2000); // the project's own split is unchanged
     }
 }
