@@ -1007,10 +1007,26 @@ public sealed partial class Backend
         var folder = GrFolder(proj);
         var v = _lib.LoadVoicePacks().FirstOrDefault(x => x.Id == proj.VoicePackId);
         var engine = v?.Engine ?? "elevenlabs";
-        string voiceName = v == null ? "" : engine == "voxcpm" ? v.VoxCpm.Voice : engine == "omnivoice" ? v.OmniVoice.Voice : v.Eleven.VoiceName;
-        string model = v == null ? "" : engine == "voxcpm" ? "VoxCPM" : engine == "omnivoice" ? v.OmniVoice.Model : v.Eleven.ModelId;
-        // ElevenLabs v3/v4 and OmniVoice read [tags]; VoxCPM would say them, so they are left out for it by default.
-        var tags = engine == "omnivoice" ? new List<string> { "[laughter]", "[sigh]", "[gasp]" } : v?.Tags ?? new List<string>();
+        string voiceName = v == null ? "" : v.CurrentVoice(false).Name;
+        string model = v == null ? "" : engine switch
+        {
+            "voxcpm" => "VoxCPM", "omnivoice" => v.OmniVoice.Model, "fish" => v.Fish.Model, "inworld" => v.Inworld.ModelId,
+            "cartesia" => v.Cartesia.ModelId, "minimax" => v.MiniMax.Model, "openai" => v.OpenAi.Model, _ => v.Eleven.ModelId,
+        };
+        // Tag chips: what the engine performs. VoxCPM would say tags, so they are left out for it by default.
+        var tags = engine switch
+        {
+            "omnivoice" => new List<string> { "[laughter]", "[sigh]" },
+            "inworld" => new List<string> { "[laugh]", "[sigh]", "[breathe]", "[gasp]", "[chuckle]", "[clear throat]" }.Concat(v?.Tags ?? new()).Distinct().ToList(),
+            "minimax" => new List<string> { "[laughs]", "[chuckle]", "[sighs]", "[gasps]", "[clears throat]" },
+            "cartesia" => new List<string> { "[laughter]" }.Concat(Core.Engines.TtsEngines.CartesiaEmotions.Take(12).Select(e => "[" + e + "]")).ToList(),
+            _ => v?.Tags ?? new List<string>(),
+        };
+        double engineSpeed = v == null ? 1 : engine switch
+        {
+            "omnivoice" => v.OmniVoice.Speed, "fish" => v.Fish.Speed, "inworld" => v.Inworld.SpeakingRate, "cartesia" => v.Cartesia.Speed,
+            "minimax" => v.MiniMax.Speed, "openai" => v.OpenAi.Speed, "voxcpm" => 1, _ => v.Eleven.Speed,
+        };
         return new
         {
             eventId = ev.Id, d.Slot, lineId = d.ReplaceLineId, d.Subtitle, d.Spoken, d.SelectedId,
@@ -1024,9 +1040,10 @@ public sealed partial class Backend
             {
                 ready = v != null && voiceName.Length > 0, voicePack = v?.Name ?? "", engine, voiceName, model, tags,
                 tagModel = engine == "elevenlabs" && ModelCapabilities.IsTagModel(v?.Eleven.ModelId ?? ""),
-                stability = v?.Eleven.Stability ?? 0.5, speed = engine == "omnivoice" ? v?.OmniVoice.Speed ?? 1 : v?.Eleven.Speed ?? 1,
+                stability = v?.Eleven.Stability ?? 0.5, speed = engineSpeed,
                 seed = v?.Eleven.Seed, discrete = ModelCapabilities.HasDiscreteStability(v?.Eleven.ModelId ?? ""),
-                hasKey = !string.IsNullOrWhiteSpace(Secrets.Unprotect(_settings.ElevenLabsApiKey)),
+                hasKey = engine == "elevenlabs" ? !string.IsNullOrWhiteSpace(Secrets.Unprotect(_settings.ElevenLabsApiKey))
+                    : !Core.Engines.TtsEngines.IsCloud(engine) || _settings.EngineKeys.ContainsKey(engine) || engine == "openai" && Core.Engines.TtsEngines.IsLocalAddress(v!.OpenAi.BaseUrl),
             },
             label = ev.Label, slotLabel = ev.Slots.FirstOrDefault(x => x.Id == d.Slot)?.Label ?? "", words = ev.Slots.FirstOrDefault(x => x.Id == d.Slot)?.Text ?? "",
             target = proj.Target,
@@ -1144,7 +1161,7 @@ public sealed partial class Backend
         }
     }
 
-    /// <summary>One text-to-speech try with the project's voice pack (ElevenLabs, VoxCPM or OmniVoice). Returns a temporary WAV.</summary>
+    /// <summary>One text-to-speech try with the project's voice pack (any engine). Returns a temporary WAV.</summary>
     private async Task<(string Wav, double Seconds, string Settings)> GrSynth(GruntProject proj, string spoken, JsonElement p)
     {
         var v = _lib.LoadVoicePacks().FirstOrDefault(x => x.Id == proj.VoicePackId) ?? throw new InvalidOperationException("Pick a DBVO voice pack for this project first (Setup & export → DBVO voice pack).");
@@ -1164,6 +1181,7 @@ public sealed partial class Backend
             case "omnivoice":
             {
                 var text = sendTags ? spoken : Core.Naming.SpokenText.StripTags(spoken);
+                if (engine == "omnivoice") text = Core.Engines.TtsEngines.EngineText("omnivoice", text).Text; // [laughter] [sigh]; other tags would be spoken
                 text = Phase2Service.ApplyPronunciations(text, prons, "local");
                 using var local = new LocalEngineClient(engine == "voxcpm" ? _settings.LocalEngines.VoxCpmAddress : _settings.LocalEngines.OmniVoiceAddress);
                 if (engine == "voxcpm")
@@ -1181,6 +1199,25 @@ public sealed partial class Backend
                     settings = $"OmniVoice · {os.Voice} · speed {os.Speed:0.##}{(sendTags ? "" : " · tags left out")}";
                 }
                 format = "wav";
+                break;
+            }
+            case "fish": case "inworld": case "cartesia": case "minimax": case "openai":
+            {
+                rt.EngineKeys.TryGetValue(engine, out var ek);
+                var vs = JsonSerializer.Deserialize<VoicePack>(JsonSerializer.Serialize(v, Library.Json), Library.Json)!; // per-try speed without changing the pack
+                if (D("speed") is { } sp)
+                    switch (engine)
+                    {
+                        case "fish": vs.Fish.Speed = sp; break; case "inworld": vs.Inworld.SpeakingRate = sp; break;
+                        case "cartesia": vs.Cartesia.Speed = Math.Clamp(sp, 0.6, 1.5); break; case "minimax": vs.MiniMax.Speed = sp; break; default: vs.OpenAi.Speed = sp; break;
+                    }
+                var src = sendTags ? spoken : Core.Naming.SpokenText.StripTags(spoken);
+                var (et, emotion, instr) = Core.Engines.TtsEngines.EngineText(engine, Phase2Service.ApplyPronunciations(src, prons, "local"), vs.MiniMax.Model,
+                    engine == "cartesia" ? vs.Cartesia.Emotion : engine == "minimax" ? vs.MiniMax.Emotion : "", engine == "openai" ? vs.OpenAi.Instructions : "");
+                using var cloud = new Core.Engines.CloudTtsClient(engine, ek);
+                var got = await cloud.SpeakAsync(et, emotion, instr, vs, CancellationToken.None);
+                audio = got.Pcm44100; format = "pcm_44100";
+                settings = $"{Core.Engines.TtsEngines.Name(engine)} · {vs.CurrentVoice(false).Name}{(emotion != null ? " · " + emotion : "")}{(instr != null ? " · instructions: " + instr : "")}";
                 break;
             }
             default:

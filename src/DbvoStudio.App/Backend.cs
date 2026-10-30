@@ -100,6 +100,16 @@ public sealed partial class Backend
                     _lib.Save(_settings);
                     return State();
                 });
+            case "settings.setEngineKey":
+                return await Locked(() =>
+                {
+                    var eng = S(p, "engine");
+                    if (!Core.Engines.TtsEngines.IsCloud(eng)) throw new InvalidOperationException("Unknown voice engine.");
+                    var key = S(p, "key").Trim();
+                    if (key.Length == 0) _settings.EngineKeys.Remove(eng); else _settings.EngineKeys[eng] = Secrets.Protect(key);
+                    _lib.Save(_settings);
+                    return State();
+                });
             case "settings.setAiKey":
                 return await Locked(() => { _settings.AiProvider.ApiKey = Secrets.Protect(S(p, "key")); _lib.Save(_settings); return State(); });
             case "eleven.subscription":
@@ -121,7 +131,15 @@ public sealed partial class Backend
             case "pick.folder": return PickFolder(S(p, "title"));
             case "dropped": return dropped;
             case "open.path": OpenPath(S(p, "path")); return true;
-            case "open.url": Process.Start(new ProcessStartInfo(S(p, "url")) { UseShellExecute = true }); return true;
+            case "open.url":
+            {
+                // web pages only: a shell-executed path or program name would run it
+                var url = S(p, "url");
+                if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || (u.Scheme != Uri.UriSchemeHttps && u.Scheme != Uri.UriSchemeHttp))
+                    throw new InvalidOperationException("Only web addresses can be opened this way.");
+                Process.Start(new ProcessStartInfo(u.AbsoluteUri) { UseShellExecute = true });
+                return true;
+            }
             case "references.add":
                 return await Locked(() => { _lib.AddReference(_settings, S(p, "name"), S(p, "path")); return State(); });
             case "references.remove":
@@ -521,6 +539,7 @@ public sealed partial class Backend
                 _settings.LastVoicePackId,
                 aiProvider = new { _settings.AiProvider.Endpoint, _settings.AiProvider.Model, hasKey = !string.IsNullOrEmpty(_settings.AiProvider.ApiKey) },
                 localEngines = _settings.LocalEngines,
+                engineKeys = Core.Engines.TtsEngines.CloudIds.ToDictionary(e => e, e => _settings.EngineKeys.TryGetValue(e, out var k) && !string.IsNullOrEmpty(Secrets.Unprotect(k))),
                 ui = _settings.Ui,
             },
             references = _settings.References,
@@ -572,12 +591,20 @@ public sealed partial class Backend
         return State();
     }
 
+    /// <summary>The engine settings object of a voice pack's current engine (for summaries).</summary>
+    private static object EngineSettingsOf(VoicePack v) => v.Engine switch
+    {
+        "voxcpm" => v.VoxCpm, "omnivoice" => v.OmniVoice, "fish" => v.Fish, "inworld" => v.Inworld,
+        "cartesia" => v.Cartesia, "minimax" => v.MiniMax, "openai" => v.OpenAi, _ => v.Eleven,
+    };
+
     /// <summary>A copy of the settings with secrets decrypted, for the core services.</summary>
     private AppSettings Runtime()
     {
         var copy = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(_settings, Library.Json), Library.Json)!;
         copy.ElevenLabsApiKey = Secrets.Unprotect(_settings.ElevenLabsApiKey);
         copy.AiProvider.ApiKey = Secrets.Unprotect(_settings.AiProvider.ApiKey);
+        copy.EngineKeys = _settings.EngineKeys.ToDictionary(kv => kv.Key, kv => Secrets.Unprotect(kv.Value));
         return copy;
     }
 
@@ -1073,7 +1100,7 @@ public sealed partial class Backend
             o = Estimate(p);
             var patch = LoadPatch(S(p, "id"));
             var voice = LoadVoice(patch.VoicePackId);
-            if (voice.Engine is "voxcpm" or "omnivoice") return null; // local engines: no credits
+            if (voice.Engine is not "elevenlabs") return null; // other engines: no ElevenLabs credits
             var lines = SelectLines(patch, p);
             if (patch.Kind == "vc") lines = lines.Where(l => l.SourceWav == null).ToList(); // only text-to-speech lines bill characters
             modelId = voice.Eleven.ModelId;
@@ -1109,17 +1136,24 @@ public sealed partial class Backend
                 voice.Loudnorm, voice.GainDb, voice.TrimTailMs, voice.FadeOutMs, naming = voice.Naming.ToString(),
                 missingSource = patch.Lines.Count(l => !l.IsOmitted && !l.Excluded && l.SourceWav == null),
                 ttsCount = tts.Count, ttsCharacters = tts.Sum(l => l.Spoken.Length), ttsEngine = voice.Engine,
-                ttsVoice = voice.Engine == "voxcpm" ? voice.VoxCpm.Voice : voice.Engine == "omnivoice" ? voice.OmniVoice.Voice : voice.Eleven.VoiceName,
+                ttsVoice = voice.CurrentVoice(false).Name,
                 standardWarning = voice.StandardVoiceWarning(true),
             };
         }
-        if (voice.Engine is "voxcpm" or "omnivoice")
+        if (voice.Engine is not "elevenlabs")
         {
+            var prons = Phase2Service.MergePronunciations(_settings.Pronunciations, voice.Pronunciations);
             return new
             {
-                kind = voice.Engine, count = lines.Count, characters = lines.Sum(l => l.Spoken.Length),
-                voiceId = voice.Engine == "voxcpm" ? voice.VoxCpm.Voice : voice.OmniVoice.Voice,
-                engineSettings = voice.Engine == "voxcpm" ? (object)voice.VoxCpm : voice.OmniVoice,
+                kind = voice.Engine, engineName = Core.Engines.TtsEngines.Name(voice.Engine), count = lines.Count, characters = lines.Sum(l => l.Spoken.Length),
+                // what the engine is sent: tags kept, translated or left out the way this engine needs
+                sentCharacters = lines.Sum(l => Core.Engines.TtsEngines.EngineText(voice.Engine, Phase2Service.ApplyPronunciations(l.Spoken, prons, "local"),
+                    voice.MiniMax.Model).Text.Length),
+                cloud = Core.Engines.TtsEngines.IsCloud(voice.Engine),
+                hasKey = !Core.Engines.TtsEngines.IsCloud(voice.Engine) || _settings.EngineKeys.ContainsKey(voice.Engine)
+                    || voice.Engine == "openai" && Core.Engines.TtsEngines.IsLocalAddress(voice.OpenAi.BaseUrl),
+                voiceId = voice.CurrentVoice(false).Name,
+                engineSettings = EngineSettingsOf(voice),
                 standardWarning = voice.StandardVoiceWarning(false),
                 voice.Loudnorm, voice.GainDb, voice.TrimTailMs, voice.FadeOutMs, naming = voice.Naming.ToString(),
                 pronunciations = Phase2Service.MergePronunciations(_settings.Pronunciations, voice.Pronunciations).Count,

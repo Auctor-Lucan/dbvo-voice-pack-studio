@@ -10,6 +10,8 @@ public sealed class AppSettings
 {
     public int SchemaVersion { get; set; } = 1;
     public string ElevenLabsApiKey { get; set; } = "";
+    /// <summary>API keys of the other cloud voice engines (fish, inworld, cartesia, minimax, openai), stored encrypted.</summary>
+    public Dictionary<string, string> EngineKeys { get; set; } = new();
     public string FonixDataPath { get; set; } = "";
     public string XwmaEncodePath { get; set; } = "";
     /// <summary>Empty = the bundled copy next to the app.</summary>
@@ -140,6 +142,10 @@ public sealed class OmniVoiceSettings
 {
     public string Voice { get; set; } = "";
     public string Model { get; set; } = "k2-fsa/OmniVoice";
+    /// <summary>DBReV's OmniVoice server only: spoken language ("" = detected from the text).</summary>
+    public string Language { get; set; } = "";
+    /// <summary>DBReV's OmniVoice server only: noise reduction on the reference audio before synthesis.</summary>
+    public bool Denoise { get; set; } = true;
     public int NumStep { get; set; } = 32;
     public double Speed { get; set; } = 1.0;
     public double GuidanceScale { get; set; } = 3.0;
@@ -219,6 +225,11 @@ public sealed class VoicePack
     public bool OverwriteFuz { get; set; }
     public VoxCpmSettings VoxCpm { get; set; } = new();
     public OmniVoiceSettings OmniVoice { get; set; } = new();
+    public Engines.FishSettings Fish { get; set; } = new();
+    public Engines.InworldSettings Inworld { get; set; } = new();
+    public Engines.CartesiaSettings Cartesia { get; set; } = new();
+    public Engines.MiniMaxSettings MiniMax { get; set; } = new();
+    public Engines.OpenAiTtsSettings OpenAi { get; set; } = new();
     /// <summary>Voice Changer (speech-to-speech) settings of this voice pack.</summary>
     public StsSettings Sts { get; set; } = new();
     /// <summary>Accent colour for this voice pack in lists and headers, e.g. #a371f7.</summary>
@@ -236,9 +247,17 @@ public sealed class VoicePack
     /// <summary>The voice a generation uses now: the speech-to-speech target, or the engine's voice.</summary>
     public (string Id, string Name) CurrentVoice(bool speechToSpeech) =>
         speechToSpeech ? (Sts.VoiceId, Sts.VoiceName.Length > 0 ? Sts.VoiceName : Sts.VoiceId)
-        : Engine == "voxcpm" ? (VoxCpm.Voice, VoxCpm.Voice)
-        : Engine == "omnivoice" ? (OmniVoice.Voice, OmniVoice.Voice)
-        : (Eleven.VoiceId, Eleven.VoiceName.Length > 0 ? Eleven.VoiceName : Eleven.VoiceId);
+        : Engine switch
+        {
+            "voxcpm" => (VoxCpm.Voice, VoxCpm.Voice),
+            "omnivoice" => (OmniVoice.Voice, OmniVoice.Voice),
+            "fish" => (Fish.VoiceId, Fish.VoiceName.Length > 0 ? Fish.VoiceName : Fish.VoiceId),
+            "inworld" => (Inworld.VoiceId, Inworld.VoiceName.Length > 0 ? Inworld.VoiceName : Inworld.VoiceId),
+            "cartesia" => (Cartesia.VoiceId, Cartesia.VoiceName.Length > 0 ? Cartesia.VoiceName : Cartesia.VoiceId),
+            "minimax" => (MiniMax.VoiceId, MiniMax.VoiceName.Length > 0 ? MiniMax.VoiceName : MiniMax.VoiceId),
+            "openai" => (OpenAi.Voice, OpenAi.Voice),
+            _ => (Eleven.VoiceId, Eleven.VoiceName.Length > 0 ? Eleven.VoiceName : Eleven.VoiceId),
+        };
 
     /// <summary>A warning when a standard voice is set for this engine and the current voice is another one; else null.</summary>
     public string? StandardVoiceWarning(bool speechToSpeech)
@@ -427,6 +446,8 @@ public sealed class TakeSettings
     public int? SentCharacters { get; set; }
     /// <summary>The leading [tags] were sent as context (previous_text), not as text (experiment).</summary>
     public bool TagsAsContext { get; set; }
+    /// <summary>Cartesia / MiniMax: the emotion the line's tags picked; OpenAI-compatible: the delivery instructions sent.</summary>
+    public string? Emotion { get; set; }
 }
 
 public sealed class Take

@@ -135,7 +135,9 @@ public sealed class LocalEngineClient : IDisposable
             ["num_step"] = s.NumStep,
             ["speed"] = s.Speed,
             ["guidance_scale"] = s.GuidanceScale,
+            ["denoise"] = s.Denoise,
         };
+        if (!string.IsNullOrWhiteSpace(s.Language)) dbrev["language"] = s.Language.Trim();
         bool openAi = OpenAiStyle.TryGetValue(_base, out var known) && known;
         try
         {

@@ -747,6 +747,11 @@ public sealed partial class Backend
             {
                 case "voxcpm": v.VoxCpm.Voice = a.VoiceId; break;
                 case "omnivoice": v.OmniVoice.Voice = a.VoiceId; break;
+                case "fish": v.Fish.VoiceId = a.VoiceId; v.Fish.VoiceName = v.Name; break;
+                case "inworld": v.Inworld.VoiceId = a.VoiceId; v.Inworld.VoiceName = v.Name; break;
+                case "cartesia": v.Cartesia.VoiceId = a.VoiceId; v.Cartesia.VoiceName = v.Name; break;
+                case "minimax": v.MiniMax.VoiceId = a.VoiceId; v.MiniMax.VoiceName = v.Name; break;
+                case "openai": v.OpenAi.Voice = a.VoiceId; break;
                 default:
                     v.Eleven.VoiceId = a.VoiceId; v.Eleven.VoiceName = v.Name;
                     v.Sts.VoiceId = a.VoiceId; v.Sts.VoiceName = v.Name;

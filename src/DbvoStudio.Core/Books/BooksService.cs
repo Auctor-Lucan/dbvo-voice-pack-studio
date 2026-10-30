@@ -308,6 +308,10 @@ public sealed class BooksService
     public static int Ceiling(BooksProject p) => p.Voice.Engine switch
     {
         "voxcpm" or "omnivoice" => Math.Max(p.PartMax, 3000),
+        // the cloud engines' request limits, kept on the safe side (Inworld takes 2,000 characters, OpenAI 4,096)
+        "inworld" => 2000,
+        "openai" => 4000,
+        "fish" or "cartesia" or "minimax" => 3000,
         _ => ModelCapabilities.MaxCharacters(p.Voice.Eleven.ModelId),
     };
 
@@ -401,6 +405,11 @@ public sealed class BooksService
         {
             case "voxcpm": v.VoxCpm.Voice = id; break;
             case "omnivoice": v.OmniVoice.Voice = id; break;
+            case "fish": v.Fish.VoiceId = id; v.Fish.VoiceName = v.Name; break;
+            case "inworld": v.Inworld.VoiceId = id; v.Inworld.VoiceName = v.Name; break;
+            case "cartesia": v.Cartesia.VoiceId = id; v.Cartesia.VoiceName = v.Name; break;
+            case "minimax": v.MiniMax.VoiceId = id; v.MiniMax.VoiceName = v.Name; break;
+            case "openai": v.OpenAi.Voice = id; break;
             default: v.Eleven.VoiceId = id; v.Eleven.VoiceName = v.Name; break;
         }
         return v;
@@ -427,7 +436,7 @@ public sealed class BooksService
     /// <summary>Neighbouring text sent with a request (ElevenLabs request stitching): the end of the previous part and the start of the next.</summary>
     public static (string? Previous, string? Next) ContextFor(BooksProject p, BookLine l)
     {
-        if (!p.SendContext || p.Voice.Engine is "voxcpm" or "omnivoice" || p.Voice.Eleven.ModelId.Contains("v3", StringComparison.OrdinalIgnoreCase)) return (null, null);
+        if (!p.SendContext || p.Voice.Engine is not "elevenlabs" || p.Voice.Eleven.ModelId.Contains("v3", StringComparison.OrdinalIgnoreCase)) return (null, null);
         var parts = LinesOf(p, l.Voice, l.Stem, l.Variant);
         int i = parts.FindIndex(x => x.LineId == l.LineId);
         string? prev = i > 0 ? Tail(parts[i - 1].Spoken, 1000) : null;

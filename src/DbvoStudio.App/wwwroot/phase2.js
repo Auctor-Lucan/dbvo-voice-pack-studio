@@ -13,7 +13,7 @@ export const LANGS = [['', 'Auto'], ['en', 'en · English'], ['de', 'de · Germa
   ['pt', 'pt · Portuguese'], ['pl', 'pl · Polish'], ['ru', 'ru · Russian'], ['ja', 'ja · Japanese'], ['zh', 'zh · Chinese'], ['ko', 'ko · Korean'],
   ['nl', 'nl · Dutch'], ['sv', 'sv · Swedish'], ['cs', 'cs · Czech'], ['tr', 'tr · Turkish'], ['uk', 'uk · Ukrainian'], ['hu', 'hu · Hungarian']];
 
-const ENGINES = [['elevenlabs', 'ElevenLabs'], ['voxcpm', 'VoxCPM (local)'], ['omnivoice', 'OmniVoice (local)']];
+import { ENGINES, ENGINE_NAMES as ENGINE_NAME, isCloud, cloudControls, tagNote, keyBadge, engineObj } from './engines.js';
 
 const pct = (p) => { const n = p.total - p.omitted - (p.excluded || 0); return n ? Math.round((100 * p.generated) / n) : 0; };
 
@@ -419,7 +419,7 @@ export async function patchView(id) {
       clear(list).append(line.takes.slice().reverse().map((t) => h('div.take' + (t.id === line.selectedTakeId ? '.sel' : ''),
         h('button.icon-btn.big', { title: 'Play this take', onclick: () => play(line, t) }, '▶'),
         h('div.grow', { style: { minWidth: 0 } }, h('div', '#' + t.slot + (t.id === line.selectedTakeId ? ' · used for export and .fuz' : '')),
-          h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.settings.engine || ''} · ${t.settings.modelId || ''} · ${new Date(t.createdUtc).toLocaleString()}${t.settings.billedCharacters != null ? ` · billed ${t.settings.billedCharacters} credits` : ''}${t.settings.tagsAsContext ? ' · tags as context' : ''}`),
+          h('div.meta', `${t.durationSeconds.toFixed(2)} s · ${t.settings.engine || ''} · ${t.settings.modelId || ''} · ${new Date(t.createdUtc).toLocaleString()}${t.settings.billedCharacters != null ? ` · billed ${t.settings.billedCharacters} ${(t.settings.engine || 'elevenlabs') === 'elevenlabs' ? 'credits' : 'characters'}` : ''}${t.settings.tagsAsContext ? ' · tags as context' : ''}${t.settings.emotion ? ` · ${t.settings.engine === 'openai' ? 'instructions' : 'emotion'}: ${t.settings.emotion}` : ''}`),
           t.spokenText !== line.spoken ? h('div.meta.ellipsis', { title: t.spokenText }, 'Text then: ' + t.spokenText) : null),
         h('button.act-btn' + (t.kept ? '.on' : ''), { title: t.kept ? 'Kept as a variant - click to un-keep' : 'Keep as a variant (DBVO 2.0 exports every kept take)', onclick: async () => { await keep(line, t); render(); } }, icon('star', { filled: t.kept })),
         t.id !== line.selectedTakeId ? h('button.btn.sm', { title: 'Use this take for export and .fuz', onclick: async () => { await upd(line, 'selectTake', t.id); render(); } }, 'Use') : null,
@@ -597,7 +597,7 @@ export async function patchView(id) {
   function renderToolbar() {
     const locked = voice.settingsLocked;
     const eng = engine();
-    const engineSel = vc ? null : grp('Engine', h('select', { disabled: locked, onchange: (ev) => { setIn(voice, 'engine', ev.target.value); loadEngine(); } },
+    const engineSel = vc ? null : grp('Engine', h('select', { disabled: locked, onchange: (ev) => { setIn(voice, 'engine', ev.target.value); loadEngine(); renderTagbar(); } },
       ENGINES.map(([v, t]) => h('option', { value: v, selected: v === (voice.engine || 'elevenlabs') }, t))));
     clear(tb);
     if (eng === 'sts') {
@@ -632,6 +632,10 @@ export async function patchView(id) {
         tb.append(numIn(o, 'numStep', 'Steps', { min: 1 }), numIn(o, 'speed', 'Speed', { step: 0.05 }), numIn(o, 'guidanceScale', 'Guidance', { step: 0.1 }),
           numIn(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
       }
+    } else if (isCloud(eng)) {
+      const o = engineObj(voice, eng);
+      tb.append(engineSel, ...cloudControls(eng, o, { grp, numIn, setIn, locked }), grp('API key', keyBadge(eng, app.state.settings)),
+        grp('Output', h('button.btn.sm', { title: 'Noise-reduced pauses for new takes', onclick: (ev) => popover(ev.currentTarget, () => [pauseNoiseRow()]) }, 'PCM 44.1k ▾')));
     } else {
       const e = voice.eleven;
       const tag = isTagModel(e.modelId);
@@ -726,8 +730,16 @@ export async function patchView(id) {
         null);
       return;
     }
-    if (engine() !== 'elevenlabs') {
-      tagbar.append(h('span.lbl', 'Tags'), h('span.dim', 'Audio tags are an ElevenLabs v3/v4 feature; local engines ignore them (they are removed before sending).'), null);
+    const eng = engine();
+    const post = () => postButton({ ticked: () => grid.selected.size, shown: () => grid.rows.filter((l) => !l.omitted && l.takes && l.takes.length).length,
+      applyFx: (fx) => applyFx([...grid.selected], fx),
+      soften: (mode, which) => applySoften(which === 'ticked' ? [...grid.selected] : grid.rows.filter((l) => !l.omitted && l.takes && l.takes.length).map((l) => l.lineId), mode),
+      noise: (on, which) => applyNoise(which === 'ticked' ? [...grid.selected] : grid.rows.filter((l) => !l.omitted && l.takes && l.takes.length).map((l) => l.lineId), on) });
+    // What this engine does with [tags], next to the tag bar (every engine but ElevenLabs v3/v4 handles them its own way)
+    const tagModel = isTagModel((voice.eleven || {}).modelId);
+    const note = eng === 'elevenlabs' && tagModel ? null : h('span.faint.tag-note', { title: tagNote(eng, { tagModel, model: (voice.eleven || {}).modelId }) }, 'ⓘ ' + tagNote(eng, { tagModel, model: (voice.eleven || {}).modelId }));
+    if (eng === 'voxcpm') {
+      tagbar.append(h('span.lbl', 'Tags'), helpButton('engine-tags', { label: 'tags per engine' }), note, h('div.spacer'), post());
       return;
     }
     const chip = (t) => {
@@ -747,7 +759,7 @@ export async function patchView(id) {
       custom.value = '';
     });
     tagbar.append(
-      h('span.lbl', 'Tags'), helpButton('spoken-text-and-tags'),
+      h('span.lbl', 'Tags'), helpButton(eng === 'elevenlabs' ? 'spoken-text-and-tags' : 'engine-tags'),
       voice.tags.map(chip),
       custom,
       h('button.btn.sm', { title: 'Let the AI add ElevenLabs audio tags to the ticked lines (you review them)', onclick: () => { const ids = [...grid.selected]; if (!ids.length) { toast('Tick the box of one or more rows first.', true); return; } autotag(ids); } }, 'AI Auto Tag'),
@@ -755,11 +767,9 @@ export async function patchView(id) {
       h('button.btn.sm.ghost', { title: 'Find text in the spoken text of every line shown and replace it, with [tags] if you like', onclick: () => findReplaceDialog({
         pool: grid.rows.filter((l) => !l.omitted), idOf: (l) => l.lineId, textOf: (l) => l.spoken, tags: voice.tags || [],
         apply: async (items) => { try { patch = await rpc('line2.replaceTexts', { id, items }); reindex(); grid.setRows(visible()); renderCounts(); renderActions(); renderInspector(); } catch (e) { fail(e); } } }) }, 'Find and replace in all shown…'),
+      note,
       h('div.spacer'),
-      postButton({ ticked: () => grid.selected.size, shown: () => grid.rows.filter((l) => !l.omitted && l.takes && l.takes.length).length,
-        applyFx: (fx) => applyFx([...grid.selected], fx),
-        soften: (mode, which) => applySoften(which === 'ticked' ? [...grid.selected] : grid.rows.filter((l) => !l.omitted && l.takes && l.takes.length).map((l) => l.lineId), mode),
-        noise: (on, which) => applyNoise(which === 'ticked' ? [...grid.selected] : grid.rows.filter((l) => !l.omitted && l.takes && l.takes.length).map((l) => l.lineId), on) }));
+      post());
   }
 
   async function autotag(ids) {
@@ -890,7 +900,7 @@ export async function patchView(id) {
       fxRow(l),
       h('div', h('div.field-label', vc ? 'Text for the LIP' : 'Spoken text (tags allowed)'), spoken,
         h('div.row', { style: { marginTop: '6px', gap: '6px' } },
-          vc || engine() !== 'elevenlabs' ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.omitted, onclick: () => autotag([l.lineId]) }, 'AI tag'),
+          vc || engine() === 'voxcpm' ? null : h('button.btn.sm', { title: 'Let the AI suggest audio tags for this line', disabled: l.omitted, onclick: () => autotag([l.lineId]) }, 'AI tag'),
           l.spokenEdited ? h('button.btn.sm.ghost', { title: 'Put the in-game line back as the spoken text', onclick: () => upd(l, 'resetSpoken') }, '↺ Restore') : null,
           h('div.spacer'),
           h('button.btn.sm', { title: l.omitted ? 'Omitted: a reference topic file already has this line' : app.job ? 'A job is running' : 'Record this line with your microphone, then keep it as it is or convert it into the voice pack voice', disabled: l.omitted || !!app.job, onclick: () => record(l) }, '🎙 Record'),
@@ -1236,9 +1246,11 @@ export async function patchView(id) {
           ['Speaker boost', est.speakerBoost ? 'ON' : 'off'], ['Remove background noise', est.removeBackgroundNoise ? 'ON' : 'off'], ['Seed', est.seed ?? 'random'],
           ['Output format', est.outputFormat], ['Concurrent requests', est.concurrency], ['Loudness normalization', est.loudnorm ? 'ON' : 'off'], ['Gain', est.gainDb + ' dB'],
           ['Tail trim / fade', `${est.trimTailMs} ms / ${est.fadeOutMs} ms`], ['LIP', 'new, from the text column'], ['Naming', est.naming]];
-      } else if (est.kind === 'voxcpm' || est.kind === 'omnivoice') {
-        rows = [['Lines', est.count], ['Characters', est.characters.toLocaleString()], ['Engine', est.kind], ['Reference voice', est.voiceId || '— none —'],
-          ...Object.entries(est.engineSettings).filter(([k]) => k !== 'voice').map(([k, v]) => [k, String(v)]),
+      } else if (est.kind !== 'elevenlabs') {
+        rows = [['Lines', est.count], ['Characters', est.characters.toLocaleString()],
+          ...(est.cloud ? [['Characters sent (tags as this engine needs them)', est.sentCharacters.toLocaleString()], ['Billing', `By ${est.engineName}'s own pricing, not ElevenLabs credits`]] : []),
+          ['Engine', est.engineName || est.kind], [est.cloud ? 'Voice' : 'Reference voice', est.voiceId || '— none —'],
+          ...Object.entries(est.engineSettings).filter(([k]) => !['voice', 'voiceId', 'voiceName', 'extraJson'].includes(k)).map(([k, v]) => [k, String(v)]),
           ['Loudness normalization', est.loudnorm ? 'ON' : 'off'], ['Tail trim / fade', `${est.trimTailMs} ms / ${est.fadeOutMs} ms`], ['Naming', est.naming], ['Pronunciation entries (global + voice)', est.pronunciations]];
       } else {
         const s = est.settings;
@@ -1260,8 +1272,9 @@ export async function patchView(id) {
         h('div.kv', rows.flatMap(([k, v]) => [h('div', k), h('div', String(v))])),
         mode === 'all' ? h('div.banner.warn', { style: { margin: 0 } }, 'Every line gets a new take, which becomes the one used. Earlier takes stay in the take list.') : null,
         missingVoice ? h('div.banner.bad', { style: { margin: 0 } }, 'Pick a voice in the toolbar first.') : null,
+        est.cloud && !est.hasKey ? h('div.banner.bad', { style: { margin: 0 } }, `${est.engineName} needs your API key: Global Settings → General & tools → Voice engines.`) : null,
         est.standardWarning ? h('div.banner.warn', { style: { margin: 0 } }, est.standardWarning) : null,
-      ], [{ label: 'Cancel', value: false }, { label: `${vc ? 'Convert' : 'Generate'} ${est.count} line(s)`, primary: true, value: !missingVoice }], { help: 'generating' });
+      ], [{ label: 'Cancel', value: false }, { label: `${vc ? 'Convert' : 'Generate'} ${est.count} line(s)`, primary: true, value: !missingVoice && !(est.cloud && !est.hasKey) }], { help: 'generating' });
       if (!ok) { markInFlight(null); return; }
       markInFlight(mode === 'selected' ? lineIds : patch.lines.filter(mode === 'marked' ? (l) => l.marked && canGen(l) : mode === 'all' ? (l) => !l.omitted && !l.excluded && canGen(l) : mode === 'edited' ? editedLine : pendingLine).map((l) => l.lineId));
       await rpc('patch.generate', { id, mode, lineIds }).catch((e) => { markInFlight(null); throw e; });
@@ -1333,7 +1346,8 @@ export async function patchView(id) {
       const c = await rpc('patch.checks', { id });
       const t = c.tools;
       const eng = engine();
-      const missing = [(eng === 'elevenlabs' || eng === 'sts') && !t.apiKey && ['ElevenLabs API key', 'elevenlabs'], !t.ffmpeg && ['ffmpeg.exe', null], !t.faceFx && ['FaceFXWrapper.exe', 'facefx'], !t.fonix && ['FonixData.cdf', 'fonix'], !t.xwma && ['xWMAEncode.exe (for .fuz)', 'xwma']].filter(Boolean);
+      const cloudKey = isCloud(eng) && !(app.state.settings.engineKeys || {})[eng] && !(eng === 'openai' && /^https?:\/\/(localhost|127\.|192\.168\.|10\.)/i.test(((voice.openAi || {}).baseUrl) || ''));
+      const missing = [(eng === 'elevenlabs' || eng === 'sts') && !t.apiKey && ['ElevenLabs API key', 'elevenlabs'], cloudKey && [`${ENGINE_NAME[eng]} API key`, 'engine-' + eng], !t.ffmpeg && ['ffmpeg.exe', null], !t.faceFx && ['FaceFXWrapper.exe', 'facefx'], !t.fonix && ['FonixData.cdf', 'fonix'], !t.xwma && ['xWMAEncode.exe (for .fuz)', 'xwma']].filter(Boolean);
       if (missing.length) banners.append(h('div.banner.bad', h('span.row', { style: { gap: '6px', flexWrap: 'wrap' } }, 'Missing:', ...missing.map(([n, k], i) => h('span.row', { style: { gap: '2px' } }, n + (i < missing.length - 1 ? ',' : ''), k ? needInfo(k) : null))), h('div.spacer'), h('button.btn.sm', { title: 'Set the tool paths', onclick: () => go('settings', { tab: 'general' }) }, 'Open Global Settings')));
       const unset = [!patch.wavLipFolder && 'WAV + LIP folder', !patch.finalRoot && 'final folder', !patch.fixFolder && 'DBVO Fix folder', vc && !patch.sourceFolders.length && 'source WAV folder'].filter(Boolean);
       if (unset.length) banners.append(h('div.banner.warn', h('span', 'Not set for this patch: ' + unset.join(', ') + '.'), h('div.spacer'), h('button.btn.sm', { title: 'Choose where files go for this patch', onclick: openOptions }, 'Set folders')));
@@ -1350,7 +1364,7 @@ export async function patchView(id) {
         const noSrc = patch.lines.filter((l) => !l.omitted && !l.hasSource).length;
         banners.append(h('div.banner.info', h('div.col', { style: { gap: '4px' } },
           h('span', h('b', 'Voice Changer is on. '), 'Lines are converted from another voice pack\'s recordings of this mod (the source folders in Folders & options), so delivery and timing come from the source. Only worth it when the mod is already DBVO-patched with another voice.'),
-          noSrc ? h('span', h('b', `${noSrc} line(s) have no source file`), ' — usually lines added by a mod update after the source pack was made, or lines it never voiced. Generate them with text-to-speech (the voice pack\'s ', h('b', voice.engine === 'elevenlabs' ? 'ElevenLabs' : voice.engine), ' settings; turn the Voice Changer off to adjust those), or leave them unvoiced.') : h('span.dim', 'Every line has a source file.')),
+          noSrc ? h('span', h('b', `${noSrc} line(s) have no source file`), ' — usually lines added by a mod update after the source pack was made, or lines it never voiced. Generate them with text-to-speech (the voice pack\'s ', h('b', ENGINE_NAME[voice.engine || 'elevenlabs'] || voice.engine), ' settings; turn the Voice Changer off to adjust those), or leave them unvoiced.') : h('span.dim', 'Every line has a source file.')),
           h('div.spacer'),
           noSrc ? switchEl(!!patch.ttsForMissing, async (on) => { try { patch = await rpc('patch.saveMeta', { id, ttsForMissing: on }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Generate lines without a source with text-to-speech', { title: 'Off: lines without a source stay unvoiced. On: Generate options ▾ → Missing also voices them with text-to-speech.' }) : null));
       }
@@ -1555,6 +1569,8 @@ export async function patchView(id) {
     try {
       if (eng === 'voxcpm' || eng === 'omnivoice') {
         localVoices = await rpc('engine.voices', { engine: eng }).catch(() => []);
+      } else if (isCloud(eng)) {
+        // voice IDs are typed in; nothing to load
       } else if (eng === 'sts') {
         [voices, models] = await Promise.all([rpc('eleven.voices', { refresh }), rpc('eleven.stsModels', {})]);
       } else {

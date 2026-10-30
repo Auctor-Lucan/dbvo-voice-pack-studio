@@ -942,6 +942,56 @@ const REQUIREMENTS = {
       ['Characters you generate use your plan\'s credits; the credits button in Phase 2 shows what is left.'],
     ],
   },
+  'engine-fish': {
+    title: 'Fish Audio API key: generate with your Fish Audio voices',
+    why: 'Each user uses their own account and credits. Fish Audio S2 performs free-form [tags] like ElevenLabs v3/v4.',
+    steps: () => [
+      ['Sign in at ', extLink('https://fish.audio/app/api-keys/', 'fish.audio → API Keys'), ' and create a key.'],
+      ['Make your voice model on fish.audio from recordings you have the right to use, and copy its ID (the model page\'s address ends in it).'],
+      ['Global Settings → Voice engines → Fish Audio: paste the key and Save key.'],
+      ['Pick Fish Audio as the voice pack\'s engine (Phase 2 toolbar) and paste the model ID into Voice ID.'],
+    ],
+  },
+  'engine-inworld': {
+    title: 'Inworld API key: generate with Inworld TTS-2',
+    why: 'Each user uses their own account. inworld-tts-2 follows free-form [tags] as instructions and performs sounds such as [laugh] [sigh].',
+    steps: () => [
+      ['Sign in at ', extLink('https://platform.inworld.ai/', 'platform.inworld.ai'), ' → API Keys, create a key and copy the ', h('b', 'Base64'), ' credential (not the key ID).'],
+      ['Pick a voice in the TTS playground, or clone one from your own recordings, and copy its voice ID.'],
+      ['Global Settings → Voice engines → Inworld: paste the credential and Save key.'],
+      ['Pick Inworld as the voice pack\'s engine (Phase 2 toolbar) and type the voice ID.'],
+    ],
+  },
+  'engine-cartesia': {
+    title: 'Cartesia API key: generate with Cartesia Sonic',
+    why: 'Each user uses their own account. Cartesia takes an emotion per line instead of [tags]: a leading tag picks it.',
+    steps: () => [
+      ['Sign in at ', extLink('https://play.cartesia.ai/keys', 'play.cartesia.ai → API Keys'), ' and create a key.'],
+      ['Pick or clone a voice under Voices and copy its ID (the long ID, not the name).'],
+      ['Global Settings → Voice engines → Cartesia: paste the key and Save key.'],
+      ['Pick Cartesia as the voice pack\'s engine (Phase 2 toolbar) and paste the voice ID.'],
+    ],
+  },
+  'engine-minimax': {
+    title: 'MiniMax API key: generate with MiniMax Speech',
+    why: 'Each user uses their own account. MiniMax takes one of 9 emotions per line instead of [tags]: a leading tag picks it.',
+    steps: () => [
+      ['Sign in at ', extLink('https://platform.minimax.io/', 'platform.minimax.io'), ' → API Keys and create a key (the international site; keys from the China site don\'t work here).'],
+      ['Use a system voice ID, or clone a voice there from your own recordings and copy its ID.'],
+      ['Global Settings → Voice engines → MiniMax: paste the key and Save key.'],
+      ['Pick MiniMax as the voice pack\'s engine (Phase 2 toolbar) and type the voice ID.'],
+    ],
+  },
+  'engine-openai': {
+    title: 'OpenAI-compatible: OpenAI, or a free speech server on your PC',
+    why: 'OpenAI needs a key. A local OpenAI-compatible server (Chatterbox TTS API, Kokoro-FastAPI, AllTalk, openedai-speech) needs none.',
+    steps: () => [
+      ['OpenAI: create a key at ', extLink('https://platform.openai.com/api-keys', 'platform.openai.com → API keys'), ' and save it under Global Settings → Voice engines → OpenAI-compatible.'],
+      ['A local server: start it, then put its address in the Phase 2 toolbar\'s Server field, e.g. http://127.0.0.1:5123. No key needed.'],
+      ['Voice: OpenAI\'s built-in voices (marin, cedar, alloy…), or the voice name your server lists. Extra fields pass settings only your server knows, e.g. {"exaggeration": 0.6}.'],
+      ['[tags] are sent as delivery instructions. gpt-4o-mini-tts follows them; most local servers ignore them.'],
+    ],
+  },
   python: {
     title: 'Python with faster-whisper (optional)',
     why: 'Only for the "My faster-whisper (Python)" engine. The built-in Whisper engine needs nothing.',

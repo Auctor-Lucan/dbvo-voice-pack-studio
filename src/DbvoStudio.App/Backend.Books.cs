@@ -585,6 +585,7 @@ public sealed partial class Backend
         if (v == null || speed is not { } sp) return v;
         v.Eleven.Speed = Math.Clamp(sp, 0.7, 1.2);
         v.OmniVoice.Speed = Math.Clamp(sp, 0.5, 2);
+        v.Fish.Speed = sp; v.Inworld.SpeakingRate = sp; v.Cartesia.Speed = Math.Clamp(sp, 0.6, 1.5); v.MiniMax.Speed = Math.Clamp(sp, 0.5, 2); v.OpenAi.Speed = sp;
         return v;
     }
 

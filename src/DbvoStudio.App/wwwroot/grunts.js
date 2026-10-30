@@ -1,6 +1,7 @@
 // Other Tools → Player Grunts Tool: player voice packs for PC Head Tracking (with or without Multi Voice Packs) and
 // Smart Player Voice System. Events are shown as blocks by category; the panel on the right holds the selected event's
 // lines. Event definitions are data (built in, read from the installed mods, or the user's own custom events).
+import { ENGINE_NAMES, tagNote as engineTagNote } from './engines.js';
 import { rpc, h, clear, toast, fail, modal, confirmBox, store, debounce, switchEl, segmented, popupMenu, droppedPaths, icon, helpButton, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips, closeDialogOf } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { setPaletteExtra } from './nav.js';
@@ -355,10 +356,10 @@ export async function gruntProjectView(id) {
     const custom = h('input', { type: 'text', placeholder: '[any tag]', title: 'Type a tag and press Enter to insert it at the cursor', style: { width: '120px' } });
     custom.addEventListener('keydown', (ev) => { if (ev.key !== 'Enter' || !custom.value.trim()) return; ev.preventDefault(); let t = custom.value.trim(); if (!t.startsWith('[')) t = `[${t.replace(/[[\]]/g, '')}]`; insertTagAtCaret(spoken, t); custom.value = ''; saveText(); });
     const tagNote = V.engine === 'voxcpm' ? h('span.faint', 'VoxCPM reads [tags] aloud, so they are left out unless you turn this on; punctuation, … and CAPS still shape the delivery.')
-      : V.engine === 'omnivoice' ? h('span.faint', 'OmniVoice reads inline tags such as [laughter], [sigh] and [gasp].')
-      : V.tagModel ? h('span.faint', 'v3 / v4 models perform [tags]: emotions, breaths, grunts, laughs, shouts…') : h('span', { style: { color: 'var(--warn)' } }, `${V.model} ignores [tags]; pick a v3 or v4 model in the voice pack to use them.`);
+      : V.engine === 'elevenlabs' && !V.tagModel ? h('span', { style: { color: 'var(--warn)' } }, engineTagNote('elevenlabs', { tagModel: false, model: V.model }))
+      : h('span.faint', engineTagNote(V.engine, { tagModel: V.tagModel, model: V.model }));
     const tagbar = h('div.row.wrap.gr-tagbar', h('span.field-label', { style: { margin: 0 } }, 'Tags'), V.tags.map(chip), custom,
-      V.engine === 'elevenlabs' ? null : switchEl(sendTags, (v) => { sendTags = v; }, 'Send [tags]', { title: 'Leave [tags] in the text sent to the local engine' }),
+      V.engine === 'voxcpm' ? switchEl(sendTags, (v) => { sendTags = v; }, 'Send [tags]', { title: 'Leave [tags] in the text sent to VoxCPM (it reads them aloud)' }) : null,
       h('div.spacer'), h('button.btn.sm.ghost', { title: 'Copy the subtitle into the spoken text', onclick: () => { spoken.value = sub.value; saveText(); spoken.focus(); } }, 'Subtitle → spoken'));
     // Per-try voice settings (the voice pack stays as it is).
     const settings = h('div.row.wrap', { style: { gap: '14px' } });
@@ -370,7 +371,7 @@ export async function gruntProjectView(id) {
       sp.addEventListener('change', () => { speed = Number(sp.value) || 1; });
       settings.append(h('div.tgroup', h('label', 'Stability'), stab), h('div.tgroup', h('label', 'Speed'), sp),
         V.seed != null ? h('div.tgroup', h('label', 'Seed'), switchEl(false, (v) => { keepSeed = v; }, `Keep ${V.seed}`, { title: 'Off: a new seed every try (different takes). On: the voice pack\'s seed (the same take for the same text).' })) : null);
-    } else if (V.engine === 'omnivoice') {
+    } else if (V.engine !== 'voxcpm') {
       const sp = h('input', { type: 'number', min: 0.5, max: 2, step: 0.05, value: speed, style: { width: '70px' } });
       sp.addEventListener('change', () => { speed = Number(sp.value) || 1; });
       settings.append(h('div.tgroup', h('label', 'Speed'), sp));
@@ -429,7 +430,7 @@ export async function gruntProjectView(id) {
       try { d = await rpc('grunts.discard', { id, ...key }); byId = evById(); closeDialogOf(discard); } catch (err) { fail(err); }
     });
     paintTries();
-    const voiceLine = V.ready ? [V.voicePack, V.engine === 'elevenlabs' ? 'ElevenLabs' : V.engine === 'voxcpm' ? 'VoxCPM' : 'OmniVoice', V.voiceName !== V.voicePack ? V.voiceName : null, V.model].filter(Boolean).join(' · ') : (V.voicePack ? `${V.voicePack} has no ${V.engine} voice yet.` : 'Pick a DBVO voice pack in Setup & export first.');
+    const voiceLine = V.ready ? [V.voicePack, ENGINE_NAMES[V.engine] || V.engine, V.voiceName !== V.voicePack ? V.voiceName : null, V.model].filter(Boolean).join(' · ') : (V.voicePack ? `${V.voicePack} has no ${ENGINE_NAMES[V.engine] || V.engine} voice yet.` : 'Pick a DBVO voice pack in Setup & export first.');
     await modal(`Text-to-speech · ${e.label}${dr.slotLabel ? ' · ' + dr.slotLabel : ''}`, [
       h('div.row', { style: { gap: '10px' } }, h('span.dim', 'Voice: ', h('b', voiceLine)), dr.words ? h('span.faint', `Words: “${dr.words}”`) : null),
       h('div.col', h('div.field-label', 'Subtitle'), sub),

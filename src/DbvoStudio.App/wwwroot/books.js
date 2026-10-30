@@ -1,6 +1,7 @@
 // Other Tools → Voiced Books Tool: narrate Skyrim's books, letters and journals (or a mod's) for Voiced Books of Skyrim.
 // Books are split into parts the engine can read, each part gets takes, and export joins them, adds the IVBOS
 // reverb and loudness chain, encodes xWMA and packs archives, the VBoS .ini and a FOMOD.
+import { ENGINE_NAMES, isCloud, engineObj, cloudControls, keyBadge, VOICE_HINT } from './engines.js';
 import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { insertTagAtCaret, findReplaceDialog } from './tagtools.js';
@@ -17,7 +18,7 @@ const CERT_TIP = {
 const SRC = { 'by-line': 'a "By …" line', signature: 'the signature', uesp: 'UESP\'s book page', title: 'the title', set: 'the built-in set', user: 'you' };
 const DOT = { ready: 'Generated', stale: 'Stale', partial: 'Partial', missing: 'Pending', none: 'Omitted' };
 const DOT_TIP = { ready: 'Ready: every part has a current take', stale: 'Edited since take: a part\'s text changed after its take', partial: 'Some parts have takes', missing: 'No takes yet', none: 'Not read by this voice' };
-const ENGINE_NAMES = { elevenlabs: 'ElevenLabs', voxcpm: 'VoxCPM (local)', omnivoice: 'OmniVoice (local)' };
+
 
 // ------------------------------------------------------------------ list
 
@@ -262,6 +263,7 @@ export async function bookProjectView(id) {
     try {
       await Promise.all([...used].map(async (eng) => {
         if (!refresh && voiceLists[eng]) return;
+        if (isCloud(eng)) { voiceLists[eng] = []; return; } // voice IDs are typed in
         try {
           voiceLists[eng] = eng === 'elevenlabs'
             ? (await rpc('eleven.voices', { refresh })).map((v) => ({ id: v.voiceId, name: v.name, sub: v.category }))
@@ -279,6 +281,11 @@ export async function bookProjectView(id) {
     const list = voiceLists[eng];
     const engSel = h('select', { title: 'Engine for this voice' }, Object.entries(ENGINE_NAMES).map(([k, t]) => h('option', { value: k, selected: k === eng }, t)));
     engSel.addEventListener('change', () => setVoice(row, kind, { engine: engSel.value, voiceId: '' }).then(loadVoices));
+    if (isCloud(eng)) {
+      const inp = h('input', { type: 'text', value: row.voiceId || '', placeholder: eng === 'openai' ? 'voice, e.g. marin' : 'voice ID', title: VOICE_HINT[eng] || '', style: { width: '190px' } });
+      inp.addEventListener('change', () => setVoice(row, kind, { engine: eng, voiceId: inp.value.trim(), voiceName: inp.value.trim() }));
+      return h('span.row.voice-cell', { style: { gap: '4px' } }, engSel, inp);
+    }
     const vSel = h('select', { title: 'The voice that reads these books', style: { maxWidth: '220px' } },
       h('option', { value: '' }, list == null ? 'Loading voices…' : list.length ? '— pick a voice —' : eng === 'elevenlabs' ? 'No voices (API key?)' : 'Server offline?'),
       (list || []).map((v) => h('option', { value: v.id, selected: v.id === row.voiceId }, v.name)));
@@ -341,6 +348,9 @@ export async function bookProjectView(id) {
     } else if (eng === 'voxcpm') {
       const o = v.voxCpm;
       kids.push(num(o, 'cfgValue', 'CFG', { step: 0.1 }), num(o, 'inferenceTimesteps', 'Timesteps', { min: 1 }), num(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
+    } else if (isCloud(eng)) {
+      const o = engineObj(v, eng);
+      if (o) kids.push(...cloudControls(eng, o, { grp, numIn: num, setIn: set, locked: false, noVoice: true }), keyBadge(eng, app.state.settings));
     } else {
       const o = v.omniVoice;
       kids.push(num(o, 'numStep', 'Steps', { min: 1 }), num(o, 'speed', 'Speed', { step: 0.05 }), num(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
@@ -780,7 +790,7 @@ export async function bookProjectView(id) {
         custom.addEventListener('input', () => { pause = custom.value === '' ? null : Number(custom.value); });
         const ok = await modal(`This book · ${d.book.title || stem}`, [
           h('div.col', h('div.field-label', 'Voice'), vsel, h('div.faint', 'One voice reads this book instead of the usual readers (a narrator or an NPC voice type from the Voices tab). Its parts get new takes in that voice.')),
-          h('div.col', h('div.field-label', 'Speed'), h('div.row', sp, h('span.faint', 'ElevenLabs 0.7–1.2, OmniVoice 0.5–2 · empty: the voice\'s own · used for new takes'))),
+          h('div.col', h('div.field-label', 'Speed'), h('div.row', sp, h('span.faint', 'ElevenLabs 0.7–1.2, Cartesia 0.6–1.5, others 0.5–2 · empty: the voice\'s own · used for new takes'))),
           h('div.col', h('div.field-label', 'Pause between paragraphs'), h('div.row', seg, custom, h('span.faint', 'ms'))),
         ], [{ label: 'Cancel', value: false }, { label: 'Save', primary: true, value: true }], { help: 'books-and-the-editor' });
         if (!ok) return;

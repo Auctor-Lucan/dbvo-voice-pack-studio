@@ -392,6 +392,35 @@ public sealed partial class Backend
             var o = v.OmniVoice;
             R("Reference voice", o.Voice ?? "— none —"); R("Steps", o.NumStep.ToString()); R("Speed", F(o.Speed)); R("Guidance", F(o.GuidanceScale)); R("Concurrent", o.Concurrency.ToString());
         }
+        else if (v.Engine == "fish")
+        {
+            var o = v.Fish;
+            R("Voice", o.VoiceName.Length > 0 ? o.VoiceName : o.VoiceId.Length > 0 ? o.VoiceId : "— none —"); R("Model", o.Model); R("Speed", F(o.Speed));
+            R("Temperature", o.Temperature > 0 ? F(o.Temperature) : "default"); R("Concurrent", o.Concurrency.ToString());
+        }
+        else if (v.Engine == "inworld")
+        {
+            var o = v.Inworld;
+            R("Voice", o.VoiceName.Length > 0 ? o.VoiceName : o.VoiceId.Length > 0 ? o.VoiceId : "— none —"); R("Model", o.ModelId); R("Speaking rate", F(o.SpeakingRate)); R("Concurrent", o.Concurrency.ToString());
+        }
+        else if (v.Engine == "cartesia")
+        {
+            var o = v.Cartesia;
+            R("Voice", o.VoiceName.Length > 0 ? o.VoiceName : o.VoiceId.Length > 0 ? o.VoiceId : "— none —"); R("Model", o.ModelId); R("Language", o.Language);
+            R("Speed", F(o.Speed)); R("Volume", F(o.Volume)); R("Emotion", o.Emotion.Length > 0 ? o.Emotion : "from the tags"); R("Concurrent", o.Concurrency.ToString());
+        }
+        else if (v.Engine == "minimax")
+        {
+            var o = v.MiniMax;
+            R("Voice", o.VoiceName.Length > 0 ? o.VoiceName : o.VoiceId.Length > 0 ? o.VoiceId : "— none —"); R("Model", o.Model); R("Speed", F(o.Speed));
+            R("Volume", F(o.Volume)); R("Pitch", o.Pitch.ToString()); R("Emotion", o.Emotion.Length > 0 ? o.Emotion : "from the tags"); R("Concurrent", o.Concurrency.ToString());
+        }
+        else if (v.Engine == "openai")
+        {
+            var o = v.OpenAi;
+            R("Server", o.BaseUrl); R("Model", o.Model); R("Voice", o.Voice); R("Speed", F(o.Speed));
+            R("Instructions", o.Instructions.Length > 0 ? o.Instructions : "— (only the tags' words)"); R("Concurrent", o.Concurrency.ToString());
+        }
         else
         {
             var e = v.Eleven;

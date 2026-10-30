@@ -536,7 +536,19 @@ public sealed partial class Phase2Service
         var pronunciations = MergePronunciations(_settings.Pronunciations, voice.Pronunciations);
         ElevenLabsClient? client = null;
         LocalEngineClient? local = null;
+        CloudTtsClient? cloud = null;
         int concurrency;
+        if (TtsEngines.IsCloud(engine))
+        {
+            _settings.EngineKeys.TryGetValue(engine, out var ek);
+            cloud = new CloudTtsClient(engine, ek);
+            var (vid, _) = voice.CurrentVoice(false);
+            if (string.IsNullOrWhiteSpace(vid)) throw new InvalidOperationException($"Enter a {TtsEngines.Name(engine)} voice for this voice pack (Phase 2 toolbar).");
+            if (string.IsNullOrWhiteSpace(ek) && !(engine == "openai" && TtsEngines.IsLocalAddress(voice.OpenAi.BaseUrl)))
+                throw new InvalidOperationException($"{TtsEngines.Name(engine)} needs your API key, and none is saved. Add it in Global Settings → General & tools → Voice engines.");
+            concurrency = engine switch { "fish" => voice.Fish.Concurrency, "inworld" => voice.Inworld.Concurrency, "cartesia" => voice.Cartesia.Concurrency, "minimax" => voice.MiniMax.Concurrency, _ => voice.OpenAi.Concurrency };
+        }
+        else
         switch (engine)
         {
             case "sts":
@@ -564,6 +576,7 @@ public sealed partial class Phase2Service
         }
         using var _c = client;
         using var _l = local;
+        using var _cl = cloud;
         var limiter = new AdaptiveLimiter(Math.Max(1, concurrency));
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
         Directory.CreateDirectory(workRoot);
@@ -597,9 +610,26 @@ public sealed partial class Phase2Service
                     var audio = await limiter.RunAsync(x => local!.VoxCpmAsync(text, voice.VoxCpm, x), ex => ex is HttpRequestException, ct: c);
                     return new EngineAudio(audio, "wav", new TakeSettings { Engine = "voxcpm", VoiceId = voice.VoxCpm.Voice, ModelId = "voxcpm", Stability = voice.VoxCpm.CfgValue, OutputFormat = "wav" });
                 }
+                case "fish": case "inworld": case "cartesia": case "minimax": case "openai":
+                {
+                    var (et, emotion, instr) = TtsEngines.EngineText(engine, ApplyPronunciations(spoken, pronunciations, "local"),
+                        engine == "minimax" ? voice.MiniMax.Model : "", engine == "cartesia" ? voice.Cartesia.Emotion : engine == "minimax" ? voice.MiniMax.Emotion : "",
+                        engine == "openai" ? voice.OpenAi.Instructions : "");
+                    var got = await limiter.RunAsync(x => cloud!.SpeakAsync(et, emotion, instr, voice, x), ex => ex is CloudTtsException { Retryable: true }, ct: c);
+                    var (vid, _) = voice.CurrentVoice(false);
+                    return new EngineAudio(got.Pcm44100, "pcm_44100", new TakeSettings
+                    {
+                        Engine = engine, VoiceId = vid, OutputFormat = "pcm_44100",
+                        ModelId = engine switch { "fish" => voice.Fish.Model, "inworld" => voice.Inworld.ModelId, "cartesia" => voice.Cartesia.ModelId, "minimax" => voice.MiniMax.Model, _ => voice.OpenAi.Model },
+                        Speed = engine switch { "fish" => voice.Fish.Speed, "inworld" => voice.Inworld.SpeakingRate, "cartesia" => voice.Cartesia.Speed, "minimax" => voice.MiniMax.Speed, _ => voice.OpenAi.Speed },
+                        Style = 0, BilledCharacters = got.BilledCharacters, SentCharacters = et.Length,
+                        Emotion = emotion ?? instr,
+                    });
+                }
                 case LocalEngineClient.OmniVoice:
                 {
-                    var text = ApplyPronunciations(SpokenText.StripTags(spoken), pronunciations, "local");
+                    // OmniVoice performs [laughter] and [sigh]; other tags would be read out, so they are left out
+                    var text = ApplyPronunciations(TtsEngines.EngineText("omnivoice", spoken).Text, pronunciations, "local");
                     var audio = await limiter.RunAsync(x => local!.OmniVoiceAsync(text, voice.OmniVoice, x), ex => ex is HttpRequestException, ct: c);
                     return new EngineAudio(audio, "wav", new TakeSettings { Engine = "omnivoice", VoiceId = voice.OmniVoice.Voice, ModelId = voice.OmniVoice.Model, Speed = voice.OmniVoice.Speed, OutputFormat = "wav" });
                 }

@@ -1,5 +1,6 @@
 // Other Tools → NPC Revoice: replace the voice files of NPC dialogue in any mod (or the base game).
 // Standalone from the DBVO pipeline; shares engines, takes and .fuz building with Phase 2.
+import { ENGINE_NAMES, CLOUD, isCloud, engineObj, cloudControls, keyBadge, tagNote, VOICE_HINT } from './engines.js';
 import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, diffAdded, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips, closeAllModals } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip, creditsButton, LANGS } from './phase2.js';
@@ -274,7 +275,6 @@ export async function revoiceView(id) {
 
   // ---------------------------------------------------------------- speakers
   // Each speaker picks an engine and a voice from your accounts / servers; the engine settings below are shared.
-  const ENGINE_NAMES = { elevenlabs: 'ElevenLabs', voxcpm: 'VoxCPM (local)', omnivoice: 'OmniVoice (local)' };
   const voiceLists = { elevenlabs: null, voxcpm: null, omnivoice: null };
   let elevenModels = null;
   let loadingVoices = false;
@@ -285,6 +285,7 @@ export async function revoiceView(id) {
     try {
       await Promise.all([...used].map(async (eng) => {
         if (!refresh && voiceLists[eng]) return;
+        if (isCloud(eng)) { voiceLists[eng] = []; return; } // voice IDs are typed in
         try {
           voiceLists[eng] = eng === 'elevenlabs'
             ? (await rpc('eleven.voices', { refresh })).map((v) => ({ id: v.voiceId, name: v.name, sub: v.category }))
@@ -314,6 +315,7 @@ export async function revoiceView(id) {
       if (!used.size || used.has('elevenlabs')) parts.push(`ElevenLabs ${v.eleven.modelId} · stability ${Number(v.eleven.stability).toFixed(2)} · similarity ${Number(v.eleven.similarity).toFixed(2)} · speed ${Number(v.eleven.speed).toFixed(2)} · ${fmtName[v.eleven.outputFormat] || v.eleven.outputFormat}`);
       if (used.has('voxcpm')) parts.push(`VoxCPM CFG ${v.voxCpm.cfgValue}`);
       if (used.has('omnivoice')) parts.push(`OmniVoice ${v.omniVoice.numStep} steps`);
+      for (const e of CLOUD) if (used.has(e)) { const o = engineObj(v, e) || {}; parts.push(`${ENGINE_NAMES[e]} ${o.model || o.modelId || ''}`.trim()); }
     }
     const d = h('details.voice-settings', { style: { maxWidth: '1180px', marginBottom: '12px' } },
       h('summary', h('b', 'Voice settings'), h('span.faint.ellipsis', { style: { minWidth: 0 }, title: 'Shared by every speaker; each speaker picks only its own voice below' }, parts.join('  |  ')), h('div.spacer'),
@@ -378,6 +380,11 @@ export async function revoiceView(id) {
         rows.push(h('div.tool-row', h('b', 'OmniVoice'), num(o, 'numStep', 'Steps', { min: 1 }), num(o, 'speed', 'Speed', { step: 0.05 }), num(o, 'guidanceScale', 'Guidance', { step: 0.1 }),
           num(o, 'concurrency', 'Concurrent', { min: 1, width: '56px' })));
       }
+      for (const e of CLOUD) if (used.has(e)) {
+        const o = engineObj(v, e);
+        if (o) rows.push(h('div.tool-row', h('b', ENGINE_NAMES[e]), ...cloudControls(e, o, { grp, numIn: num, setIn: set, locked: false, noVoice: true }), keyBadge(e, app.state.settings),
+          h('span.faint', { title: tagNote(e) }, 'ⓘ tags')));
+      }
     }
     return rows;
   }
@@ -389,6 +396,14 @@ export async function revoiceView(id) {
     engSel.addEventListener('change', async () => {
       try { proj.speakers = await rpc('revoice.speaker', { id, key: sp.key, engine: engSel.value, voiceId: '' }); renderAll(); loadVoices(); } catch (e) { fail(e); }
     });
+    if (isCloud(eng)) {
+      // cloud engines: the voice ID is typed in (see the engine's ⓘ in Global Settings for where to find it)
+      const inp = h('input', { type: 'text', value: sp.voiceId || '', placeholder: eng === 'openai' ? 'voice, e.g. marin' : 'voice ID', title: VOICE_HINT[eng] || '', style: { width: '170px' } });
+      inp.addEventListener('change', async () => {
+        try { proj.speakers = await rpc('revoice.speaker', { id, key: sp.key, engine: eng, voiceId: inp.value.trim(), voiceName: inp.value.trim() }); renderAll(); } catch (e) { fail(e); }
+      });
+      return h('span.row.voice-cell', { style: { gap: '4px', flexWrap: 'nowrap' } }, engSel, inp);
+    }
     const list = voiceLists[eng];
     const vSel = h('select', { title: 'The voice that speaks this speaker\'s lines', style: { maxWidth: '180px' } },
       h('option', { value: '' }, list == null ? 'Loading voices…' : list.length ? '— pick a voice —' : eng === 'elevenlabs' ? 'No voices (API key?)' : 'Server offline?'),
@@ -868,6 +883,9 @@ export async function revoiceView(id) {
         kids.push(num(o, 'cfgValue', 'CFG', { step: 0.1 }), num(o, 'inferenceTimesteps', 'Timesteps', { min: 1 }),
           grp('Normalize', switchEl(o.normalize, (x) => set(o, 'normalize', x), '')), grp('Retry bad cases', switchEl(o.retryBadcase, (x) => set(o, 'retryBadcase', x), '')),
           num(o, 'concurrency', 'Concurrent', { min: 1, width: '58px' }));
+      } else if (isCloud(eng)) {
+        const o = engineObj(v, eng);
+        if (o) kids.push(...cloudControls(eng, o, { grp, numIn: num, setIn: set, locked: false, noVoice: true }), keyBadge(eng, app.state.settings));
       } else {
         const o = v.omniVoice;
         kids.push(num(o, 'numStep', 'Steps', { min: 1 }), num(o, 'speed', 'Speed', { step: 0.05 }), num(o, 'guidanceScale', 'Guidance', { step: 0.1 }),

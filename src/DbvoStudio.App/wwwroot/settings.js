@@ -3,6 +3,7 @@ import { VOICE_COLORS, voiceChip } from './phase2.js';
 import { THEMES, applyTheme } from './themes.js';
 import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, switchEl, segmented, popupMenu, needInfo, helpButton, pathText, pathRows, pathList, namingLabel } from './lib.js';
 import { app, go, refreshState, applyBackground, noteNav } from './app.js';
+import { ENGINES, CLOUD, ENGINE_NAMES, ENGINE_DEFAULTS, engineObj, tagNote, isCloud } from './engines.js';
 
 const TABS = [
   ['general', 'General & tools'],
@@ -351,6 +352,19 @@ async function general(_, rerender) {
         } catch (e) { aiResult.textContent = '✕ ' + e.message; }
       } }, 'Test connection'), aiResult))),
     section('WAV to LIP (Other Tools)', null, wlBox),
+    section('Voice engines', null,
+      h('div.help', { style: { margin: '10px 0' } }, 'Besides ElevenLabs, a voice pack can use Fish Audio, Inworld, Cartesia, MiniMax or an OpenAI-compatible engine (OpenAI, or a free server on your PC such as Chatterbox or Kokoro). Save the engine\'s API key here, then pick the engine for a voice pack (Voice packs → Engine, or the Phase 2 toolbar) and type its voice ID. ', helpButton('voice-engines', { label: 'voice engines' }),
+        h('div', { style: { marginTop: '6px' } }, h('b', 'Your own voices only. '), 'Clone voices from recordings you have the right to use. A voice made with ElevenLabs can\'t be used to build a voice on another engine (ElevenLabs\' terms).')),
+      CLOUD.map((eng) => {
+        const has = (st.engineKeys || {})[eng];
+        const inp = h('input', { type: 'password', placeholder: has ? '•••••••• saved (type a new one to replace it)' : 'paste the API key', style: { width: '280px' }, autocomplete: 'off' });
+        const saveKey = async (key) => { try { await rpc('settings.setEngineKey', { engine: eng, key }); inp.value = ''; await refreshState(); rerender(); toast(key ? 'Saved.' : 'Key removed.'); } catch (e) { fail(e); } };
+        return srow(h('span.row', { style: { gap: '4px' } }, ENGINE_NAMES[eng], needInfo('engine-' + eng)), eng === 'openai' ? 'OpenAI\'s key. Not needed for a server on this PC or your network.' : 'Stored encrypted for your Windows user.',
+          h('div.row', inp,
+            h('button.btn.sm.primary', { title: 'Save the key encrypted for your Windows user', onclick: () => saveKey(inp.value.trim()) }, 'Save key'),
+            has ? h('button.btn.sm.ghost', { title: 'Forget this key', onclick: () => saveKey('') }, 'Remove') : null,
+            h(has ? 'span.badge.b-valid' : 'span.badge.b-skip', has ? 'saved' : 'no key')));
+      })),
     section('Local voice engines', null,
       h('div.help', { style: { margin: '10px 0' } }, 'VoxCPM and OmniVoice run on your own PC, as with DBVO Voice Pack Maker 2.7.0 (same servers and settings). Start the server, then pick the engine for a voice pack (Voice packs → Engine, or the Phase 2 toolbar).'),
       srow('VoxCPM server', 'Default http://localhost:7861', h('div.col', h('div.row', textInput(st.localEngines.voxCpmAddress, (x) => save({ voxCpmAddress: x }), 'http://localhost:7861'), engStatus.voxcpm, h('button.btn.sm', { title: 'See whether the VoxCPM server answers at this address', onclick: () => checkEngine('voxcpm') }, 'Check')), engWhy.voxcpm))),
@@ -364,7 +378,8 @@ const NEW_VOICE = () => ({
   id: Math.random().toString(36).slice(2, 10), name: '', packId: '', author: '', naming: 'Legacy', engine: 'elevenlabs', color: '#58a6ff',
   eleven: { voiceId: '', voiceName: '', modelId: 'eleven_v4', stability: 0.5, similarity: 0.75, style: 0, speakerBoost: false, speed: 1, seed: null, outputFormat: 'mp3_44100_128', languageCode: '', textNormalization: 'auto', concurrency: 5, pronunciationDictionaryIds: [] },
   voxCpm: { voice: '', cfgValue: 2.1, inferenceTimesteps: 12, normalize: true, retryBadcase: true, referenceMode: false, controlCfgValue: 2.7, language: 'en', concurrency: 1 },
-  omniVoice: { voice: '', model: 'k2-fsa/OmniVoice', numStep: 32, speed: 1, guidanceScale: 3, concurrency: 1 },
+  omniVoice: { voice: '', model: 'k2-fsa/OmniVoice', numStep: 32, speed: 1, guidanceScale: 3, language: '', denoise: true, concurrency: 1 },
+  ...JSON.parse(JSON.stringify(ENGINE_DEFAULTS)),
   sts: { voiceId: '', voiceName: '', modelId: 'eleven_multilingual_sts_v2', stability: 0.5, similarity: 0.75, style: 0, speakerBoost: false, seed: null, removeBackgroundNoise: false, outputFormat: 'mp3_44100_128', concurrency: 5 },
   tags: ['[whispers]', '[sighs]', '[laughs]', '[sarcastic]', '[curious]', '[excited]'],
   pronunciations: [], destinations: { wavLipFolder: '', finalRoot: '', fixFolder: '', fuzTemplate: 'Sound\\DBVO\\{packId}', releaseFolder: '' },
@@ -423,6 +438,14 @@ async function voices(selectedId, rerender, onSelect) {
         list.map((x) => h('option', { value: x.id, selected: !!cur && x.id === cur.id }, x.name)));
       if (cur && cur.id && !list.some((x) => x.id === cur.id)) sel.append(h('option', { value: cur.id, selected: true }, cur.name || cur.id));
     };
+    if (isCloud(key)) {
+      // typed-in voice IDs: the standard voice is the one set for this engine now
+      const o = engineObj(v, key) || {};
+      const id = o.voiceId ?? o.voice ?? '';
+      const btn = h('button.btn.sm', { disabled: !id, title: 'Make the engine\'s current voice ID this pack\'s standard voice', onclick: () => { v.standardVoices[key] = { id, name: o.voiceName || id }; persistSoon(); renderEditor(); } }, id ? `Use ${o.voiceName || id}` : 'No voice ID set yet');
+      return h('div.row', h('span.dim', cur ? `${cur.name || cur.id}` : '— none —'), btn,
+        cur ? h('button.btn.sm.ghost', { onclick: () => { delete v.standardVoices[key]; persistSoon(); renderEditor(); } }, 'Clear') : null);
+    }
     fill([], 'Loading voices…');
     sel.addEventListener('change', () => {
       const o = sel.selectedOptions[0];
@@ -485,9 +508,17 @@ async function voices(selectedId, rerender, onSelect) {
         srow('Author', null, txt(v, 'author')),
         srow(h('span.row', { style: { gap: '4px' } }, 'Pack format', helpButton('pack-formats', { label: 'pack formats' })), 'Which mod plays the pack, and how its files are named. Legacy names are readable, so you can see which line each file is. DBVO 2.0 names are hashes of the line, identical to DBVO Voice Pack Maker 2.7.0. DBReV packs are for Dragonborn ReVoiced: files are named by plugin and FormID, so a changed line text never breaks a file. Switch any time; the next export writes the new names.',
           segmented([['Legacy', 'DBVO 1 (Legacy names)'], ['Dbvo2Hash', 'DBVO 2.0 (hash names)'], ['Dbrev', 'DBReV (Dragonborn ReVoiced)']], v.naming, (x) => { v.naming = x; persistSoon(); renderEditor(); })),
-        srow('Engine', 'ElevenLabs, or a local VoxCPM / OmniVoice server (Global Settings → General & tools). Voice, model and the engine\'s settings are picked in the Phase 2 toolbar and remembered here.',
-          h('div.col', segmented([['elevenlabs', 'ElevenLabs'], ['voxcpm', 'VoxCPM'], ['omnivoice', 'OmniVoice']], v.engine || 'elevenlabs', (x) => { v.engine = x; persistSoon(); renderEditor(); }),
-            h('span.dim', v.engine === 'voxcpm' ? `VoxCPM · ${v.voxCpm.voice || 'no reference voice yet'}` : v.engine === 'omnivoice' ? `OmniVoice · ${v.omniVoice.voice || 'no reference voice yet'}` : `${v.eleven.voiceName || '— no voice picked yet —'} · ${v.eleven.modelId}`))),
+        srow(h('span.row', { style: { gap: '4px' } }, 'Engine', helpButton('voice-engines', { label: 'voice engines' })), 'ElevenLabs, another online engine (keys in Global Settings → General & tools → Voice engines), or a local VoxCPM / OmniVoice server. Voice, model and the engine\'s settings are picked in the Phase 2 toolbar and remembered here.',
+          h('div.col', h('select', { style: { maxWidth: '240px' }, onchange: (ev) => { v.engine = ev.target.value; persistSoon(); renderEditor(); } },
+              ENGINES.map(([x, t]) => h('option', { value: x, selected: x === (v.engine || 'elevenlabs') }, t))),
+            h('span.dim', (() => {
+              const e = v.engine || 'elevenlabs';
+              if (e === 'voxcpm') return `VoxCPM · ${v.voxCpm.voice || 'no reference voice yet'}`;
+              if (e === 'omnivoice') return `OmniVoice · ${v.omniVoice.voice || 'no reference voice yet'}`;
+              if (isCloud(e)) { const o = engineObj(v, e) || {}; return `${ENGINE_NAMES[e]} · ${o.voiceName || o.voiceId || o.voice || 'no voice yet'}${(app.state.settings.engineKeys || {})[e] || (e === 'openai') ? '' : ' · no API key saved'}`; }
+              return `${v.eleven.voiceName || '— no voice picked yet —'} · ${v.eleven.modelId}`;
+            })()),
+            h('span.faint', { style: { fontSize: '12px' } }, tagNote(v.engine || 'elevenlabs', { tagModel: /^eleven_v[34]/i.test(v.eleven.modelId || ''), model: v.eleven.modelId })))),
         srow('Standard voice', 'The voice this pack is meant to use with this engine. Projects keep the voice you last picked in the toolbar, but before any bulk generation the check warns when it isn\'t this one.', standardVoicePicker(v))),
       section('Defaults for new DBVO Patches', null,
         h('div.help', { style: { margin: '10px 0' } }, 'These are only starting points. Each new DBVO Patch copies them, with ', h('b', '{mod}'), ' replaced by the mod name, and from then on the patch\'s own folders count (Phase 2 → Folders & options).'),
@@ -497,7 +528,7 @@ async function voices(selectedId, rerender, onSelect) {
         srow('.fuz sub-folder', 'Inside the final folder. e.g. MyVoice - {mod}\\Sound\\DBVO\\{packId}; the DBVO Fix plugins go next to that Sound folder.', txt(d, 'fuzTemplate', { placeholder: 'Sound\\DBVO\\{packId}', after: renderPreview })),
         srow('Release folder', 'Where Phase 3 writes the packed FOMOD archive.', pathField(d.releaseFolder, (x) => { d.releaseFolder = x; persistSoon(); }, { folder: true, title: 'Release folder' })),
         srow('Preview', null, preview)),
-      section('Tags toolbar', null, srow('Tags for this voice', 'Shown above the Phase 2 grid (ElevenLabs v3 / v4).', tagsBox)),
+      section('Tags toolbar', null, srow('Tags for this voice', 'Shown above the Phase 2 grid. Every engine but VoxCPM uses them in its own way (see Engine above).', tagsBox)),
       section('Voice pack pronunciation', h('div.row', h('span.pill.gold', 'THIS VOICE'), h('div.spacer'), pronFileButtons(v.id, async () => { await refreshState(); const fresh = app.state.voicePacks.find((x) => x.id === v.id); if (fresh) { current = structuredClone(fresh); renderEditor(); } })),
         h('div.help', { style: { margin: '10px 0' } }, 'Words this voice should say differently. The global DBVO dictionary (Global Settings → Pronunciation) applies to every voice pack; when both have the same word, ', h('b', 'this voice pack\'s entry wins'), '.', h('div', { style: { marginTop: '8px' } }, pronHelp())),
         pronTable(v.pronunciations, persistSoon)),
@@ -526,7 +557,7 @@ async function voices(selectedId, rerender, onSelect) {
   savedEl.className = 'saved' + (initial ? ' ok' : '');
   // fill fields older voice packs may not have
   const def = NEW_VOICE();
-  for (const k of ['voxCpm', 'omniVoice', 'sts']) current[k] = { ...def[k], ...(current[k] || {}) };
+  for (const k of ['voxCpm', 'omniVoice', 'sts', 'fish', 'inworld', 'cartesia', 'miniMax', 'openAi']) current[k] = { ...def[k], ...(current[k] || {}) };
   current.destinations = { ...def.destinations, ...current.destinations };
   current.standardVoices = current.standardVoices || {};
   renderEditor();
