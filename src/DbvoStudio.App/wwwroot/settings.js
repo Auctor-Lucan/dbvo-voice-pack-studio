@@ -367,8 +367,8 @@ async function general(_, rerender) {
       })),
     section('Local voice engines', null,
       h('div.help', { style: { margin: '10px 0' } }, 'VoxCPM and OmniVoice run on your own PC, as with DBVO Voice Pack Maker 2.7.0 (same servers and settings). Start the server, then pick the engine for a voice pack (Voice packs → Engine, or the Phase 2 toolbar).'),
-      srow('VoxCPM server', 'Default http://localhost:7861', h('div.col', h('div.row', textInput(st.localEngines.voxCpmAddress, (x) => save({ voxCpmAddress: x }), 'http://localhost:7861'), engStatus.voxcpm, h('button.btn.sm', { title: 'See whether the VoxCPM server answers at this address', onclick: () => checkEngine('voxcpm') }, 'Check')), engWhy.voxcpm))),
-      srow('OmniVoice server', 'Default http://localhost:7862 (DBVO Voice Pack Maker). DBReV Voice Pack Maker\'s server: http://localhost:8001', h('div.col', h('div.row', textInput(st.localEngines.omniVoiceAddress, (x) => save({ omniVoiceAddress: x }), 'http://localhost:7862'), engStatus.omnivoice, h('button.btn.sm', { title: 'See whether the OmniVoice server answers at this address', onclick: () => checkEngine('omnivoice') }, 'Check')), engWhy.omnivoice)))),
+      srow('VoxCPM server', 'Default http://localhost:7861', h('div.col', h('div.row', textInput(st.localEngines.voxCpmAddress, (x) => save({ voxCpmAddress: x }), 'http://localhost:7861'), engStatus.voxcpm, h('button.btn.sm', { title: 'See whether the VoxCPM server answers at this address', onclick: () => checkEngine('voxcpm') }, 'Check')), engWhy.voxcpm)),
+      srow('OmniVoice server', 'Default http://localhost:7862 (DBVO Voice Pack Maker). DBReV Voice Pack Maker\'s server: http://localhost:8001', h('div.col', h('div.row', textInput(st.localEngines.omniVoiceAddress, (x) => save({ omniVoiceAddress: x }), 'http://localhost:7862'), engStatus.omnivoice, h('button.btn.sm', { title: 'See whether the OmniVoice server answers at this address', onclick: () => checkEngine('omnivoice') }, 'Check')), engWhy.omnivoice))),
   );
 }
 
@@ -504,7 +504,7 @@ async function voices(selectedId, rerender, onSelect) {
       section('Voice pack', h('div.row', h('div.spacer'), savedEl, h('button.btn.primary.sm', { title: 'Save this voice pack now (changes also save by themselves)', onclick: async () => { if (await persistNow()) toast('Saved.'); } }, 'Save')),
         srow('Name', null, txt(v, 'name', { placeholder: 'e.g. MyVoice' })),
         srow('Colour', 'The voice pack label takes this colour everywhere, so you always see which voice you are working with.', colorIn),
-        srow('DBVO voice pack ID', 'The folder name under Sound\\DBVO\\ and the voice_pack_id in the DBVO JSON.', txt(v, 'packId', { placeholder: 'e.g. vampira', after: renderPreview })),
+        srow('DBVO voice pack ID', 'The folder name under Sound\\DBVO\\ (Sound\\DBReV\\ for DBReV packs) and the voice_pack_id in the voice pack JSON.', txt(v, 'packId', { placeholder: 'e.g. vampira', after: renderPreview })),
         srow('Author', null, txt(v, 'author')),
         srow(h('span.row', { style: { gap: '4px' } }, 'Pack format', helpButton('pack-formats', { label: 'pack formats' })), 'Which mod plays the pack, and how its files are named. Legacy names are readable, so you can see which line each file is. DBVO 2.0 names are hashes of the line, identical to DBVO Voice Pack Maker 2.7.0. DBReV packs are for Dragonborn ReVoiced: files are named by plugin and FormID, so a changed line text never breaks a file. Switch any time; the next export writes the new names.',
           segmented([['Legacy', 'DBVO 1 (Legacy names)'], ['Dbvo2Hash', 'DBVO 2.0 (hash names)'], ['Dbrev', 'DBReV (Dragonborn ReVoiced)']], v.naming, (x) => { v.naming = x; persistSoon(); renderEditor(); })),
