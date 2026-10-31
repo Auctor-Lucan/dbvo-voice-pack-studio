@@ -157,7 +157,7 @@ public sealed partial class Backend
                 var j = await BookJoiner.JoinAsync(proj, folder, voice, b, S(p, "variant"), BooksTools(), encode: false, CancellationToken.None)
                     ?? throw new InvalidOperationException("Every part needs a take first.");
                 await Locked(() => { _lib.Save(proj); return null; });
-                return new { url = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, Path.Combine(folder, j.Wav)).Replace('\\', '/') + "?t=" + DateTime.UtcNow.Ticks, j.Seconds, j.Lufs, j.PeakDb };
+                return new { url = MediaUrl(Path.Combine(folder, j.Wav)) + "?t=" + DateTime.UtcNow.Ticks, j.Seconds, j.Lufs, j.PeakDb };
             }
             case "books.aiFormat":
             {
@@ -312,6 +312,12 @@ public sealed partial class Backend
     {
         var proj = LoadBk(S(p, "id"));
         bool relines = false;
+        // Changes that re-split the parts wait while this project's takes are being made (checked before anything changes).
+        bool PartSize(string k, int cur) => p.TryGetProperty(k, out var x) && x.ValueKind == JsonValueKind.Number && Math.Clamp(x.GetInt32(), 200, 40000) != cur;
+        VoicePack? newVoice = p.TryGetProperty("voice", out var vs0) && vs0.ValueKind == JsonValueKind.Object ? vs0.Deserialize<VoicePack>(JsonOptions) : null;
+        if ((NB(p, "npcVoices") is { } nv0 && nv0 != proj.NpcVoices) || PartSize("partTarget", proj.PartTarget) || PartSize("partMax", proj.PartMax) || PartSize("partMin", proj.PartMin)
+            || (newVoice != null && (newVoice.Eleven.ModelId != proj.Voice.Eleven.ModelId || newVoice.Engine != proj.Voice.Engine)))
+            NotWhileGenerating(proj.Id);
         proj.Name = S(p, "name", proj.Name);
         proj.ModName = S(p, "modName", proj.ModName);
         proj.ArchivePrefix = S(p, "archivePrefix", proj.ArchivePrefix);
@@ -328,7 +334,7 @@ public sealed partial class Backend
         if (NB(p, "useBaseGame") is { } bg && bg != proj.UseBaseGame) { proj.UseBaseGame = bg; BkService().ApplyBaseGame(proj); }
         if (B(p, "refreshBaseGame")) BkService().ApplyBaseGame(proj);
         foreach (var (k, set) in new (string, Action<int>)[] { ("partTarget", v => proj.PartTarget = v), ("partMax", v => proj.PartMax = v), ("partMin", v => proj.PartMin = v) })
-            if (p.TryGetProperty(k, out var n) && n.ValueKind == JsonValueKind.Number) { set(Math.Clamp(n.GetInt32(), 200, 40000)); relines = true; }
+            if (p.TryGetProperty(k, out var n) && n.ValueKind == JsonValueKind.Number) { var cur = k == "partTarget" ? proj.PartTarget : k == "partMax" ? proj.PartMax : proj.PartMin; var nv2 = Math.Clamp(n.GetInt32(), 200, 40000); if (nv2 != cur) { set(nv2); relines = true; } }
         if (proj.PartTarget > proj.PartMax) proj.PartTarget = proj.PartMax;
         if (p.TryGetProperty("audio", out var au) && au.ValueKind == JsonValueKind.Object) proj.Audio = au.Deserialize<BookAudioSettings>(JsonOptions) ?? proj.Audio;
         if (p.TryGetProperty("voice", out var vs) && vs.ValueKind == JsonValueKind.Object)
@@ -347,6 +353,7 @@ public sealed partial class Backend
     {
         var proj = LoadBk(S(p, "id"));
         var b = proj.Books.FirstOrDefault(x => x.Stem == S(p, "stem")) ?? throw new InvalidOperationException("Book not found.");
+        NotWhileGenerating(proj.Id);
         BkApply(proj, b, S(p, "action"), p);
         BooksService.RebuildLines(proj);
         _lib.Save(proj);
@@ -419,6 +426,7 @@ public sealed partial class Backend
 
     private object BkBulk(JsonElement p)
     {
+        NotWhileGenerating(S(p, "id"));
         var proj = LoadBk(S(p, "id"));
         var stems = Strings(p, "stems").ToHashSet();
         var action = S(p, "action");
@@ -440,6 +448,7 @@ public sealed partial class Backend
 
     private object BkVoice(JsonElement p)
     {
+        NotWhileGenerating(S(p, "id"));
         var proj = LoadBk(S(p, "id"));
         var kind = S(p, "kind");
         if (kind == "narrator")
@@ -600,7 +609,7 @@ public sealed partial class Backend
         var groups = all.GroupBy(l => (l.Voice, SpeedOf(l))).Select(g => (Voice: WithSpeed(BooksService.VoicePackFor(proj, g.Key.Voice), g.Key.Item2), Key: g.Key.Voice, Lines: g.ToList())).Where(g => g.Voice != null).ToList();
         if (groups.Count == 0) throw new InvalidOperationException(all.Count == 0 ? "Nothing to generate." : "Pick a voice for the narrator or voice types first (Voices tab).");
         var tools = BooksTools();
-        _jobCts = NewJob();
+        _jobCts = NewJob(S(p, "id"));
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
@@ -641,16 +650,19 @@ public sealed partial class Backend
     {
         if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         _jobCts = NewJob();
+        var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
             try
             {
                 var proj = LoadBk(id);
                 Emit("progress", new { kind = "revoice", done = 0, total = 1, failed = 0, message = "Reading plugins" });
-                var prog = new DirectProgress<string>(msg => Emit("progress", new { kind = "revoice", done = 0, total = 1, failed = 0, message = msg }));
+                // Cancel stops the scan at the next plugin or archive it reads.
+                var prog = new DirectProgress<string>(msg => { ct.ThrowIfCancellationRequested(); Emit("progress", new { kind = "revoice", done = 0, total = 1, failed = 0, message = msg }); });
                 if (proj.Source != "plugins" && !proj.Plugins.Any(x => File.Exists(x.Path)))
                     throw new InvalidOperationException("Set the base game folder (Global Settings → General) to see the game's own text next to the spoken text. The built-in texts work without it.");
                 var s = await Task.Run(() => BkSession(proj, prog));
+                ct.ThrowIfCancellationRequested();
                 BooksScanReport rep;
                 await _gate.WaitAsync();
                 try
@@ -675,6 +687,7 @@ public sealed partial class Backend
                 finally { _gate.Release(); }
                 Emit("jobDone", new { kind = "books-scan", id, ok = true, report = rep });
             }
+            catch (OperationCanceledException) { Emit("jobDone", new { kind = "books-scan", id, ok = false, message = "Cancelled." }); }
             catch (Exception ex)
             {
                 App.Log("Books scan failed: " + ex);

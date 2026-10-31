@@ -307,6 +307,8 @@ public sealed class Phase1Line
     public int Order { get; set; }
     /// <summary>Exported to the player-name topic file (Downloads).</summary>
     public bool PlayerNameExported { get; set; }
+    /// <summary>Gone through in Proofread lines (cleared when the mod changes the line).</summary>
+    public bool Proofread { get; set; }
     /// <summary>Set when an imported DBVO Fix plugin changed this line: the line as it was before, and the text the import wrote.</summary>
     public FixImportUndo? FixImport { get; set; }
 

@@ -2,7 +2,7 @@
 // Books are split into parts the engine can read, each part gets takes, and export joins them, adds the IVBOS
 // reverb and loudness chain, encodes xWMA and packs archives, the VBoS .ini and a FOMOD.
 import { ENGINES, ENGINE_NAMES, isCloud, engineObj, cloudControls, keyBadge, VOICE_HINT } from './engines.js';
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, aiReady, switchEl, segmented, popupMenu, columnsMenu, droppedPaths, icon, mergeInto, helpButton, generateButton, outputFormats, keepScroll, withBusy, pathText, pathRows, pathList, searchLamp, pdoneChips, spinTracker, mediaPath } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { creditsButton, LANGS } from './phase2.js';
@@ -674,33 +674,34 @@ export async function bookProjectView(id) {
     try { toast('Joining the parts…'); const r = await rpc('books.join', { id, stem: b.stem, voice: v }); audio.src = r.url; audio.play().catch(fail); toast(`${voiceName(v)} · ${fmtTime(r.seconds)} · ${r.lufs.toFixed(1)} LUFS · peak ${r.peakDb.toFixed(1)} dB`); } catch (e) { fail(e); }
   }
 
-  const inFlight = new Set();
-  function markInFlight(stems) {
-    const before = [...inFlight];
-    inFlight.clear();
-    for (const x of stems || []) inFlight.add(x);
-    if (grid.el.isConnected) for (const x of new Set([...before, ...inFlight])) grid.refreshRow(x);
-  }
+  // Books (rows) whose ↻ spins; parts (in the book editor) spin on their own, cleared as each take arrives or the job ends.
+  const inFlight = spinTracker((x) => { if (grid.el.isConnected) grid.refreshRow(x); });
+  const partsInFlight = new Set();
+  let onPartsChanged = null; // the open book editor redraws its parts
+  function dropParts(ids) { for (const x of ids || []) partsInFlight.delete(x); if (onPartsChanged) onPartsChanged(); }
 
   async function generate(mode, stems, { single = false, lineIds = null } = {}) {
+    const spin = inFlight.request(single && stems ? stems : []);
+    let accepted = false;
     try {
-      if (single && stems) markInFlight(stems);
       // One book (the row's ↻): its parts that need work, or a new take of every part when none do. Ticked and Flagged always make new takes.
       const book = single && stems && stems.length === 1 ? index.get(stems[0]) : null;
       const needsWork = book && book.voices.some((v) => v.miss || v.edited);
       const regenerate = mode === 'all' || mode === 'flagged' || (mode === 'ticked' && (!single || !needsWork));
       const params = { id, mode: lineIds ? 'lines' : mode, stems: stems || [], lineIds: lineIds || [], voice: single || lineIds ? '' : voiceFilter, regenerate };
       const est = await rpc('books.estimate', params);
-      if (!est.count) { markInFlight(null); toast(est.unassigned.length ? `Pick a voice for ${est.unassigned.join(', ')} first (Narrators & authors).` : 'Nothing to generate.', !!est.unassigned.length); return; }
+      if (!est.count) { spin.drop(); toast(est.unassigned.length ? `Pick a voice for ${est.unassigned.join(', ')} first (Narrators & authors).` : 'Nothing to generate.', !!est.unassigned.length); return; }
       const confirmBatch = (app.state.settings.ui || {}).confirmBatch !== 'false';
       if ((est.count > 1 || !single) && confirmBatch) {
         const ok = await modal('Check before spending credits', estimateBody(est), [{ label: 'Cancel', value: false }, { label: `Generate ${est.count} part(s)`, primary: true, value: true }], { wide: true, help: 'generating-books' });
-        if (!ok) { markInFlight(null); return; }
+        if (!ok) { spin.drop(); return; }
       }
-      if (!single) markInFlight(stems || proj.books.filter((b) => mode === 'flagged' ? b.marked : mode === 'all' || b.voices.some((v) => (mode === 'edited' ? v.edited : mode === 'problems' ? v.miss || v.edited : v.miss))).map((b) => b.stem));
+      if (!single) spin.add(stems || proj.books.filter((b) => mode === 'flagged' ? b.marked : mode === 'all' || b.voices.some((v) => (mode === 'edited' ? v.edited : mode === 'problems' ? v.miss || v.edited : v.miss))).map((b) => b.stem));
       await rpc('books.generate', params);
+      spin.accept();
+      accepted = true;
       renderActions();
-    } catch (e) { markInFlight(null); fail(e); }
+    } catch (e) { spin.drop(); fail(e); } finally { if (!accepted && lineIds) dropParts(lineIds); }
   }
 
   function estimateBody(est) {
@@ -736,7 +737,7 @@ export async function bookProjectView(id) {
         if (v == null) return;
         if (v === 'save') await saveText(); else dirty = false;
       }
-      overlay.remove(); document.removeEventListener('keydown', onKey, true); off(); edAudio.pause();
+      overlay.remove(); document.removeEventListener('keydown', onKey, true); off(); onPartsChanged = null; edAudio.pause();
       try { proj = await rpc('books.get', { id }); reindex(); renderAll(); } catch { /* keep */ }
     };
     const onKey = (e) => {
@@ -766,7 +767,7 @@ export async function bookProjectView(id) {
       } catch (e) { fail(e); }
     }
     // Going to another page with the editor open: save the text and close it.
-    overlay.addEventListener('leave', async () => { asking = false; await saveText(); overlay.remove(); document.removeEventListener('keydown', onKey, true); off(); edAudio.pause(); });
+    overlay.addEventListener('leave', async () => { asking = false; await saveText(); overlay.remove(); document.removeEventListener('keydown', onKey, true); off(); onPartsChanged = null; edAudio.pause(); });
     ta.addEventListener('input', () => { dirty = true; renderCount(); });
     ta.addEventListener('blur', () => saveText());
     const countEl = h('span.faint');
@@ -809,7 +810,7 @@ export async function bookProjectView(id) {
     async function lineAct(lineId, action, value) {
       try { d = await rpc('books.line', { id, lineId, action, value }); renderEd(false); replaceBook(d.book); } catch (e) { fail(e); }
     }
-    const playTake = (t) => { edAudio.src = proj.mediaBase + encodeURI(t.wav) + '?t=' + Date.now(); edAudio.play().catch(fail); };
+    const playTake = (t) => { edAudio.src = proj.mediaBase + mediaPath(t.wav) + '?t=' + Date.now(); edAudio.play().catch(fail); };
     const vdata = () => d.voices.find((v) => v.key === voice);
     const linesNow = () => { const v = vdata(); if (!v) return []; return variant ? ((v.variants.find((x) => x.id === variant) || {}).lines || []) : v.lines; };
 
@@ -889,7 +890,7 @@ export async function bookProjectView(id) {
             h('div.row', h('span.dot.' + (l ? l.status : 'Pending'), { title: l ? (l.status + (l.err ? ': ' + l.err : '')) : 'Not generated' }),
               h('b', { style: { cursor: 'pointer' }, title: 'Select this part in the spoken text', onclick: () => selectRange(r.start, r.end) }, `Part ${i + 1}`),
               h('span.faint', `${(r.end - r.start).toLocaleString()} chars${r.para ? ' · ¶' : ''}`), h('div.spacer'),
-              l ? h('button.act-btn' + (inFlight.has(l.id) ? '.spinning' : ''), { title: v && v.hasVoice ? (l.takes.length ? 'A new take of this part' : 'Generate this part') : 'Pick a voice first', disabled: !v || !v.hasVoice, onclick: () => { inFlight.add(l.id); edAutoPlay.add(l.id); renderEd(false); generate('lines', null, { lineIds: [l.id], single: true }); } }, icon('regen')) : null,
+              l ? h('button.act-btn' + (partsInFlight.has(l.id) ? '.spinning' : ''), { title: v && v.hasVoice ? (l.takes.length ? 'A new take of this part' : 'Generate this part') : 'Pick a voice first', disabled: !v || !v.hasVoice, onclick: () => { partsInFlight.add(l.id); edAutoPlay.add(l.id); renderEd(false); generate('lines', null, { lineIds: [l.id], single: true }); } }, icon('regen')) : null,
               takeSel,
               l && l.takes.length ? h('button.icon-btn', { title: 'Delete the take in use', onclick: async () => { if (await confirmBox('Delete take?', 'Deletes this part\'s take in use and its file.', 'Delete', true)) lineAct(l.id, 'deleteTake', l.sel); } }, '🗑') : null,
               t ? h('button.act-btn', { title: 'Edit this part\'s take: trim, cut, fade', onclick: () => editTake({ kind: 'books', id, lineId: l.id, takeId: t.id, onSaved: (r) => { d = r.result; renderEd(false); replaceBook(d.book); } }) }, icon('wrench')) : null,
@@ -908,7 +909,7 @@ export async function bookProjectView(id) {
             const ids = (need.length ? need : lines).map((l) => l.id);
             const label = need.length ? (need.length === lines.length ? (lines.length === 1 ? 'Generate' : 'Generate all') : `Generate ${need.length} missing`) : (lines.length === 1 ? 'New take' : 'New takes');
             return h('button.btn.sm.primary', { title: need.length ? 'Generate the parts that have no take yet or whose text changed since their take, in this voice' : 'Every part has a current take: make a new take of each, in this voice (earlier takes stay)', disabled: !v || !v.hasVoice || !lines.length,
-              onclick: () => { ids.forEach((x) => inFlight.add(x)); if (ids.length === 1) edAutoPlay.add(ids[0]); renderEd(false); generate('lines', null, { lineIds: ids, single: ids.length === 1 }); } }, label);
+              onclick: () => { ids.forEach((x) => partsInFlight.add(x)); if (ids.length === 1) edAutoPlay.add(ids[0]); renderEd(false); generate('lines', null, { lineIds: ids, single: ids.length === 1 }); } }, label);
           })(),
           lines.length ? effectRow(lines.every((l) => l.effect === lines[0].effect) ? lines[0].effect || '' : '', 1, async (fx) => {
             try {
@@ -969,7 +970,7 @@ export async function bookProjectView(id) {
 
     const off = on('booksLine', (ev) => {
       if (ev.projectId !== id || ev.stem !== stem) return;
-      inFlight.delete(ev.line.id);
+      partsInFlight.delete(ev.line.id);
       for (const v of d.voices) {
         if (v.key !== ev.line.voice) continue;
         const list = ev.line.variant ? (v.variants.find((x) => x.id === ev.line.variant) || {}).lines : v.lines;
@@ -981,6 +982,7 @@ export async function bookProjectView(id) {
       if (ev.line.status === 'Generated' && ev.line.sel && edAutoPlay.has(ev.line.id)) { edAutoPlay.delete(ev.line.id); const t = ev.line.takes.find((x) => x.id === ev.line.sel); if (t) playTake(t); }
     });
     const edAutoPlay = new Set();
+    onPartsChanged = () => renderEd(false);
     card.append(headBox, h('div.ed-body', h('div.ed-left', gameBox), h('div.ed-mid', h('div.ed-col-head', h('b', 'Spoken text'), h('span.faint', 'what the voice reads')), toolsBox, ta, checksBox), h('div.ed-right', partsBox)));
     renderEd(true);
     document.body.append(overlay);
@@ -1018,16 +1020,25 @@ export async function bookProjectView(id) {
     // The book row's dots come from the server: refresh that book.
     refreshBook(d.stem);
   });
-  const refreshBook = debounce(async (stem) => {
-    try { const x = await rpc('books.bookGet', { id, stem }); replaceBook(x.book); inFlight.delete(stem); if (grid.el.isConnected) { grid.refreshRow(stem); flashRow(grid, stem, x.book.voices.some((v) => v.status === 'missing')); } } catch { /* ignore */ }
+  // Every book a part arrived for is refreshed (a burst of parts from several books keeps all of them).
+  const booksToRefresh = new Set();
+  const refreshBooks = debounce(async () => {
+    const stems = [...booksToRefresh];
+    booksToRefresh.clear();
+    for (const stem of stems) {
+      try { const x = await rpc('books.bookGet', { id, stem }); replaceBook(x.book); inFlight.arrived(stem); if (grid.el.isConnected) { grid.refreshRow(stem); flashRow(grid, stem, x.book.voices.some((v) => v.status === 'missing')); } } catch { /* ignore */ }
+    }
   }, 250);
+  const refreshBook = (stem) => { booksToRefresh.add(stem); refreshBooks(); };
   let jobSeen = false;
   document.addEventListener('job-progress', () => { if (!jobSeen && document.body.contains(view)) { jobSeen = true; renderHead(); if (tab === 'books') { grid.paint(true); renderActions(); } } });
   document.addEventListener('job-done', async (e) => {
     jobSeen = false;
     if (!document.body.contains(view)) { offLine && offLine(); return; }
-    if (inFlight.size) markInFlight(null);
     const d = e.detail || {};
+    const mine = d.kind === 'generate' && d.booksId === id;
+    inFlight.jobDone(mine);
+    if (mine && partsInFlight.size) dropParts([...partsInFlight]);
     if ((d.kind === 'books-scan' && d.id === id) || (d.kind === 'generate' && d.booksId === id) || (d.kind === 'books-export' && d.id === id)) {
       try { proj = await rpc('books.get', { id }); reindex(); } catch { /* keep */ }
       if (d.kind === 'books-scan' && d.ok) toast(`Read: ${d.report.books.toLocaleString()} books${d.report.npc ? `, ${d.report.npc} read by NPC voices` : ''}.`);

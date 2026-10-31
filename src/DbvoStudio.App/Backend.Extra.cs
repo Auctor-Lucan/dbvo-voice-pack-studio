@@ -238,6 +238,7 @@ public sealed partial class Backend
             case "books.replaceTexts":
                 return await Locked(() =>
                 {
+                    NotWhileGenerating(S(p, "id"));
                     var proj = LoadBk(S(p, "id"));
                     var items = Items(p);
                     int n = 0;
@@ -295,7 +296,7 @@ public sealed partial class Backend
                 var path = S(p, "path");
                 if (!File.Exists(path)) return null;
                 byte[] bytes = path.EndsWith(".fuz", StringComparison.OrdinalIgnoreCase)
-                    ? await Phase2Service.FuzToWavAsync(path, Tools(), Path.Combine(Path.GetTempPath(), "dbvo"), CancellationToken.None)
+                    ? await Phase2Service.FuzToWavAsync(path, GrExternal(), Path.Combine(Path.GetTempPath(), "dbvo"), CancellationToken.None)
                     : await File.ReadAllBytesAsync(path);
                 return "data:audio/wav;base64," + Convert.ToBase64String(bytes);
             }
@@ -333,6 +334,7 @@ public sealed partial class Backend
             case "fomod.delete":
                 return await Locked(() =>
                 {
+                    if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Press Cancel there first.");
                     _lib.Backup("before-delete-fomod", _settings.BackupsToKeep);
                     Directory.Delete(_lib.FomodFolder(S(p, "id")), true);
                     return State();

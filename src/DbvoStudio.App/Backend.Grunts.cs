@@ -160,7 +160,7 @@ public sealed partial class Backend
                     if (!File.Exists(copy)) File.Copy(wav, copy, true);
                     wav = copy;
                 }
-                return "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, wav).Replace('\\', '/') + "?t=" + File.GetLastWriteTimeUtc(wav).Ticks;
+                return MediaUrl(wav) + "?t=" + File.GetLastWriteTimeUtc(wav).Ticks;
             }
             case "grunts.importPack":
             {
@@ -790,7 +790,7 @@ public sealed partial class Backend
                 File.Copy(wav, outPath, true);
             }
         }
-        return new { url = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, outPath).Replace('\\', '/') + "?t=" + File.GetLastWriteTimeUtc(outPath).Ticks };
+        return new { url = MediaUrl(outPath) + "?t=" + File.GetLastWriteTimeUtc(outPath).Ticks };
     }
 
     private object GrTrim(JsonElement p)
@@ -876,7 +876,7 @@ public sealed partial class Backend
             try
             {
                 Emit("progress", new { kind = "grunts-whisper", done = 0, total = todo.Count, message = "Loading Whisper" });
-                var tool = new Tools.WavToLip(_settings.WavToLip, Tools(), WhisperModelsFolder(), e => { if (e.Kind == "log") App.Log("Whisper: " + e.Text); });
+                var tool = new Tools.WavToLip(_settings.WavToLip, GrExternal(), WhisperModelsFolder(), e => { if (e.Kind == "log") App.Log("Whisper: " + e.Text); });
                 var (transcribe, engine) = await tool.CreateTranscriberAsync(ct);
                 var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
                 Directory.CreateDirectory(workRoot);
@@ -945,7 +945,7 @@ public sealed partial class Backend
         args.AddRange(new[] { "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le", wav });
         var r = await ExternalTools.RunAsync(tools.FfmpegPath, args);
         if (r.ExitCode != 0 || !File.Exists(wav)) throw new ToolException("The audio couldn't be read for Whisper.");
-        var tool = new Tools.WavToLip(_settings.WavToLip, Tools(), WhisperModelsFolder(), e => { if (e.Kind == "log") App.Log("Whisper: " + e.Text); });
+        var tool = new Tools.WavToLip(_settings.WavToLip, GrExternal(), WhisperModelsFolder(), e => { if (e.Kind == "log") App.Log("Whisper: " + e.Text); });
         var (transcribe, engine) = await tool.CreateTranscriberAsync(CancellationToken.None);
         string text;
         await using (engine) text = (await transcribe(wav, CancellationToken.None)).Trim();
@@ -1033,7 +1033,7 @@ public sealed partial class Backend
             tries = d.Tries.Select(t => new
             {
                 t.Id, t.Spoken, t.Seconds, t.Settings, t.CreatedUtc,
-                url = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, Path.Combine(folder, t.File)).Replace('\\', '/'),
+                url = MediaUrl(Path.Combine(folder, t.File)),
                 exists = File.Exists(Path.Combine(folder, t.File)),
             }),
             voice = new

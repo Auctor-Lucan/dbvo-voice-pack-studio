@@ -71,7 +71,7 @@ public sealed partial class Backend
                     catch (Exception ex) { throw new InvalidOperationException("This take can't be edited: " + FriendlyError.From(ex)); }
                     return new
                     {
-                        url = "https://media.dbvo/" + Path.GetRelativePath(_lib.Root, src).Replace('\\', '/') + "?t=" + DateTime.UtcNow.Ticks,
+                        url = MediaUrl(src) + "?t=" + DateTime.UtcNow.Ticks,
                         takeId = t.Id, t.Slot, text = t.SpokenText, line = line.FinalLine, seconds = t.DurationSeconds,
                         engine = t.Settings.Engine, model = t.Settings.ModelId,
                         lip = !string.IsNullOrEmpty(t.LipPath),

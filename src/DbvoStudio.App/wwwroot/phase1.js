@@ -1,7 +1,8 @@
 // Phase 1: Mods list and the per-plugin workspace.
 import { findReplaceDialog } from './tagtools.js';
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton, segmented, pathText, pathRows, pathList, searchLamp, closeDialogOf } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, droppedPaths, debounce, popupMenu, columnsMenu, switchEl, askFixOverwrite, icon, helpButton, segmented, pathText, pathRows, pathList, searchLamp, closeDialogOf, afterPointer } from './lib.js';
 import { app, go, refreshState } from './app.js';
+import { proofreadDialog } from './proofread.js';
 
 const KIND_LABEL = {
   Valid: ['Valid', 'b-valid'],
@@ -479,9 +480,8 @@ export async function modView(id) {
       Object.assign(l, r.line);
       Object.assign(plugin, { ...r.plugin, lines: plugin.lines });
       grid.refreshRow(l.key, action !== 'review');
-      if (focusedKey === l.key) renderInspector();
-      renderTabs();
-      renderActions();
+      // Drawn after a click in progress, so the button pressed (often right after typing) still gets the click.
+      afterPointer('p1:act', () => { if (focusedKey === l.key) renderInspector(); renderTabs(); renderActions(); });
     } catch (e) { fail(e); }
   }
 
@@ -658,9 +658,25 @@ export async function modView(id) {
       h('div.filter-tools',
         h('span.legend-note', 'Review ', h('b', 'BROKEN'), ' and ', h('b', 'TOO LONG WILL CTD'), ' lines before Phase 2.'),
         h('div.spacer'), helpButton('review-the-lines'),
+        h('button.btn.sm.ghost', { title: 'Go through the lines one at a time and fix spelling and grammar, with the spellchecker and optional AI suggestions (edits go into the DBVO Fix plugin)', onclick: proofread }, 'Proofread…'),
         h('button.btn.sm.ghost', { title: 'Find text in the in-game text of every line shown and replace it (goes into the DBVO Fix plugin like any edit)', onclick: findReplace }, 'Find and replace in all shown…'),
         searchLamp(q), columnsMenu(grid),
         h('button.btn.sm', { title: 'Show or hide the editing panel', onclick: () => { showInsp = !showInsp; store.set('insp1', showInsp); split.classList.toggle('no-insp', !showInsp); renderFilters(); } }, showInsp ? 'Hide panel ▸' : '◂ Show panel')));
+  }
+  function proofread() {
+    proofreadDialog({
+      mod, plugin, shown: grid.rows, ticked: [...grid.selected], kindBadge,
+      apply: (r) => {
+        const l = plugin.lines.find((x) => x.key === r.line.key);
+        if (l) Object.assign(l, r.line);
+        Object.assign(plugin, { ...r.plugin, lines: plugin.lines });
+        grid.refreshRow(r.line.key, true);
+      },
+      finish: (showEdited) => {
+        if (showEdited) { filter = 'edited'; save(); grid.setRows(visibleLines()); }
+        renderTabs(); renderFilters(); renderActions(); renderInspector();
+      },
+    }).catch(fail);
   }
   function findReplace() {
     findReplaceDialog({

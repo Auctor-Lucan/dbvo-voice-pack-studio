@@ -362,8 +362,98 @@ export const store = {
  * columns: [{ id, title, width, min, flex, render(row, index) -> Node|string, cls, resizable }]
  * Column widths can be dragged; they are remembered under `storageKey`.
  */
+// ---- clicks and re-rendering
+// A row or panel drawn again between mousedown and mouseup swallows the click (the button pressed is gone), which is
+// why a click right after typing sometimes needed a second one. Re-renders asked for while a button is down wait
+// until the click has been handled.
+let _pointerDown = false;
+const _afterPointer = new Map();
+let _gridUid = 0;
+function _flushPointer() {
+  _pointerDown = false;
+  const fns = [..._afterPointer.values()];
+  _afterPointer.clear();
+  for (const fn of fns) { try { fn(); } catch (e) { console.error(e); } }
+}
+document.addEventListener('pointerdown', (e) => { if (e.button === 0) _pointerDown = true; }, true);
+// click comes straight after pointerup in the same task, so a timeout runs after it.
+document.addEventListener('pointerup', () => { if (_pointerDown) setTimeout(_flushPointer, 0); }, true);
+document.addEventListener('pointercancel', () => setTimeout(_flushPointer, 0), true);
+window.addEventListener('blur', () => { if (_pointerDown) _flushPointer(); });
+/** A take's library path for a media URL: each name escaped, so # and % in Legacy names don't break it. */
+export const mediaPath = (p) => String(p || '').split('/').map(encodeURIComponent).join('/');
+export function pointerIsDown() { return _pointerDown; }
+/** Run fn now, or once the mouse button is released and the click handled (the latest fn per key wins). */
+export function afterPointer(key, fn) {
+  if (!_pointerDown) { fn(); return; }
+  _afterPointer.set(key, fn);
+}
+/**
+ * The spinning ↻ on lines a take is being made for. Every request spins its lines at once; the server's job (started
+ * or queued) keeps them spinning until each take arrives or that job ends. Jobs end in the order they were queued,
+ * so a quick second click never stops (or leaves spinning) the lines of another job.
+ */
+export function spinTracker(refresh) {
+  const set = new Set();
+  const finishing = new Set(); // their job ended; the take may still be on its way (it still flashes)
+  const jobs = [];
+  const busy = (x) => jobs.some((j) => j.has(x));
+  function release(ids, flash) {
+    const gone = [];
+    for (const x of [...ids]) {
+      if (busy(x)) continue;
+      if (set.delete(x)) { if (flash) { finishing.add(x); gone.push(x); } refresh(x); }
+    }
+    if (gone.length) setTimeout(() => { for (const x of gone) finishing.delete(x); }, 5000);
+  }
+  return {
+    has: (x) => set.has(x),
+    /** A take arrived: true when the line was spinning (or just finished), so its row flashes. */
+    arrived(x) {
+      const j = jobs.find((k) => k.has(x));
+      if (j) j.delete(x);
+      const was = set.has(x) || finishing.has(x);
+      finishing.delete(x);
+      if (!busy(x)) set.delete(x);
+      return was;
+    },
+    /** Spin these lines now; call accept() once the server took the job, or drop() if it didn't. */
+    request(ids) {
+      ids = [...new Set(ids || [])];
+      for (const x of ids) { set.add(x); refresh(x); }
+      let open = true;
+      return {
+        add(more) { for (const x of more || []) if (!ids.includes(x)) { ids.push(x); set.add(x); refresh(x); } },
+        accept() { if (!open) return; open = false; jobs.push(new Set(ids)); for (const x of ids) if (!set.has(x)) { set.add(x); refresh(x); } },
+        drop() { if (!open) return; open = false; release(ids, false); },
+      };
+    },
+    /** A job ended: mine = it was one of these generations. The lines still spinning for it stop. */
+    jobDone(mine) {
+      if (mine) { const j = jobs.shift(); if (j) release(j, true); }
+      if (!jobs.length) release([...set], true);
+    },
+    clear() { jobs.length = 0; release([...set], false); },
+  };
+}
+
+/** Swap every cell of a row for the fresh row's, except the cell holding the focused input; take the row's classes. */
+function patchRowAround(old, fresh) {
+  const active = document.activeElement;
+  const a = [...old.children], b = [...fresh.children];
+  for (let j = 0; j < b.length; j++) {
+    if (a[j] && a[j].contains(active)) continue;
+    if (a[j]) a[j].replaceWith(b[j]); else old.append(b[j]);
+  }
+  for (let j = b.length; j < a.length; j++) if (!a[j].contains(active)) a[j].remove();
+  old.className = fresh.className;
+  old.style.top = fresh.style.top;
+  old.dataset.index = fresh.dataset.index;
+}
+
 export class VGrid {
   constructor(container, { columns, rowHeight = 34, rowKey, rowClass, onRowClick, onRowDblClick, storageKey }) {
+    this._uid = ++_gridUid;
     this.columns = columns.map((c, i) => ({ id: c.id || String(i), min: 40, resizable: true, ...c, _orig: { width: c.width, flex: c.flex } }));
     this.storageKey = storageKey;
     const saved = storageKey ? store.get('cols:' + storageKey, {}) : {};
@@ -585,16 +675,23 @@ export class VGrid {
     return this.body.querySelector(`[data-key="${CSS.escape(String(key))}"]`);
   }
 
-  /** Re-render one row (skipped while the user is typing in it, so no keystrokes are lost). */
+  /**
+   * Re-render one row. While a mouse button is down the row waits until the click is done, so a click is never
+   * lost to a row drawn again under it. While the user types in the row, every cell but the one being typed in
+   * is drawn again (icons such as the spinning ↻ stay current, and no keystrokes are lost).
+   */
   refreshRow(key, force = false) {
+    if (pointerIsDown()) { afterPointer('row:' + this._uid + ':' + key, () => this.refreshRow(key, force)); return; }
     const el = this.rowEl(key);
     if (!el) return;
-    if (!force && el.contains(document.activeElement) && document.activeElement.matches('input,textarea,select')) return;
     const i = Number(el.dataset.index);
-    el.replaceWith(this.renderRow(this.rows[i], i));
+    const fresh = this.renderRow(this.rows[i], i);
+    if (!force && el.contains(document.activeElement) && document.activeElement.matches('input,textarea,select')) patchRowAround(el, fresh);
+    else el.replaceWith(fresh);
   }
 
   paint(force = false) {
+    if (force && pointerIsDown()) { afterPointer('paint:' + this._uid, () => this.paint(true)); return; }
     const top = this.el.scrollTop;
     const height = this.el.clientHeight || 600;
     const first = Math.max(0, Math.floor(top / this.rowHeight) - 10);
@@ -609,8 +706,7 @@ export class VGrid {
     for (let i = first; i < last; i++) {
       const r = this.rows[i];
       if (activeRow && activeRow.dataset.key === String(this.rowKey(r)) && active.matches('input,textarea,select')) {
-        activeRow.style.top = i * this.rowHeight + 'px';
-        activeRow.dataset.index = i;
+        patchRowAround(activeRow, this.renderRow(r, i));
         keep = activeRow;
         frag.append(activeRow);
         continue;

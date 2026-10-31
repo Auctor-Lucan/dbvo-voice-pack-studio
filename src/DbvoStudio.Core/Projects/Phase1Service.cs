@@ -172,6 +172,7 @@ public sealed class Phase1Service
                     nl.PreviousFinal = prev.PreviousFinal;
                     nl.PreviousOriginal = prev.PreviousOriginal;
                     nl.PlayerNameExported = prev.PlayerNameExported;
+                    nl.Proofread = prev.Proofread;
                     report.Kept++;
                 }
                 else
@@ -498,6 +499,7 @@ public sealed class Phase1Service
                         l.UserEdited = false;
                     }
                     l.Original = nl.Original;
+                    l.Proofread = false;
                     l.Suggested = nl.Suggested;
                     l.Final = nl.Final;
                     l.Kind = nl.Kind;

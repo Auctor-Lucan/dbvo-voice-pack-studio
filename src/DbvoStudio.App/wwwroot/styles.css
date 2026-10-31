@@ -1081,3 +1081,45 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 .rv-path { font-size: 12px; }
 .speakers-sec { max-width: 1180px; }
 .speakers-sec .section-body { padding: 2px 12px 6px; }
+
+/* ---- Proofread lines (Phase 1) */
+.modal-card.pr-card { width: min(780px, 94vw); }
+.modal-card.pr-card > h2:first-child { display: none; }
+.modal-card.pr-card > .row:last-child { display: none; }
+.pr-step { display: flex; flex-direction: column; gap: 12px; }
+.pr-step .modal-head h2 { font-size: 16px; }
+.pr-prog { height: 4px; background: var(--raised); border-radius: 2px; overflow: hidden; }
+.pr-prog > i { display: block; height: 100%; background: var(--accent); transition: width .15s; }
+.pr-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12.5px; }
+.pr-meta .link, .pr-sum .link { color: var(--link); }
+.pr-box { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 11px; font-size: 14.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pr-orig { color: var(--dim); }
+.pr-edit { border-color: var(--accent); min-height: 42px; outline: none; cursor: text; }
+.pr-edit:focus { box-shadow: 0 0 0 2px var(--accent-soft); }
+.pr-tag { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.5px; background: var(--raised); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; color: var(--warn); white-space: nowrap; user-select: none; }
+.pr-sugg { border: 1px solid color-mix(in srgb, var(--ok) 40%, var(--line)); background: color-mix(in srgb, var(--ok) 6%, var(--panel)); border-radius: var(--radius); padding: 9px 12px; display: flex; flex-direction: column; gap: 7px; }
+.pr-sugg.style { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: color-mix(in srgb, var(--warn) 6%, var(--panel)); }
+.pr-sugg.style .pr-ai { color: var(--warn); }
+.pr-sugg.wait { border-color: var(--line); background: var(--panel-2); }
+.pr-ai { color: var(--ok); }
+.pr-text { font-size: 14.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pr-del { background: color-mix(in srgb, var(--bad) 25%, transparent); color: color-mix(in srgb, var(--bad) 40%, var(--text)); text-decoration: line-through; border-radius: 3px; padding: 0 1px; }
+.pr-ins { background: color-mix(in srgb, var(--ok) 25%, transparent); color: color-mix(in srgb, var(--ok) 35%, var(--text)); border-radius: 3px; padding: 0 1px; }
+.pr-why { font-size: 12.5px; }
+.pr-ok { color: var(--ok); font-size: 12.5px; }
+.pill.p-ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+.pill.p-warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+.pill.p-acc { color: var(--link); border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: var(--accent-soft); }
+.pr-keys { font-size: 12px; color: var(--faint); }
+.pr-keys kbd { font-family: inherit; background: var(--raised); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--dim); }
+.pr-spin { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; display: inline-block; animation: spin 0.9s linear infinite; }
+.pr-opt { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; }
+.pr-opt.on { border-color: var(--accent); background: var(--accent-soft); }
+.pr-opt.off { opacity: .5; cursor: default; }
+.pr-radio { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--dim); margin-top: 3px; flex-shrink: 0; }
+.pr-opt.on .pr-radio { border-color: var(--accent); background: radial-gradient(var(--accent) 40%, transparent 45%); }
+.pr-check { display: flex; gap: 8px; align-items: baseline; cursor: pointer; }
+.pr-check.off { opacity: .55; cursor: default; }
+table.pr-sum { border-collapse: collapse; width: 100%; }
+table.pr-sum td { padding: 6px 4px; border-bottom: 1px solid var(--line-soft); }
+table.pr-sum td:last-child { text-align: right; font-weight: 600; }

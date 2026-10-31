@@ -193,7 +193,7 @@ public sealed partial class Backend
                 var proj = LoadRv(S(p, "id"));
                 var line = proj.Lines.FirstOrDefault(l => l.LineId == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
                 var session = await Task.Run(() => RvSession(proj));
-                var wav = await RevoiceService.OriginalWavAsync(proj, line, session, Tools(), CancellationToken.None);
+                var wav = await RevoiceService.OriginalWavAsync(proj, line, session, GrExternal(), CancellationToken.None);
                 return wav == null ? null : "data:audio/wav;base64," + Convert.ToBase64String(wav);
             }
             case "revoice.estimate": return await Locked(() => RvEstimate(p));
@@ -312,7 +312,7 @@ public sealed partial class Backend
                 var proj = LoadRv(S(p, "id"));
                 var src = proj.Sources.FirstOrDefault(x => x.Id == S(p, "sourceId")) ?? throw new InvalidOperationException("Source not found.");
                 var s = await Task.Run(() => RvSession(proj));
-                var wav = await RevoiceService.DecodeAsync(s.Files, VoiceFileIndex.Make(src, S(p, "inner")), Tools(), CancellationToken.None);
+                var wav = await RevoiceService.DecodeAsync(s.Files, VoiceFileIndex.Make(src, S(p, "inner")), GrExternal(), CancellationToken.None);
                 return "data:audio/wav;base64," + Convert.ToBase64String(wav);
             }
             case "revoice.openFolder":
@@ -630,14 +630,17 @@ public sealed partial class Backend
     {
         if (_jobCts != null) throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         _jobCts = NewJob();
+        var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
             try
             {
                 var proj = LoadRv(id);
                 Emit("progress", new { kind = "revoice", done = 0, total = 1, failed = 0, message = "Reading plugins" });
-                var prog = new DirectProgress<string>(msg => Emit("progress", new { kind = "revoice", done = 0, total = 1, failed = 0, message = msg }));
+                // Cancel stops the scan at the next plugin or archive it reads.
+                var prog = new DirectProgress<string>(msg => { ct.ThrowIfCancellationRequested(); Emit("progress", new { kind = "revoice", done = 0, total = 1, failed = 0, message = msg }); });
                 var s = RvSession(proj, prog);
+                ct.ThrowIfCancellationRequested();
                 RevoiceScanReport rep = null!;
                 await _gate.WaitAsync();
                 try
@@ -648,6 +651,7 @@ public sealed partial class Backend
                 finally { _gate.Release(); }
                 Emit("jobDone", new { kind = "revoice-scan", id, ok = true, report = rep });
             }
+            catch (OperationCanceledException) { Emit("jobDone", new { kind = "revoice-scan", id, ok = false, message = "Cancelled." }); }
             catch (Exception ex)
             {
                 App.Log("Revoice scan failed: " + ex);
@@ -680,7 +684,7 @@ public sealed partial class Backend
                 var orphans = RevoiceService.FindOrphans(proj, s);
                 var named = proj.OrphanProposals.Where(x => x.LineId != null).Select(x => (x.SourceId, x.Inner)).ToHashSet();
                 var todo = orphans.Where(o => !named.Contains((o.Source.Id, o.Inner))).ToList();
-                var tool = new WavToLip(_settings.WavToLip, Tools(), WhisperModelsFolder(), e => { if (e.Kind == "log") App.Log("Whisper: " + e.Text); });
+                var tool = new WavToLip(_settings.WavToLip, GrExternal(), WhisperModelsFolder(), e => { if (e.Kind == "log") App.Log("Whisper: " + e.Text); });
                 var (transcribe, engine) = await tool.CreateTranscriberAsync(ct);
                 var items = new List<(VoiceFile, string)>();
                 await using (engine)
@@ -693,7 +697,7 @@ public sealed partial class Backend
                         Emit("progress", new { kind = "wavlip", done = i, total = todo.Count, failed = 0, current = todo[i].Inner, message = "Transcribing orphaned files" });
                         try
                         {
-                            var wav = await RevoiceService.DecodeAsync(s.Files, todo[i], Tools(), ct);
+                            var wav = await RevoiceService.DecodeAsync(s.Files, todo[i], GrExternal(), ct);
                             var path = Path.Combine(work, $"o{i:00000}.wav");
                             await File.WriteAllBytesAsync(path, wav, ct);
                             temp.Add(path);

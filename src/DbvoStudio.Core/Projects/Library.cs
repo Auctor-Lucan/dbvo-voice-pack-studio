@@ -186,7 +186,8 @@ public sealed class Library
     public static T? Load<T>(string path) where T : class
     {
         if (!File.Exists(path)) return null;
-        using var s = File.OpenRead(path);
+        // Shared for writing and replacing: a save of the same file (another thread) must never fail because of this read.
+        using var s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         return JsonSerializer.Deserialize<T>(s, Json);
     }
 
@@ -197,9 +198,15 @@ public sealed class Library
     {
         BeforeSave?.Invoke(path);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var tmp = path + ".tmp";
+        var tmp = path + "." + Guid.NewGuid().ToString("N")[..8] + ".tmp"; // two saves at once never share a temp file
         using (var s = File.Create(tmp))
             JsonSerializer.Serialize(s, value, Json);
-        File.Move(tmp, path, true);
+        // Windows: a reader elsewhere (a backup zip, an antivirus scan) can hold the file for a moment.
+        for (int attempt = 0; ; attempt++)
+        {
+            try { File.Move(tmp, path, true); return; }
+            catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && attempt < 8) { Thread.Sleep(60 * (attempt + 1)); }
+            catch { try { File.Delete(tmp); } catch { } throw; }
+        }
     }
 }

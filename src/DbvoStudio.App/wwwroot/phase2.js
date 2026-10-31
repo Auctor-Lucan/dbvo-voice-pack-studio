@@ -1,5 +1,5 @@
 // Phase 2: DBVO Patches (voice pack x mods) and Voice Changer patches — generation grid, takes, export.
-import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats, withBusy, pathText, pathRows, pathList, searchLamp, dragSource, dragTarget, closeAllModals, namingLabel } from './lib.js';
+import { flashRow, TOOL_TIPS, popover, rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, diffAdded, aiReady, autotagSummary, switchEl, segmented, popupMenu, columnsMenu, tip, icon, ringIcon, mergeInto, askFixOverwrite, needInfo, helpButton, generateButton, outputFormats, withBusy, pathText, pathRows, pathList, searchLamp, dragSource, dragTarget, closeAllModals, namingLabel, afterPointer, spinTracker, mediaPath } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { bulkTagDialog as sharedBulkTagDialog, insertTagAtCaret, findReplaceDialog } from './tagtools.js';
 import { recordTake } from './recorder.js';
@@ -275,8 +275,7 @@ export async function patchView(id) {
   let focusedId = null;
   let voices = [], models = [], localVoices = [];
   let creditsEl = null; // one credits button per page, updated in place
-  const inFlight = new Set(); // lines a take is being made for: their ↻ spins until the take arrives
-  const finishing = new Set(); // in flight when the job ended; their take may still be on its way
+  const inFlight = spinTracker((x) => grid.refreshRow(x)); // lines a take is being made for: their ↻ spins until it arrives
   const creditsSlot = h('span.credits-slot');
   { const c = engineCache.get(vc ? 'sts' : voice.engine || 'elevenlabs'); if (c) ({ voices, models, localVoices } = c); }
   let showInsp = store.get('insp2', true);
@@ -401,7 +400,7 @@ export async function patchView(id) {
   function play(l, take) {
     const t = take || l.takes.find((x) => x.id === l.selectedTakeId);
     if (!t) return;
-    audio.src = patch.mediaBase + encodeURI(t.wav) + '?t=' + Date.now();
+    audio.src = patch.mediaBase + mediaPath(t.wav) + '?t=' + Date.now();
     audio.play().catch(fail);
   }
 
@@ -514,7 +513,7 @@ export async function patchView(id) {
 
   // done: the line came back from generation (only then does its ↻ stop and the row flash).
   function replaceLine(nl, done = false) {
-    const wasInFlight = done && (inFlight.delete(nl.lineId) | finishing.delete(nl.lineId));
+    const wasInFlight = done && inFlight.arrived(nl.lineId);
     const i = patch.lines.findIndex((x) => x.lineId === nl.lineId);
     if (i >= 0) patch.lines[i] = nl;
     index.set(nl.lineId, nl);
@@ -523,9 +522,12 @@ export async function patchView(id) {
     if (lastEdit && lastEdit.line.lineId === nl.lineId) lastEdit.line = nl;
     grid.refreshRow(nl.lineId);
     if (wasInFlight) flashRow(grid, nl.lineId, nl.status === 'Failed');
-    if (focusedId === nl.lineId && !insp.contains(document.activeElement)) renderInspector();
-    renderCounts();
-    renderActions();
+    // Drawn after a click in progress, so the button pressed (often right after typing) still gets the click.
+    afterPointer('p2:line', () => {
+      if (focusedId === nl.lineId && !insp.contains(document.activeElement)) renderInspector();
+      renderCounts();
+      renderActions();
+    });
   }
 
   // ---- toolbar: the voice pack's engine settings, saved on every change
@@ -586,7 +588,7 @@ export async function patchView(id) {
   function tagsContextRow() {
     if (vc || voice.engine !== 'elevenlabs' || /v3/i.test((voice.eleven || {}).modelId || '')) return null; // eleven_v3 takes no context
     return h('div.pause-row',
-      switchEl(!!patch.tagsAsContext, async (v) => { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: v }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Leading tags as context', { title: 'This patch, new takes: the [tags] at the start of a line are sent to ElevenLabs as context (the text before the line) instead of as part of the line. Context isn\'t counted against your credits, and short lines no longer get doubled words from their tags. Tags later in the line stay in the text.' }),
+      switchEl(!!patch.tagsAsContext, async (v) => { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: v }); reindex(); renderAll(); } catch (e) { fail(e); renderAll(); } }, 'Leading tags as context', { title: 'This patch, new takes: the [tags] at the start of a line are sent to ElevenLabs as context (the text before the line) instead of as part of the line. Context isn\'t counted against your credits, and short lines no longer get doubled words from their tags. Tags later in the line stay in the text.' }),
       h('div.faint', 'Leading [tags] don\'t use credits, but they come through weaker: add "Extremely", e.g. [British Extremely Baleful] instead of [British Baleful] (in tests it only strengthens the next word; "Very" barely helped). Check the billed credits in the takes window.'));
   }
   function outputGroup(fields, o) {
@@ -1010,13 +1012,6 @@ export async function patchView(id) {
     return btn;
   }
 
-  // Spinning ↻ on the lines being made, cleared as each take arrives (or all at once when the job ends).
-  function markInFlight(ids) {
-    const before = [...inFlight];
-    inFlight.clear();
-    for (const x of ids || []) inFlight.add(x);
-    for (const x of new Set([...before, ...inFlight])) grid.refreshRow(x);
-  }
 
   // ---- 7.0: record, review, check takes, earlier packs, merge, spreadsheet, cache
   async function record(l) {
@@ -1223,17 +1218,19 @@ export async function patchView(id) {
   let autoPlay = null; // { lineId, takes }
   async function generate(mode, lineIds, { autoplay = false } = {}) {
     autoPlay = null;
+    // One line spins at once, before the server answers; a batch once it is confirmed.
+    const spin = inFlight.request(lineIds && lineIds.length === 1 ? lineIds : []);
     try {
-      if (lineIds && lineIds.length === 1) markInFlight(lineIds); // spin at once, before the server answers
       const est = await rpc('patch.estimate', { id, mode, lineIds });
-      if (!est.count) { markInFlight(null); toast(vc ? 'Nothing to convert.' : 'Nothing to generate.'); return; }
+      if (!est.count) { spin.drop(); toast(vc ? 'Nothing to convert.' : 'Nothing to generate.'); return; }
       // One line never asks; batches ask unless that is turned off in Global Settings.
       const confirmBatch = (app.state.settings.ui || {}).confirmBatch !== 'false';
       if (est.count === 1 || !confirmBatch) {
-        if (!est.voiceId) { markInFlight(null); toast('Pick a voice in the toolbar first.', true); return; }
+        if (!est.voiceId) { spin.drop(); toast('Pick a voice in the toolbar first.', true); return; }
         if (autoplay && lineIds && lineIds.length === 1) { const l0 = index.get(lineIds[0]); autoPlay = { lineId: lineIds[0], takes: l0 ? l0.takes.length : 0 }; }
-        markInFlight(lineIds);
-        await rpc('patch.generate', { id, mode, lineIds }).catch((e) => { markInFlight(null); throw e; });
+        spin.add(lineIds);
+        await rpc('patch.generate', { id, mode, lineIds });
+        spin.accept();
         renderActions();
         return;
       }
@@ -1281,11 +1278,12 @@ export async function patchView(id) {
         est.cloud && !est.hasKey ? h('div.banner.bad', { style: { margin: 0 } }, `${est.engineName} needs your API key: Global Settings → General & tools → Voice engines.`) : null,
         est.standardWarning ? h('div.banner.warn', { style: { margin: 0 } }, est.standardWarning) : null,
       ], [{ label: 'Cancel', value: false }, { label: `${vc ? 'Convert' : 'Generate'} ${est.count} line(s)`, primary: true, value: !missingVoice && !(est.cloud && !est.hasKey) }], { help: 'generating' });
-      if (!ok) { markInFlight(null); return; }
-      markInFlight(mode === 'selected' ? lineIds : patch.lines.filter(mode === 'marked' ? (l) => l.marked && canGen(l) : mode === 'all' ? (l) => !l.omitted && !l.excluded && canGen(l) : mode === 'edited' ? editedLine : pendingLine).map((l) => l.lineId));
-      await rpc('patch.generate', { id, mode, lineIds }).catch((e) => { markInFlight(null); throw e; });
+      if (!ok) { spin.drop(); return; }
+      spin.add(mode === 'selected' ? lineIds : patch.lines.filter(mode === 'marked' ? (l) => l.marked && canGen(l) : mode === 'all' ? (l) => !l.omitted && !l.excluded && canGen(l) : mode === 'edited' ? editedLine : pendingLine).map((l) => l.lineId));
+      await rpc('patch.generate', { id, mode, lineIds });
+      spin.accept();
       renderActions();
-    } catch (e) { markInFlight(null); fail(e); }
+    } catch (e) { spin.drop(); fail(e); }
   }
 
   const filesModal = (title, summary, files) => modal(title, [summary, files && files.length ? h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), pathList(files)) : null]);
@@ -1375,7 +1373,7 @@ export async function patchView(id) {
           h('span', h('b', 'Voice Changer is on. '), 'Lines are converted from another voice pack\'s recordings of this mod (the source folders in Folders & options), so delivery and timing come from the source. Only worth it when the mod is already DBVO-patched with another voice.'),
           noSrc ? h('span', h('b', `${noSrc} line(s) have no source file`), ' — usually lines added by a mod update after the source pack was made, or lines it never voiced. Generate them with text-to-speech (the voice pack\'s ', h('b', ENGINE_NAME[voice.engine || 'elevenlabs'] || voice.engine), ' settings; turn the Voice Changer off to adjust those), or leave them unvoiced.') : h('span.dim', 'Every line has a source file.')),
           h('div.spacer'),
-          noSrc ? switchEl(!!patch.ttsForMissing, async (on) => { try { patch = await rpc('patch.saveMeta', { id, ttsForMissing: on }); reindex(); renderAll(); } catch (e) { fail(e); } }, 'Generate lines without a source with text-to-speech', { title: 'Off: lines without a source stay unvoiced. On: Generate options ▾ → Missing also voices them with text-to-speech.' }) : null));
+          noSrc ? switchEl(!!patch.ttsForMissing, async (on) => { try { patch = await rpc('patch.saveMeta', { id, ttsForMissing: on }); reindex(); renderAll(); } catch (e) { fail(e); renderAll(); } }, 'Generate lines without a source with text-to-speech', { title: 'Off: lines without a source stay unvoiced. On: Generate options ▾ → Missing also voices them with text-to-speech.' }) : null));
       }
       if (c.fuzOnly && !store.get('fuz-banner-off:' + id, false)) banners.append(h('div.banner.info', h('span', `${c.fuzOnly} line(s) have no WAV + LIP here but a .fuz in the final folder. Import them as takes so they count as done and can be played.`),
         h('div.spacer'), h('button.btn.sm', { title: 'Unpack the .fuz files into WAV + LIP takes so they show as generated', onclick: async () => { try { await rpc('patch.importFuz', { id }); } catch (e) { fail(e); } } }, 'Import from .fuz'),
@@ -1608,7 +1606,7 @@ export async function patchView(id) {
     if (!document.body.contains(view)) return;
     if (syncSkipped) { syncSkipped = false; sync(); } // Phase 1 changes held back while the task ran
     // The last take's line can arrive just after the job ends: it still flashes.
-    if (inFlight.size) { for (const x of inFlight) finishing.add(x); setTimeout(() => finishing.clear(), 5000); markInFlight(null); }
+    inFlight.jobDone(!!e.detail && e.detail.kind === 'generate' && e.detail.patchId === id);
     if (e.detail && (e.detail.kind === 'import' || e.detail.kind === 'qa') && e.detail.patchId === id) {
       patch = await rpc('patch.get', { id });
       reindex();

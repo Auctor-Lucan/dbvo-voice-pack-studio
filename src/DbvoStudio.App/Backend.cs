@@ -38,7 +38,7 @@ public sealed partial class Backend
     /// Claims the one job slot: a queued job (started from the timer) and a job the user starts can check _jobCts at the
     /// same moment, and two jobs at once would let the first one's end re-enable Undo and Edit take while the other writes.
     /// </summary>
-    private CancellationTokenSource NewJob()
+    private CancellationTokenSource NewJob(string? generating = null)
     {
         var c = new CancellationTokenSource();
         if (Interlocked.CompareExchange(ref _jobCts, c, null) != null)
@@ -46,7 +46,16 @@ public sealed partial class Backend
             c.Dispose();
             throw new InvalidOperationException("Another task is still running (see the bar at the top). Wait for it to finish, or press Cancel there.");
         }
+        _generating = generating;
         return c;
+    }
+    /// <summary>The DBVO Patch or Voiced Books project the running job generates takes for (null: none).</summary>
+    private volatile string? _generating;
+    /// <summary>Changes that rebuild a project's lines wait while takes are being made for it: a line swapped for a new one mid-request loses its paid-for take.</summary>
+    private void NotWhileGenerating(string id)
+    {
+        if (_jobCts != null && _generating == id)
+            throw new InvalidOperationException("Takes are being made for this project right now. Wait for that to finish (or press Cancel in the bar at the top), then make this change: it rebuilds the lines being generated.");
     }
     private List<ElevenVoice>? _voices;
     private List<ElevenModel>? _models;
@@ -347,7 +356,7 @@ public sealed partial class Backend
                     var keys = Strings(p, "keys").ToHashSet();
                     var lines = pl.Lines.Where(l => l.IsPlayerName && l.Status != Phase1Status.Removed && (keys.Count == 0 || keys.Contains(l.Key))).ToList(); // excluded or not voiced here: still exported
                     if (lines.Count == 0) throw new InvalidOperationException("No player-name lines to export.");
-                    var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                    var downloads = DownloadsFolder();
                     Directory.CreateDirectory(downloads);
                     var file = Path.Combine(downloads, $"Player name lines - {SafeFile(mod.Name)}.txt");
                     Core.Topics.TopicFile.Write(file, lines.Select(l => (l.Final ?? l.Original).Trim()).Distinct());
@@ -381,6 +390,7 @@ public sealed partial class Backend
                 });
             case "line1.update": return await Locked(() => UpdatePhase1Line(p));
             case "line1.bulk": return await Locked(() => BulkPhase1(p));
+            case "line1.proofread": return await ProofreadBatch(p);
             case "mod.writeOutputs": return await Locked(() => WriteModOutputs(p));
 
             // ---- DBVO Patches (Phase 2)
@@ -422,6 +432,7 @@ public sealed partial class Backend
             case "patch.saveMeta":
                 return await Locked(() =>
                 {
+                    NotWhileGenerating(S(p, "id"));
                     var patch = LoadPatch(S(p, "id"));
                     patch.Name = S(p, "name", patch.Name);
                     if (p.TryGetProperty("modIds", out _)) patch.ModIds = Strings(p, "modIds");
@@ -755,12 +766,34 @@ public sealed partial class Backend
     // One shared instance per patch, so a running job and edits in the grid work on the same object.
     private readonly Dictionary<string, DbvoPatch> _patches = new();
 
+    [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int SHGetKnownFolderPath([System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPStruct)] Guid id, uint flags, IntPtr token, out IntPtr path);
+    /// <summary>The user's Downloads folder, also when it was moved (OneDrive, another drive).</summary>
+    private static string DownloadsFolder()
+    {
+        try
+        {
+            if (SHGetKnownFolderPath(new Guid("374DE290-123F-4565-9164-39C4925E467B"), 0, IntPtr.Zero, out var ptr) == 0)
+            {
+                try { var p = System.Runtime.InteropServices.Marshal.PtrToStringUni(ptr); if (!string.IsNullOrEmpty(p)) return p; }
+                finally { System.Runtime.InteropServices.Marshal.FreeCoTaskMem(ptr); }
+            }
+        }
+        catch { /* not Windows, or the shell call failed: the usual place */ }
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+    }
+
+    /// <summary>A file in the library as a media.dbvo URL; every folder and file name is escaped (# and % in Legacy names).</summary>
+    private string MediaUrl(string path) => "https://media.dbvo/" + string.Join("/", Path.GetRelativePath(_lib.Root, path).Split('\\', '/').Select(Uri.EscapeDataString));
+
     private DbvoPatch LoadPatch(string id)
     {
         lock (_patches)
         {
             if (_patches.TryGetValue(id, out var cached)) return cached;
             var p = _lib.LoadPatch(id) ?? throw new InvalidOperationException("DBVO Patch not found.");
+            // Lines left "Generating" when the app closed during a batch: nothing is generating them now.
+            foreach (var l in p.Lines.Where(l => l.Status == Phase2Status.Generating)) l.Status = l.Takes.Count > 0 ? Phase2Status.Generated : Phase2Status.Pending;
             // Patches from the first test build had no folders of their own: fill them from the voice pack's templates.
             if (string.IsNullOrWhiteSpace(p.WavLipFolder) && string.IsNullOrWhiteSpace(p.FinalRoot))
             {
@@ -843,7 +876,7 @@ public sealed partial class Backend
         voiced = l.Voiced, l.VoiceApproved, l.FixApproved, defaultVoice = l.DefaultVoice, defaultFix = l.DefaultFix,
         inFix = !topicFile && l.NeedsOverride, stage = l.IsStageDirection, needsDecision = l.NeedsVoiceDecision,
         changed = l.Final != null && l.Final != l.Original,
-        isPlayerName = l.IsPlayerName, l.PlayerNameExported,
+        isPlayerName = l.IsPlayerName, l.PlayerNameExported, l.Proofread,
         hasOtherAlias = ScriptRules.HasOtherAlias(l.Original),
         hasPlaceholder = l.Final != null && ScriptRules.HasPlaceholder(LineNaming.SpokenPart(l.Final)),
     };
@@ -908,6 +941,13 @@ public sealed partial class Backend
             case "accept": Phase1Service.AcceptSuggestion(line); break;
             case "revert": Phase1Service.RevertToOriginal(line); break;
             case "review": line.Reviewed = true; break;
+            case "proofread":
+                // Proofread lines: the text as the user left it (an edit goes into the DBVO Fix plugin like any edit).
+                if (p.TryGetProperty("text", out var pt) && pt.ValueKind == JsonValueKind.String && pt.GetString()!.Trim() != (line.Final ?? line.Original).Trim())
+                    Phase1Service.SetFinal(line, pt.GetString());
+                line.Proofread = true;
+                break;
+            case "unproofread": line.Proofread = false; break;
             case "exclude": line.Excluded = B(p, "value"); line.Reviewed = true; break;
             case "includeHidden": line.IncludeAnyway = B(p, "value"); break;
             case "variants":
@@ -932,6 +972,29 @@ public sealed partial class Backend
         }
         _lib.Save(mod);
         return new { line = Line1Dto(line, plugin.IsTopicFile), plugin = PluginDto(new Phase1Service(_lib, Runtime()), mod, plugin, false) };
+    }
+
+    /// <summary>Proofread lines: AI suggestions for up to one batch of lines (spelling, grammar, punctuation).</summary>
+    private async Task<object> ProofreadBatch(JsonElement p)
+    {
+        var mod = LoadMod(S(p, "modId"));
+        var plugin = mod.Plugins.First(x => x.FileName == S(p, "plugin"));
+        var keys = Strings(p, "keys").Take(Core.Text.Proofreader.BatchSize).ToList();
+        var byKey = plugin.Lines.GroupBy(l => l.Key).ToDictionary(g => g.Key, g => g.First());
+        var lines = keys.Where(byKey.ContainsKey).Select(k => (k, byKey[k].Final ?? byKey[k].Original)).Where(x => !string.IsNullOrWhiteSpace(x.Item2)).ToList();
+        if (lines.Count == 0) return new { suggestions = Array.Empty<object>() };
+        var rt = Runtime();
+        using var ai = new AutoTagger(rt.AiProvider.Endpoint, rt.AiProvider.ApiKey, rt.AiProvider.Model);
+        var (prompt, sent) = Core.Text.Proofreader.BuildBatch(lines);
+        var r = await ai.ChatAsync(Core.Text.Proofreader.SystemPrompt, prompt, 0.1, CancellationToken.None);
+        if (r.Error != null) throw new InvalidOperationException(r.Error);
+        List<Core.Text.ProofSuggestion> list;
+        try { list = Core.Text.Proofreader.ParseReply(r.Text!, sent); }
+        catch (Exception ex) when (ex is FormatException or JsonException)
+        {
+            throw new InvalidOperationException("The AI provider's answer couldn't be read as suggestions. Try again, or try another model in " + FriendlyError.AiPlace + ".");
+        }
+        return new { suggestions = list.Select(x => new { key = x.Key, text = x.Text, kind = x.Kind, why = x.Why }) };
     }
 
     private object BulkPhase1(JsonElement p)
@@ -1227,7 +1290,7 @@ public sealed partial class Backend
         var id = S(p, "id");
         var mode = S(p, "mode", "missing");
         List<string>? ids = p.TryGetProperty("lineIds", out var li) && li.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds") : null;
-        _jobCts = NewJob();
+        _jobCts = NewJob(S(p, "id"));
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
@@ -1436,6 +1499,10 @@ public sealed partial class Backend
         bool existingLibrary = File.Exists(Path.Combine(target, "settings.json"));
         if (!existingLibrary)
         {
+            // A folder inside the library (or the library inside it) would be copied into itself without end.
+            string Slash(string x) => x.TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+            if (Slash(target).StartsWith(Slash(_lib.Root), StringComparison.OrdinalIgnoreCase) || Slash(_lib.Root).StartsWith(Slash(target), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Choose a folder outside the current library: a folder inside it (or one that holds it) can't take a copy of it.");
             if (Directory.Exists(target) && Directory.EnumerateFileSystemEntries(target).Any())
                 throw new InvalidOperationException("That folder is not empty and holds no library. Choose an empty folder or an existing DBVO Studio library.");
             CopyDirectory(_lib.Root, target);
