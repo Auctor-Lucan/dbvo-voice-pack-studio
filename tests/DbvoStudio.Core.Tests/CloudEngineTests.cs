@@ -74,6 +74,27 @@ public class CloudEngineTests
         Assert.Contains("out of credits", ex.Message);
     }
 
+    [Theory]
+    [InlineData("http://127.0.0.1:5123/v1/audio/speech", "http://127.0.0.1:5123/v1/audio/speech", false)]
+    [InlineData("192.168.1.20:8004", "http://192.168.1.20:8004/v1/audio/speech", false)]
+    [InlineData("https://api.openai.com/v1", "https://api.openai.com/v1/audio/speech", true)]
+    public async Task OpenAi_key_never_goes_to_a_local_server_and_a_full_endpoint_isnt_doubled(string baseUrl, string expected, bool keySent)
+    {
+        var wav = new Audio.WavFile { SampleRate = 24000, Channels = 1, Samples = new short[240] }.ToBytes();
+        var h = new Fake((r, _) => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(wav) });
+        var v = new VoicePack { OpenAi = { BaseUrl = baseUrl, Voice = "default" } };
+        await new CloudTtsClient("openai", "sk-secret", new HttpClient(h)).SpeakAsync("Hi.", null, null, v, default);
+        var (req, _) = h.Seen.Single();
+        Assert.Equal(expected, req.RequestUri!.ToString());
+        Assert.Equal(keySent, req.Headers.Authorization != null);
+    }
+
+    [Theory]
+    [InlineData(@"{mod} Sound\Sound\DBVO\{packId}", 12)]
+    [InlineData(@"Sound\DBVO\{packId}", 0)]
+    [InlineData(@"My Sound Mod\x", -1)]
+    public void Sound_folder_is_a_whole_folder_name(string path, int at) => Assert.Equal(at, DbvoStudio.Core.Projects.Phase2Service.SoundFolderAt(path.Replace(@"\\", @"\")));
+
     [Fact]
     public async Task OpenAi_compatible_on_this_pc_needs_no_key_and_rejects_mp3()
     {

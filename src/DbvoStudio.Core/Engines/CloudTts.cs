@@ -271,7 +271,8 @@ public sealed class CloudTtsClient : IDisposable
     {
         _engine = engine;
         _key = string.IsNullOrWhiteSpace(key) ? null : key.Trim();
-        _http = http ?? new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+        // OpenAI-compatible servers are often local ones on a CPU or small GPU: a long Books part can take a while.
+        _http = http ?? new HttpClient { Timeout = TimeSpan.FromMinutes(engine == "openai" ? 15 : 3) };
     }
 
     public void Dispose() => _http.Dispose();
@@ -390,7 +391,7 @@ public sealed class CloudTtsClient : IDisposable
         };
         using var resp = await PostAsync("https://api.inworld.ai/tts/v1/voice", body, m => m.Headers.Authorization = new AuthenticationHeaderValue("Basic", key), ct);
         var json = JsonNode.Parse(await resp.Content.ReadAsStringAsync(ct));
-        var b64 = json?["audioContent"]?.GetValue<string>() ?? throw new CloudTtsException("Inworld: no audio in the reply.", true);
+        var b64 = json?["audioContent"]?.GetValue<string>() ?? throw new CloudTtsException("Inworld: no audio in the reply.", false); // answered (maybe billed): not retried
         int? used = Num(json?["usage"]?["processedCharactersCount"]);
         return new CloudAudio(Pcm.ToMono44100(Convert.FromBase64String(b64), 44100, Name), used);
     }
@@ -456,7 +457,7 @@ public sealed class CloudTtsClient : IDisposable
             int http = status switch { 1004 => 401, 1008 => 402, 1002 or 1039 => 429, _ => 400 };
             throw new CloudTtsException(Explain(http, $"MiniMax status {status}: {msg}"), http == 429);
         }
-        var hex = json?["data"]?["audio"]?.GetValue<string>() ?? throw new CloudTtsException("MiniMax: no audio in the reply.", true);
+        var hex = json?["data"]?["audio"]?.GetValue<string>() ?? throw new CloudTtsException("MiniMax: no audio in the reply.", false); // answered (maybe billed): not retried
         int? used = Num(json?["extra_info"]?["usage_characters"]);
         return new CloudAudio(Pcm.ToMono44100(Convert.FromHexString(hex), 44100, Name), used);
     }
@@ -481,11 +482,14 @@ public sealed class CloudTtsClient : IDisposable
             catch (JsonException) { throw new InvalidOperationException("OpenAI-compatible: Extra fields must be a JSON object, like {\"exaggeration\": 0.6}."); }
             foreach (var (k, v) in extra) body[k] = v?.DeepClone();
         }
-        // A base address that already ends in /v1 (as many local servers print it) isn't doubled.
-        var url = baseUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? baseUrl + "/audio/speech" : baseUrl + "/v1/audio/speech";
+        // A base address that already ends in /v1 (as many local servers print it), or is the whole endpoint, isn't doubled.
+        var b = System.Text.RegularExpressions.Regex.Replace(baseUrl.TrimEnd('/'), @"(/v1)?/audio/speech$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var url = b.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? b + "/audio/speech" : b + "/v1/audio/speech";
+        // The saved key is only sent to servers outside this PC and network: a local server never gets the OpenAI key.
+        bool local = TtsEngines.IsLocalAddress(baseUrl);
         using var resp = await PostAsync(url, body, m =>
         {
-            if (_key != null) m.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _key);
+            if (_key != null && !local) m.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _key);
         }, ct);
         var audio = await resp.Content.ReadAsByteArrayAsync(ct);
         Pcm.RequireWav(audio, Name);

@@ -169,7 +169,7 @@ public sealed class FomodService
     {
         var tpl = Phase2Service.ResolveFuzTemplate(patch, voice);
         var expanded = Phase2Service.ExpandTemplate(tpl, mod.Name, voice, patch).Replace('/', '\\');
-        int i = expanded.IndexOf(@"Sound\", StringComparison.OrdinalIgnoreCase);
+        int i = Phase2Service.SoundFolderAt(expanded);
         var prefix = i < 0 ? "" : expanded[..i].TrimEnd('\\');
         return string.IsNullOrEmpty(prefix) ? patch.FinalRoot : Path.Combine(patch.FinalRoot, prefix);
     }

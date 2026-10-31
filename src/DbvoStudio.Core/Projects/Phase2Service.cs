@@ -126,7 +126,8 @@ public sealed partial class Phase2Service
     public SyncReport Sync(DbvoPatch patch, VoicePack voice, IReadOnlyList<Mod> mods)
     {
         var report = new SyncReport();
-        var refKeys = ReferenceKeys(patch.ReferenceIds, voice.Naming);
+        // DBReV finds a line by plugin and FormID, never by its text, so another pack's file for the same text can't stand in.
+        var refKeys = voice.Naming == NamingMode.Dbrev ? new Dictionary<string, string>() : ReferenceKeys(patch.ReferenceIds, voice.Naming);
         // Parked lines (left Phase 1 earlier, with takes) come back with their takes when the line returns.
         var old = patch.Lines.Concat(patch.Parked).GroupBy(l => l.Key).ToDictionary(g => g.Key, g => g.First());
         var result = new Dictionary<string, Phase2Line>();
@@ -270,22 +271,40 @@ public sealed partial class Phase2Service
     /// Names a line's files may have: for a DBReV pack &lt;plugin&gt;\dbrev_line_&lt;FormID&gt; per source first; then the
     /// voice pack's DBVO naming, then the other one.
     /// </summary>
-    private IEnumerable<string> Stems(Phase2Line l, VoicePack v)
+    private IEnumerable<string> Stems(Phase2Line l, VoicePack v, ISet<string>? shared = null)
     {
         if (v.Naming == NamingMode.Dbrev)
         {
-            var mods = _mods ??= _lib.LoadMods();
-            foreach (var src in l.Sources.Where(x => !string.IsNullOrWhiteSpace(x.Plugin)))
-            {
-                var pl = mods.FirstOrDefault(m => m.Id == src.ModId)?.Plugins.FirstOrDefault(x => string.Equals(x.FileName, src.Plugin, StringComparison.OrdinalIgnoreCase));
-                yield return Path.Combine(src.Plugin, LineNaming.DbrevName(LineNaming.DbrevFormId(src.FormId, pl != null && IsLight(pl), pl?.Masters.Count ?? 0), 0));
-            }
+            // A FormID several lines of the patch share (text variants of one record) is left out: its base file
+            // belongs to one of them only, and its numbered files depend on the kept takes, so a guess would give a line
+            // another line's audio.
+            foreach (var name in DbrevBases(l))
+                if (shared == null || !shared.Contains(name)) yield return name;
         }
         var naming = v.Naming == NamingMode.Dbrev ? NamingMode.Dbvo2Hash : v.Naming;
         yield return LineNaming.Stem(l.FinalLine, naming);
         yield return LineNaming.Stem(l.FinalLine, naming == NamingMode.Legacy ? NamingMode.Dbvo2Hash : NamingMode.Legacy);
     }
     private IReadOnlyList<Mod>? _mods;
+
+    /// <summary>A line's DBReV base names, &lt;plugin&gt;\dbrev_line_&lt;FormID&gt;, one per source plugin.</summary>
+    private IEnumerable<string> DbrevBases(Phase2Line l)
+    {
+        var mods = _mods ??= _lib.LoadMods();
+        foreach (var src in l.Sources.Where(x => !string.IsNullOrWhiteSpace(x.Plugin)))
+        {
+            var pl = mods.FirstOrDefault(m => m.Id == src.ModId)?.Plugins.FirstOrDefault(x => string.Equals(x.FileName, src.Plugin, StringComparison.OrdinalIgnoreCase));
+            yield return Path.Combine(src.Plugin, LineNaming.DbrevName(LineNaming.DbrevFormId(src.FormId, pl != null && IsLight(pl), pl?.Masters.Count ?? 0), 0));
+        }
+    }
+
+    /// <summary>DBReV base names that more than one line of the patch has.</summary>
+    private HashSet<string>? SharedDbrevBases(DbvoPatch patch, VoicePack v)
+    {
+        if (v.Naming != NamingMode.Dbrev) return null;
+        return patch.Lines.SelectMany(l => DbrevBases(l).Distinct(StringComparer.OrdinalIgnoreCase)).GroupBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
 
     /// <summary>A file's lookup names: its stem, and for a DBReV file also &lt;plugin folder&gt;\dbrev_line_….</summary>
     private static void AddFileKeys(Dictionary<string, string> into, string file)
@@ -308,10 +327,11 @@ public sealed partial class Phase2Service
         foreach (var f in Directory.EnumerateFiles(patch.WavLipFolder, "*.wav", SearchOption.AllDirectories)) AddFileKeys(wavs, f);
         if (wavs.Count == 0) return 0;
         int n = 0;
+        var shared = SharedDbrevBases(patch, voice);
         foreach (var line in patch.Lines.Where(l => l.Takes.Count == 0 && !l.NoAdopt))
         {
             string? wav = null;
-            foreach (var stem in Stems(line, voice)) if (wavs.TryGetValue(stem, out wav)) break;
+            foreach (var stem in Stems(line, voice, shared)) if (wavs.TryGetValue(stem, out wav)) break;
             if (wav == null) continue;
             var lip = Path.ChangeExtension(wav, ".lip");
             if (!File.Exists(lip)) continue; // a WAV without its LIP is not a finished line
@@ -335,10 +355,11 @@ public sealed partial class Phase2Service
         if (wavs.Count == 0) return (0, 0);
         var root = _lib.PatchFolder(patch.Id);
         int adopted = 0, added = 0;
+        var shared = SharedDbrevBases(patch, voice);
         foreach (var line in patch.Lines)
         {
             string? wav = null;
-            foreach (var stem in Stems(line, voice)) if (wavs.TryGetValue(stem, out wav)) break;
+            foreach (var stem in Stems(line, voice, shared)) if (wavs.TryGetValue(stem, out wav)) break;
             if (wav == null) continue;
             var lip = Path.ChangeExtension(wav, ".lip");
             if (!File.Exists(lip)) continue;
@@ -441,8 +462,9 @@ public sealed partial class Phase2Service
         var fuz = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var d in folders)
             foreach (var f in Directory.EnumerateFiles(d, "*.fuz", voice.Naming == NamingMode.Dbrev ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly)) AddFileKeys(fuz, f);
+        var shared = SharedDbrevBases(patch, voice);
         foreach (var line in patch.Lines.Where(l => l.Takes.Count == 0 && !l.IsOmitted && !l.NoAdopt))
-            foreach (var stem in Stems(line, voice))
+            foreach (var stem in Stems(line, voice, shared))
                 if (fuz.TryGetValue(stem, out var f)) { list.Add((line, f)); break; }
         return list;
     }
@@ -1012,10 +1034,17 @@ public sealed partial class Phase2Service
     }
 
     /// <summary>The .fuz folder of a DBReV pack: the part of the template above Sound\, then Sound\DBReV\{packId}.</summary>
+    /// <summary>Where the folder named Sound starts in a path (a whole folder name, not "My Sound\"); -1 if none.</summary>
+    public static int SoundFolderAt(string path)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(path, @"(?<=^|[\\/])Sound[\\/]", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return m.Success ? m.Index : -1;
+    }
+
     public static string DbrevTemplate(string template)
     {
         var t = template.Replace('/', '\\');
-        int i = t.IndexOf(@"Sound\", StringComparison.OrdinalIgnoreCase);
+        int i = SoundFolderAt(t);
         var prefix = i < 0 ? "" : t[..i];
         return prefix + @"Sound\DBReV\{packId}";
     }
@@ -1354,7 +1383,11 @@ public sealed partial class Phase2Service
         if (voice.Naming == NamingMode.Dbrev)
         {
             // DBReV finds a line by plugin and FormID: a line that only comes from a topic .txt has none
-            int noId = DbrevPlan(ExportLines(patch), mods).Count(kv => kv.Value.Count == 0 && kv.Key.SelectedTake != null);
+            var dplan = DbrevPlan(ExportLines(patch), mods);
+            int noId = dplan.Count(kv => kv.Value.Count == 0 && kv.Key.SelectedTake != null);
+            // Takes beyond the 20 files one FormID can have (kept takes of text variants add up).
+            var cut = dplan.Where(kv => kv.Value.Count > 0).Count(kv => kv.Value.Count < kv.Key.Takes.Where(t => t.Kept || t == kv.Key.SelectedTake).Distinct().Count() * kv.Value.Select(x => DbrevBase(x.Rel)).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+            if (cut > 0) list.Add($"{cut} line(s) have more kept takes than DBReV's 20 files per line allow (text variants of one line share them). The extra takes were left out.");
             if (noId > 0) list.Add($"{noId} line(s) only come from topic files, so they have no FormID and Dragonborn ReVoiced can't play them. They were left out of the DBReV export.");
         }
         foreach (var mod in mods.Where(m => patch.ModIds.Contains(m.Id)))
