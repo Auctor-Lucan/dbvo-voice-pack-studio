@@ -913,6 +913,25 @@ export async function askFixOverwrite(paths) {
 }
 
 /** Small pop-up menu under an anchor: items [{label, sub, onclick}]. */
+/**
+ * Put a menu next to the button it belongs to, always fully on screen: below it, or above it when there is more
+ * room there; a list taller than that room scrolls instead of running off the top or bottom of the window.
+ */
+export function placeMenu(m, r) {
+  const vw = window.innerWidth, vh = window.innerHeight, pad = 8;
+  m.style.maxHeight = '';
+  m.style.overflowY = 'auto';
+  const { width: mw } = m.getBoundingClientRect();
+  const below = vh - r.bottom - 6 - pad, above = r.top - 6 - pad;
+  const mh = m.scrollHeight;
+  const down = mh <= below || below >= above;
+  const room = Math.max(120, down ? below : above);
+  if (mh > room) m.style.maxHeight = room + 'px';
+  const h0 = Math.min(mh, room);
+  m.style.left = Math.max(pad, Math.min(r.left, vw - mw - pad)) + 'px';
+  m.style.top = Math.max(pad, Math.min(down ? r.bottom + 6 : r.top - h0 - 6, vh - h0 - pad)) + 'px';
+}
+
 export function popupMenu(anchor, items) {
   // A click on the button whose menu is open closes it (the mousedown already closed it; don't reopen on the click).
   if (anchor && anchor.__menuClosed && Date.now() - anchor.__menuClosed < 600) { anchor.__menuClosed = 0; return null; }
@@ -920,10 +939,7 @@ export function popupMenu(anchor, items) {
   const r = anchor.getBoundingClientRect();
   const m = h('div.menu', items.map((it) => h('button', { title: it.title || it.sub || '', disabled: !!it.disabled, onclick: () => { m.remove(); if (m.__close) document.removeEventListener('mousedown', m.__close); it.onclick(); } }, h('div', it.label), it.sub ? h('div.menu-sub', it.sub) : null)));
   document.body.append(m);
-  const { height: mh, width: mw } = m.getBoundingClientRect();
-  // keep the whole menu on screen (a button at the right edge opens it leftwards)
-  m.style.left = Math.max(8, Math.min(r.left, window.innerWidth - mw - 8)) + 'px';
-  m.style.top = (r.bottom + mh + 6 > window.innerHeight ? r.top - mh - 6 : r.bottom + 6) + 'px';
+  placeMenu(m, r);
   m.__close = function close(e) {
     if (m.contains(e.target)) return;
     if (anchor && anchor.contains && anchor.contains(e.target) && m.isConnected) anchor.__menuClosed = Date.now();
@@ -960,8 +976,7 @@ export function columnsMenu(grid) {
       return h('label.menu-check', cb, c.menuTitle || c.title);
     }), h('button', { title: 'Show every column again, at its standard width and order', onclick: () => { m.remove(); grid.resetColumns(); grid.hidden.clear(); grid.setHidden('__none', false); } }, h('div', 'Reset columns')));
     document.body.append(m);
-    m.style.left = Math.min(r.left, window.innerWidth - 260) + 'px';
-    m.style.top = r.bottom + 6 + 'px';
+    placeMenu(m, r);
     setTimeout(() => document.addEventListener('mousedown', function close(e) {
       if (!m.isConnected) { document.removeEventListener('mousedown', close); return; }
       if (!m.contains(e.target) && !btn.contains(e.target)) { m.remove(); document.removeEventListener('mousedown', close); }
