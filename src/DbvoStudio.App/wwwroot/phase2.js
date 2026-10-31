@@ -523,7 +523,7 @@ export async function patchView(id) {
     grid.refreshRow(nl.lineId);
     if (wasInFlight) flashRow(grid, nl.lineId, nl.status === 'Failed');
     // Drawn after a click in progress, so the button pressed (often right after typing) still gets the click.
-    afterPointer('p2:line', () => {
+    afterPointer('p2:line:' + nl.lineId, () => {
       if (focusedId === nl.lineId && !insp.contains(document.activeElement)) renderInspector();
       renderCounts();
       renderActions();
@@ -1229,8 +1229,7 @@ export async function patchView(id) {
         if (!est.voiceId) { spin.drop(); toast('Pick a voice in the toolbar first.', true); return; }
         if (autoplay && lineIds && lineIds.length === 1) { const l0 = index.get(lineIds[0]); autoPlay = { lineId: lineIds[0], takes: l0 ? l0.takes.length : 0 }; }
         spin.add(lineIds);
-        await rpc('patch.generate', { id, mode, lineIds });
-        spin.accept();
+        spin.accept(await rpc('patch.generate', { id, mode, lineIds }));
         renderActions();
         return;
       }
@@ -1280,8 +1279,7 @@ export async function patchView(id) {
       ], [{ label: 'Cancel', value: false }, { label: `${vc ? 'Convert' : 'Generate'} ${est.count} line(s)`, primary: true, value: !missingVoice && !(est.cloud && !est.hasKey) }], { help: 'generating' });
       if (!ok) { spin.drop(); return; }
       spin.add(mode === 'selected' ? lineIds : patch.lines.filter(mode === 'marked' ? (l) => l.marked && canGen(l) : mode === 'all' ? (l) => !l.omitted && !l.excluded && canGen(l) : mode === 'edited' ? editedLine : pendingLine).map((l) => l.lineId));
-      await rpc('patch.generate', { id, mode, lineIds });
-      spin.accept();
+      spin.accept(await rpc('patch.generate', { id, mode, lineIds }));
       renderActions();
     } catch (e) { spin.drop(); fail(e); }
   }
@@ -1601,6 +1599,7 @@ export async function patchView(id) {
   });
   let jobSeen = false;
   document.addEventListener('job-progress', () => { if (!jobSeen && document.body.contains(view)) { jobSeen = true; grid.paint(true); renderActions(); } });
+  document.addEventListener('queue-dropped', (e) => { if (e.detail) inFlight.dropQueued(e.detail.queueId); });
   document.addEventListener('job-done', async (e) => {
     jobSeen = false;
     if (!document.body.contains(view)) return;

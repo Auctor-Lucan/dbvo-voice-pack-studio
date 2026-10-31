@@ -194,7 +194,15 @@ public sealed class Library
     /// <summary>Called before a JSON file is written (the app keeps the old content for Undo).</summary>
     public static Action<string>? BeforeSave;
 
+    // One save of a file at a time, so an older snapshot still retrying can never land after a newer one.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> SaveLocks = new(StringComparer.OrdinalIgnoreCase);
+
     public static void SaveJson<T>(string path, T value)
+    {
+        lock (SaveLocks.GetOrAdd(Path.GetFullPath(path), _ => new object())) SaveJsonNow(path, value);
+    }
+
+    private static void SaveJsonNow<T>(string path, T value)
     {
         BeforeSave?.Invoke(path);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

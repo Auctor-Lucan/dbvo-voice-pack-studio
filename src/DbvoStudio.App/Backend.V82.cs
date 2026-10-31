@@ -180,7 +180,7 @@ public sealed partial class Backend
             _queue.Add(q);
             _queueTimer ??= new System.Threading.Timer(_ => _ = RunQueue(), null, 700, 700);
             EmitQueue();
-            return new { started = true, queued = _queue.Count, label = q.Label };
+            return new { started = true, queued = _queue.Count, label = q.Label, queueId = q.Id };
         }
     }
 
@@ -223,7 +223,7 @@ public sealed partial class Backend
                 var r = await Dispatch(next.Method, next.Params, next.Dropped);
                 // A start that needs an answer first (an export asking to replace files) can't run unattended.
                 var notStarted = r != null && JsonSerializer.SerializeToElement(r, JsonOptions) is { ValueKind: JsonValueKind.Object } el && el.TryGetProperty("started", out var st) && st.ValueKind == JsonValueKind.False;
-                if (notStarted) Emit("jobDone", new { kind = "queue", ok = false, message = $"{next.Label} (queued) didn't start: it needs your answer. Open it and start it again." });
+                if (notStarted) Emit("jobDone", new { kind = "queue", queueId = next.Id, ok = false, message = $"{next.Label} (queued) didn't start: it needs your answer. Open it and start it again." });
             }
             catch (Exception ex) when (_jobCts != null)
             {
@@ -232,7 +232,7 @@ public sealed partial class Backend
                 EmitQueue();
                 _ = ex;
             }
-            catch (Exception ex) { Emit("jobDone", new { kind = "queue", ok = false, message = $"{next.Label} (queued) didn't start: {FriendlyError.From(ex)}" }); }
+            catch (Exception ex) { Emit("jobDone", new { kind = "queue", queueId = next.Id, ok = false, message = $"{next.Label} (queued) didn't start: {FriendlyError.From(ex)}" }); }
         }
         finally { Interlocked.Exchange(ref _queueBusy, 0); }
     }
@@ -247,9 +247,14 @@ public sealed partial class Backend
             case "undo.apply": return await Locked(() => UndoApply(p.TryGetProperty("index", out var ix) && ix.ValueKind == JsonValueKind.Number ? ix.GetInt32() : 0));
             case "queue.list": lock (_queue) return _queue.Select(x => new { x.Id, x.Label }).ToList();
             case "queue.remove":
-                lock (_queue) _queue.RemoveAll(x => x.Id == S(p, "queueId"));
-                EmitQueue();
-                return true;
+                {
+                    int gone;
+                    lock (_queue) gone = _queue.RemoveAll(x => x.Id == S(p, "queueId"));
+                    EmitQueue();
+                    // Pages waiting on it (a spinning ↻) learn it won't run.
+                    if (gone > 0) Emit("jobDone", new { kind = "queue", queueId = S(p, "queueId"), ok = false, removed = true });
+                    return true;
+                }
             case "effects.list": return Effects.BuiltIn();
             case "patch.importSpoken": return await Locked(() => ImportSpoken(p));
             case "takes.effect": return await TakesEffect(p);

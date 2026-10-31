@@ -50,6 +50,24 @@ public class ProofreaderTests
     }
 
     [Fact]
+    public void Reasoning_and_prose_around_the_list_are_passed_over()
+    {
+        var (_, sent) = Proofreader.BuildBatch(new List<(string, string)> { ("A", "Dont go."), ("B", "Fine.") });
+        var reply = "<think>Line [0] has a typo; line [1] is fine.</think>Here you go [as asked]:\n[{\"i\":0,\"t\":\"Don't go.\",\"kind\":\"spelling\"}] Hope [this] helps.";
+        var r = Proofreader.ParseReply(reply, sent);
+        Assert.Equal("Don't go.", r[0].Text);
+        Assert.Null(r[1].Text);
+    }
+
+    [Fact]
+    public void Nested_parentheses_are_one_locked_piece()
+    {
+        var (t, tokens) = Proofreader.Protect("(Intimidate (Level 50)) Move.");
+        Assert.Equal("⟦1⟧ Move.", t);
+        Assert.Single(tokens);
+    }
+
+    [Fact]
     public void Unreadable_reply_throws()
     {
         var (_, sent) = Proofreader.BuildBatch(new List<(string, string)> { ("A", "Hi.") });

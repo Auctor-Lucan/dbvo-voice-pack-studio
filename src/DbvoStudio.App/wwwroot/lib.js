@@ -375,7 +375,17 @@ function _flushPointer() {
   _afterPointer.clear();
   for (const fn of fns) { try { fn(); } catch (e) { console.error(e); } }
 }
-document.addEventListener('pointerdown', (e) => { if (e.button === 0) _pointerDown = true; }, true);
+let _pointerTimer = 0;
+document.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  _pointerDown = true;
+  // Never wait long: a dropdown that opens on mousedown can swallow the mouseup.
+  clearTimeout(_pointerTimer);
+  _pointerTimer = setTimeout(() => { if (_pointerDown) _flushPointer(); }, 1500);
+}, true);
+// The button is up although no pointerup came (a dropdown list, a drag that left the window): flush.
+document.addEventListener('pointermove', (e) => { if (_pointerDown && e.buttons === 0) setTimeout(_flushPointer, 0); }, true);
+document.addEventListener('keydown', () => { if (_pointerDown) setTimeout(_flushPointer, 0); }, true);
 // click comes straight after pointerup in the same task, so a timeout runs after it.
 document.addEventListener('pointerup', () => { if (_pointerDown) setTimeout(_flushPointer, 0); }, true);
 document.addEventListener('pointercancel', () => setTimeout(_flushPointer, 0), true);
@@ -424,7 +434,12 @@ export function spinTracker(refresh) {
       let open = true;
       return {
         add(more) { for (const x of more || []) if (!ids.includes(x)) { ids.push(x); set.add(x); refresh(x); } },
-        accept() { if (!open) return; open = false; jobs.push(new Set(ids)); for (const x of ids) if (!set.has(x)) { set.add(x); refresh(x); } },
+        /** r: the server's answer; a queued job carries its queueId, so removing it from the queue stops its lines. */
+        accept(r) {
+          if (!open) return; open = false;
+          const j = new Set(ids); j.queueId = r && r.queueId; jobs.push(j);
+          for (const x of ids) if (!set.has(x)) { set.add(x); refresh(x); }
+        },
         drop() { if (!open) return; open = false; release(ids, false); },
       };
     },
@@ -432,6 +447,13 @@ export function spinTracker(refresh) {
     jobDone(mine) {
       if (mine) { const j = jobs.shift(); if (j) release(j, true); }
       if (!jobs.length) release([...set], true);
+    },
+    /** A queued job was removed or couldn't start. */
+    dropQueued(queueId) {
+      const i = jobs.findIndex((j) => j.queueId && j.queueId === queueId);
+      if (i < 0) return;
+      const [j] = jobs.splice(i, 1);
+      release(j, false);
     },
     clear() { jobs.length = 0; release([...set], false); },
   };

@@ -697,8 +697,7 @@ export async function bookProjectView(id) {
         if (!ok) { spin.drop(); return; }
       }
       if (!single) spin.add(stems || proj.books.filter((b) => mode === 'flagged' ? b.marked : mode === 'all' || b.voices.some((v) => (mode === 'edited' ? v.edited : mode === 'problems' ? v.miss || v.edited : v.miss))).map((b) => b.stem));
-      await rpc('books.generate', params);
-      spin.accept();
+      spin.accept(await rpc('books.generate', params));
       accepted = true;
       renderActions();
     } catch (e) { spin.drop(); fail(e); } finally { if (!accepted && lineIds) dropParts(lineIds); }
@@ -735,7 +734,7 @@ export async function bookProjectView(id) {
         const v = await modal('Unsaved changes', [h('div', 'Save the spoken text before closing?')], [{ label: 'Discard', value: 'discard' }, { label: 'Cancel', value: null }, { label: 'Save', primary: true, value: 'save' }]);
         asking = false;
         if (v == null) return;
-        if (v === 'save') await saveText(); else dirty = false;
+        if (v === 'save') { if (!(await saveText())) return; } else dirty = false;
       }
       overlay.remove(); document.removeEventListener('keydown', onKey, true); off(); onPartsChanged = null; edAudio.pause();
       try { proj = await rpc('books.get', { id }); reindex(); renderAll(); } catch { /* keep */ }
@@ -756,15 +755,26 @@ export async function bookProjectView(id) {
     let breaks = [], manual = false;
 
     const currentText = () => variant ? (d.variantsList.find((x) => x.id === variant) || {}).spoken || '' : d.spoken;
+    // True when saved (or held until the running generation ends); false when it failed and the text is only in the box.
+    let saveWaits = false;
     async function saveText() {
-      if (!dirty || asking) return;
+      if (!dirty || asking) return true;
       const sent = ta.value;
       try {
         d = await rpc('books.book', variant ? { id, stem, action: 'variantSpoken', variant, value: sent } : { id, stem, action: 'spoken', value: sent });
         // typed on while it was saving: keep what is in the box (it is saved next time)
         if (ta.value === sent) { dirty = false; renderEd(true); } else renderEd(false);
         replaceBook(d.book);
-      } catch (e) { fail(e); }
+        return true;
+      } catch (e) {
+        // This project's takes are being made: the text waits and is saved when that ends (also after the editor closed).
+        if (/Takes are being made/.test(e && e.message || '')) {
+          if (!saveWaits) { saveWaits = true; toast('The text is saved as soon as the generation running now ends.'); document.addEventListener('job-done', () => { saveWaits = false; asking = false; saveText(); }, { once: true }); }
+          return true;
+        }
+        fail(e);
+        return false;
+      }
     }
     // Going to another page with the editor open: save the text and close it.
     overlay.addEventListener('leave', async () => { asking = false; await saveText(); overlay.remove(); document.removeEventListener('keydown', onKey, true); off(); onPartsChanged = null; edAudio.pause(); });
@@ -1032,6 +1042,7 @@ export async function bookProjectView(id) {
   const refreshBook = (stem) => { booksToRefresh.add(stem); refreshBooks(); };
   let jobSeen = false;
   document.addEventListener('job-progress', () => { if (!jobSeen && document.body.contains(view)) { jobSeen = true; renderHead(); if (tab === 'books') { grid.paint(true); renderActions(); } } });
+  document.addEventListener('queue-dropped', (e) => { if (e.detail) inFlight.dropQueued(e.detail.queueId); if (partsInFlight.size && !app.job) dropParts([...partsInFlight]); });
   document.addEventListener('job-done', async (e) => {
     jobSeen = false;
     if (!document.body.contains(view)) { offLine && offLine(); return; }

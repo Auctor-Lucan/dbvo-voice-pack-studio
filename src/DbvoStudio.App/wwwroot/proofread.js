@@ -1,9 +1,9 @@
 // Proofread lines (Phase 1): step through lines one at a time and fix spelling and grammar. Saved edits go into the
 // DBVO Fix plugin like any other edit. Optional AI suggestions come in batches ahead of where the user is; game
 // markup (<Alias=…>, (Persuade), [tags]) is locked in the editor and never sent to the AI.
-import { rpc, h, clear, modal, toast, fail, helpButton, segmented } from './lib.js';
+import { rpc, h, clear, modal, toast, fail, helpButton, segmented, inTopDialog } from './lib.js';
 
-const MARKUP = /<[^<>]*>|\((?:[^()<>]|<[^<>]*>)*\)|\[[^[\]]*\]/g;
+const MARKUP = /<[^<>]*>|\((?:[^()<>]|<[^<>]*>|\([^()]*\))*\)|\[[^[\]]*\]/g;
 const BATCH = 50;
 const KIND_TEXT = { spelling: 'Spelling', grammar: 'Grammar', punctuation: 'Punctuation', style: 'Style — check before accepting' };
 
@@ -42,7 +42,7 @@ function tagEditor(initial, spellcheck) {
   };
   const api = {
     el,
-    get: () => read(el).replace(/ /g, ' ').replace(/\s+/g, ' ').trim(),
+    get: () => read(el).replace(/\u00a0/g, ' ').trim(), // spacing kept as typed (a doubled space is a fix too)
     set(s) { clear(el).append(...withTags(s)); want = tokensOf(s); good = s; },
     onInput: null,
   };
@@ -92,7 +92,7 @@ function tagEditor(initial, spellcheck) {
 
 /** Word-level difference: the base text with removed words struck through and added words marked. */
 function diffView(a, b) {
-  const tok = (s) => (s || '').match(/<[^<>]*>|\((?:[^()<>]|<[^<>]*>)*\)|\[[^[\]]*\]|\s+|[\p{L}\p{N}'’]+|[^\s\p{L}\p{N}]/gu) || [];
+  const tok = (s) => (s || '').match(/<[^<>]*>|\((?:[^()<>]|<[^<>]*>|\([^()]*\))*\)|\[[^[\]]*\]|\s+|[\p{L}\p{N}'’]+|[^\s\p{L}\p{N}]/gu) || [];
   const x = tok(a), y = tok(b);
   const n = x.length, m = y.length;
   const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
@@ -161,9 +161,10 @@ export async function proofreadDialog(opts) {
   const requested = new Set();
   let aiError = null;
   async function fetchFrom(i) {
-    if (!useAi) return;
-    for (let s = i; s < Math.min(keys.length, i + BATCH * 2); s += BATCH) {
-      const batch = keys.slice(s, s + BATCH).filter((k) => !requested.has(k));
+    if (!useAi || !open) return;
+    // Whole blocks of 50 (the one the line is in and the next), so every request carries a full batch.
+    for (let b = Math.floor(i / BATCH); b <= Math.floor(i / BATCH) + 1 && b * BATCH < keys.length; b++) {
+      const batch = keys.slice(b * BATCH, b * BATCH + BATCH).filter((k) => !requested.has(k));
       if (!batch.length) continue;
       batch.forEach((k) => requested.add(k));
       paintAi();
@@ -186,51 +187,74 @@ export async function proofreadDialog(opts) {
   // ---- stepping
   let idx = 0, open = true;
   const stats = { seen: new Set(), edited: new Set(), accepted: new Set(), declined: new Set(), autoSkipped: new Set(), skipped: new Set() };
-  let editor = null, accepted = false, base = '';
+  let editor = null, accepted = false, base = '', busy = false, cameBack = false;
+  const startText = new Map(keys.map((k) => [k, textOf(line(k) || {}).trim()]));
   const view = h('div.pr-step');
   const head = h('div.modal-head');
   const prog = h('div.pr-prog', h('i'));
   const aiSlot = h('div');
-  const keysRow = h('div.pr-keys', h('kbd', 'Ctrl'), '+', h('kbd', 'Enter'), ' save & next · ', h('kbd', 'Ctrl'), '+', h('kbd', '→'), ' skip · ', h('kbd', 'Ctrl'), '+', h('kbd', '←'), ' back',
+  const keysRow = h('div.pr-keys', h('kbd', 'Ctrl'), '+', h('kbd', 'Enter'), ' save & next · ', h('kbd', 'Alt'), '+', h('kbd', '→'), ' skip · ', h('kbd', 'Alt'), '+', h('kbd', '←'), ' back',
     useAi ? [' · ', h('kbd', 'Alt'), '+', h('kbd', 'A'), ' accept suggestion'] : null);
   const foot = h('div.row');
   let close = null;
 
-  const dirty = () => editor && editor.get() !== base.replace(/\s+/g, ' ').trim();
+  const dirty = () => !!editor && editor.get() !== base.trim();
 
+  // One save at a time (a held Ctrl+Enter or a double click doesn't pass over the next line).
   async function save(next) {
-    const l = line(keys[idx]);
+    if (busy) return false;
+    const at = idx, k = keys[at];
+    const l = line(k);
     if (!l) return true;
     const text = editor.get();
+    const changed = text !== base.trim();
+    busy = true;
     try {
-      const r = await rpc('line1.update', { modId: mod.id, plugin: plugin.fileName, key: l.key, action: 'proofread', text: text !== base.replace(/\s+/g, ' ').trim() ? text : null });
+      const r = await rpc('line1.update', { modId: mod.id, plugin: plugin.fileName, key: l.key, action: 'proofread', text: changed ? text : null });
       opts.apply(r);
-      stats.seen.add(l.key);
-      stats.skipped.delete(l.key);
-      if (text !== base.replace(/\s+/g, ' ').trim()) stats.edited.add(l.key); else stats.edited.delete(l.key);
-      const s = sugg.get(l.key);
-      if (s) { if (accepted && text === s.text) { stats.accepted.add(l.key); stats.declined.delete(l.key); } else { stats.declined.add(l.key); stats.accepted.delete(l.key); } }
-      if (next) go(idx + 1);
+      stats.seen.add(k);
+      stats.skipped.delete(k);
+      const s = sugg.get(k);
+      if (s) {
+        if (accepted && text === s.text) { stats.accepted.add(k); stats.declined.delete(k); }
+        else if (changed || !stats.accepted.has(k)) { stats.accepted.delete(k); stats.declined.add(k); }
+      }
+      if (next && idx === at) go(at + 1);
       return true;
-    } catch (e) { fail(e); return false; }
+    } catch (e) { fail(e); return false; } finally { busy = false; }
   }
-  function skip() { stats.skipped.add(keys[idx]); go(idx + 1); }
-  function go(i) {
+  // Skip leaves the line as it is and not proofread; text typed in it is saved instead.
+  async function skip() {
+    if (busy) return;
+    if (dirty()) { await save(true); return; }
+    stats.skipped.add(keys[idx]);
+    go(idx + 1);
+  }
+  async function back() {
+    if (busy || idx === 0) return;
+    if (dirty() && !(await save(false))) return;
+    go(idx - 1, false);
+  }
+  function go(i, forward = true) {
+    if (!open) return;
     if (i >= keys.length) { finish(); return; }
     idx = Math.max(0, i);
+    cameBack = !forward;
     render();
     fetchFrom(idx);
-    autoSkipIfNothing();
+    if (forward) autoSkipIfNothing();
   }
-  // A line the AI found nothing wrong with is skipped (when asked), unless the user already typed in it.
+  // Moving on: a line the AI found nothing wrong with is passed over (when asked), unless the user typed in it,
+  // came back to it, or skipped it before.
   async function autoSkipIfNothing() {
     const k = keys[idx];
-    if (!useAi || !skipNone || !sugg.has(k) || sugg.get(k) !== null || dirty() || stats.seen.has(k)) return false;
+    if (!open || busy || cameBack || !useAi || !skipNone || !sugg.has(k) || sugg.get(k) !== null || dirty() || stats.seen.has(k) || stats.skipped.has(k)) return false;
     const l = line(k);
-    try { opts.apply(await rpc('line1.update', { modId: mod.id, plugin: plugin.fileName, key: l.key, action: 'proofread' })); } catch (e) { fail(e); return false; }
+    busy = true;
+    try { opts.apply(await rpc('line1.update', { modId: mod.id, plugin: plugin.fileName, key: l.key, action: 'proofread' })); } catch (e) { fail(e); return false; } finally { busy = false; }
     stats.autoSkipped.add(k);
     stats.seen.add(k);
-    go(idx + 1);
+    if (open && keys[idx] === k && !dirty()) go(idx + 1);
     return true;
   }
   async function onSuggestionArrived() { if (!(await autoSkipIfNothing())) { paintAi(); paintFoot(); } }
@@ -277,8 +301,8 @@ export async function proofreadDialog(opts) {
     const s = useAi ? sugg.get(keys[idx]) : null;
     const keepLabel = s && !accepted && !dirty() ? 'Keep original & next →' : 'Save & next →';
     clear(foot).append(
-      h('button.btn', { disabled: idx === 0, title: 'The line before (Ctrl+←)', onclick: () => go(idx - 1) }, '← Back'),
-      h('button.btn', { title: 'Leave this line as it is and not proofread (Ctrl+→)', onclick: skip }, 'Skip'),
+      h('button.btn', { disabled: idx === 0, title: 'The line before (Alt+←); text you typed here is saved first', onclick: back }, '← Back'),
+      h('button.btn', { title: 'Leave this line as it is and not proofread (Alt+→); text you typed here is saved instead', onclick: skip }, 'Skip'),
       h('div.spacer'),
       h('button.btn.ghost', { title: 'Close; the lines you saved stay saved', onclick: async () => { if (dirty() && !(await save(false))) return; finish(); } }, 'Stop for now'),
       h('button.btn.primary', { title: 'Save this line and go to the next (Ctrl+Enter)', onclick: () => save(true) }, keepLabel));
@@ -318,10 +342,12 @@ export async function proofreadDialog(opts) {
 
   const onKey = (e) => {
     if (!open || !view.isConnected) return;
-    if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); save(true); }
-    else if (e.ctrlKey && e.key === 'ArrowRight') { e.preventDefault(); skip(); }
-    else if (e.ctrlKey && e.key === 'ArrowLeft') { e.preventDefault(); if (idx > 0) go(idx - 1); }
-    else if (e.altKey && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); accept(); }
+    if (!inTopDialog(view)) return; // another dialog (a question) is on top
+    const stop = () => { e.preventDefault(); e.stopPropagation(); };
+    if (e.ctrlKey && !e.altKey && e.key === 'Enter') { stop(); if (!e.repeat) save(true); }
+    else if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key === 'ArrowRight') { stop(); skip(); } // Alt+arrows: not the app's Back/Forward here
+    else if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key === 'ArrowLeft') { stop(); back(); }
+    else if (e.altKey && !e.ctrlKey && (e.key === 'a' || e.key === 'A')) { stop(); accept(); }
   };
   document.addEventListener('keydown', onKey, true);
 
@@ -333,14 +359,19 @@ export async function proofreadDialog(opts) {
   }
 
   go(0);
-  const r = await modal('Proofread lines', [view], [], { cls: 'pr-card', autofocus: false, onOpen: (c) => { close = c; }, guard: async () => { if (dirty()) await save(false); open = false; return true; } }); // Escape / ✕ close it themselves
+  // Escape or going to another page: the line being typed in is saved first (a failed save keeps the dialog open).
+  const r = await modal('Proofread lines', [view], [], { cls: 'pr-card', autofocus: false, onOpen: (c) => { close = c; },
+    guard: async () => { if (busy || (dirty() && !(await save(false)))) return false; open = false; return true; } });
+  // Closed without asking (the help's "Open in the guide"): keep what was typed.
+  if (r === null && open && dirty()) await save(false);
   open = false;
   document.removeEventListener('keydown', onKey, true);
   if (r !== 'done' && r !== null) return;
+  // ---- summary: after the key or click that closed the dialog is handled, and only on the page it was opened from
+  await new Promise((res) => setTimeout(res, 60));
+  if (opts.isCurrent && !opts.isCurrent()) return;
   if (!stats.seen.size && !stats.skipped.size) { opts.finish(false); return; } // closed before doing anything
-
-  // ---- summary (after the key or click that closed the dialog is fully handled, so Escape can't close it too)
-  await new Promise((r) => setTimeout(r, 0));
+  stats.edited = new Set(keys.filter((k) => line(k) && textOf(line(k)).trim() !== startText.get(k)));
   const showEdited = await modal('Proofreading done · ' + plugin.fileName, [
     h('table.pr-sum',
       h('tr', h('td', 'Lines gone through'), h('td', stats.seen.size)),

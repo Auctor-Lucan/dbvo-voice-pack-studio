@@ -666,6 +666,7 @@ export async function modView(id) {
   function proofread() {
     proofreadDialog({
       mod, plugin, shown: grid.rows, ticked: [...grid.selected], kindBadge,
+      isCurrent: () => document.body.contains(view),
       apply: (r) => {
         const l = plugin.lines.find((x) => x.key === r.line.key);
         if (l) Object.assign(l, r.line);

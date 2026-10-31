@@ -36,7 +36,8 @@ public static class Proofreader
         Lines that need no change are left out. Reply [] when none do.
         """;
 
-    private static readonly Regex Markup = new(@"<[^<>]*>|\((?:[^()<>]|<[^<>]*>)*\)|\[[^\[\]]*\]", RegexOptions.Compiled);
+    // <…>, (…) with one level of (…) inside, […]
+    private static readonly Regex Markup = new(@"<[^<>]*>|\((?:[^()<>]|<[^<>]*>|\([^()]*\))*\)|\[[^\[\]]*\]", RegexOptions.Compiled);
     private static readonly Regex Placeholder = new(@"⟦(\d+)⟧", RegexOptions.Compiled);
 
     /// <summary>The text with its markup replaced by ⟦1⟧, ⟦2⟧ …, and the markup in order.</summary>
@@ -90,10 +91,23 @@ public static class Proofreader
         return sent.Select((s, i) => byIndex.TryGetValue(i, out var x) ? x : new ProofSuggestion(s.Key, null, "", "")).ToList();
     }
 
+    /// <summary>The JSON array in a reply: past a reasoning model's &lt;think&gt; block, code fences and any prose around it.</summary>
     private static string? ExtractArray(string reply)
     {
-        var s = Regex.Replace(reply.Trim(), @"^```[a-z]*\s*|\s*```$", "");
-        int a = s.IndexOf('['), b = s.LastIndexOf(']');
-        return a >= 0 && b > a ? s[a..(b + 1)] : null;
+        var s = Regex.Replace(reply, @"<think>[\s\S]*?</think>", "", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s.Trim(), @"```[a-z]*", "");
+        for (int a = s.IndexOf('['); a >= 0; a = s.IndexOf('[', a + 1))
+        {
+            // The first [ that starts a whole, valid array (prose such as "line [3]" before it is passed over).
+            try
+            {
+                var reader = new Utf8JsonReader(System.Text.Encoding.UTF8.GetBytes(s[a..]), new JsonReaderOptions { AllowTrailingCommas = true });
+                using var doc = JsonDocument.ParseValue(ref reader);
+                if (doc.RootElement.ValueKind == JsonValueKind.Array && (doc.RootElement.GetArrayLength() == 0 || doc.RootElement[0].ValueKind == JsonValueKind.Object))
+                    return doc.RootElement.GetRawText();
+            }
+            catch (JsonException) { }
+        }
+        return null;
     }
 }

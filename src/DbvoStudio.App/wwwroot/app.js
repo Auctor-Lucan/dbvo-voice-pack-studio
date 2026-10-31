@@ -183,6 +183,11 @@ on('contextBilled', (d) => {
 });
 
 on('jobDone', async (d) => {
+  // A queued task that was removed or couldn't start: pages stop waiting for it. A removal leaves the running task alone.
+  if (d.kind === 'queue' && d.queueId) {
+    document.dispatchEvent(new CustomEvent('queue-dropped', { detail: d }));
+    if (d.removed) return;
+  }
   lastDone = { kind: d.kind, t: Date.now() };
   app.job = null;
   jobEl.classList.add('hidden');

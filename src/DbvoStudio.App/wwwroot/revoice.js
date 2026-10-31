@@ -1041,7 +1041,7 @@ export async function revoiceView(id) {
     grid.refreshRow(nl.id);
     if (wasInFlight) flashRow(grid, nl.id, nl.status === 'Failed');
     // Drawn after a click in progress, so the button pressed (often right after typing) still gets the click.
-    afterPointer('rv:line', () => { if (focusedId === nl.id && !insp.contains(document.activeElement)) renderInspector(); renderActions(); });
+    afterPointer('rv:line:' + nl.id, () => { if (focusedId === nl.id && !insp.contains(document.activeElement)) renderInspector(); renderActions(); });
   }
 
   function play(l, take) {
@@ -1103,8 +1103,7 @@ export async function revoiceView(id) {
         if (!ok) { spin.drop(); return; }
       }
       if (est.count > 1) spin.add(mode === 'selected' ? lineIds : proj.lines.filter((l) => (!speaker || l.speaker === speaker) && !l.excl && !l.gone && (mode === 'marked' ? l.marked : mode === 'all' ? true : mode === 'edited' ? isEdited(l) : isMissing(l))).map((l) => l.id));
-      await rpc('revoice.generate', { id, mode, lineIds, speaker });
-      spin.accept();
+      spin.accept(await rpc('revoice.generate', { id, mode, lineIds, speaker }));
       renderActions();
     } catch (e) { spin.drop(); fail(e); }
   }
@@ -1254,6 +1253,7 @@ export async function revoiceView(id) {
   });
   let jobSeen = false;
   document.addEventListener('job-progress', () => { if (!jobSeen && document.body.contains(view)) { jobSeen = true; renderHead(); if (tab === 'lines') { grid.paint(true); renderActions(); } } });
+  document.addEventListener('queue-dropped', (e) => { if (e.detail) inFlight.dropQueued(e.detail.queueId); });
   document.addEventListener('job-done', async (e) => {
     jobSeen = false;
     if (!document.body.contains(view)) return;

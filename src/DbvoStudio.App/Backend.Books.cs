@@ -353,9 +353,12 @@ public sealed partial class Backend
     {
         var proj = LoadBk(S(p, "id"));
         var b = proj.Books.FirstOrDefault(x => x.Stem == S(p, "stem")) ?? throw new InvalidOperationException("Book not found.");
-        NotWhileGenerating(proj.Id);
-        BkApply(proj, b, S(p, "action"), p);
-        BooksService.RebuildLines(proj);
+        var action = S(p, "action");
+        // Notes, flags and author choices don't touch the parts, so they also work while the project generates.
+        bool partsSame = action is "confirm" or "unconfirm" or "author" or "mark" or "markOn" or "markOff" or "notes" or "keepMine";
+        if (!partsSame) NotWhileGenerating(proj.Id);
+        BkApply(proj, b, action, p);
+        if (!partsSame) BooksService.RebuildLines(proj);
         _lib.Save(proj);
         return BkBookDetail(proj, b.Stem);
     }
