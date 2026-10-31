@@ -333,12 +333,14 @@ export async function proofreadDialog(opts) {
   }
 
   go(0);
-  const r = await modal('Proofread lines', [view], [], { cls: 'pr-card', autofocus: false, onOpen: (c) => { close = c; }, guard: async () => { if (dirty()) await save(false); finish(); return true; } });
+  const r = await modal('Proofread lines', [view], [], { cls: 'pr-card', autofocus: false, onOpen: (c) => { close = c; }, guard: async () => { if (dirty()) await save(false); open = false; return true; } }); // Escape / ✕ close it themselves
   open = false;
   document.removeEventListener('keydown', onKey, true);
   if (r !== 'done' && r !== null) return;
+  if (!stats.seen.size && !stats.skipped.size) { opts.finish(false); return; } // closed before doing anything
 
-  // ---- summary
+  // ---- summary (after the key or click that closed the dialog is fully handled, so Escape can't close it too)
+  await new Promise((r) => setTimeout(r, 0));
   const showEdited = await modal('Proofreading done · ' + plugin.fileName, [
     h('table.pr-sum',
       h('tr', h('td', 'Lines gone through'), h('td', stats.seen.size)),
