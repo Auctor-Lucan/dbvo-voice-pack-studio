@@ -73,4 +73,29 @@ public class ProofreaderTests
         var (_, sent) = Proofreader.BuildBatch(new List<(string, string)> { ("A", "Hi.") });
         Assert.Throws<FormatException>(() => Proofreader.ParseReply("Sorry, I can't help.", sent));
     }
+
+    [Fact]
+    public async Task A_model_that_refuses_temperature_is_asked_again_without_it()
+    {
+        int calls = 0; var bodies = new List<string>();
+        var h = new Handler(async (r) =>
+        {
+            calls++; var b = await r.Content!.ReadAsStringAsync(); bodies.Add(b);
+            return b.Contains("temperature")
+                ? new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.BadRequest) { Content = new System.Net.Http.StringContent("{\"error\":{\"message\":\"`temperature` is deprecated for this model.\"}}") }
+                : new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new System.Net.Http.StringContent("{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}") };
+        });
+        using var ai = new DbvoStudio.Core.ElevenLabs.AutoTagger("https://example.test/v1", "k", "claude-test-x", new System.Net.Http.HttpClient(h));
+        var r1 = await ai.ChatAsync("s", "u", 0.1);
+        Assert.Equal("ok", r1.Text);
+        Assert.Equal(2, calls);
+        var r2 = await ai.ChatAsync("s", "u", 0.1); // remembered: one request
+        Assert.Equal(3, calls);
+        Assert.DoesNotContain("temperature", bodies[2]);
+    }
+
+    private sealed class Handler(Func<System.Net.Http.HttpRequestMessage, Task<System.Net.Http.HttpResponseMessage>> f) : System.Net.Http.HttpMessageHandler
+    {
+        protected override Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage r, CancellationToken ct) => f(r);
+    }
 }

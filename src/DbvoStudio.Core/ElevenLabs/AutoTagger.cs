@@ -53,18 +53,8 @@ public sealed class AutoTagger : IDisposable
             var user = $"Preferred tags for this voice: {string.Join(" ", preferredTags)}\n" +
                        (string.IsNullOrWhiteSpace(context) ? "" : $"Context: {context}\n") +
                        $"Line: {spoken}";
-            var body = new
-            {
-                model = _model,
-                temperature = 0.4,
-                messages = new object[]
-                {
-                    new { role = "system", content = SystemPrompt },
-                    new { role = "user", content = user },
-                },
-            };
-            using var resp = await _http.PostAsJsonAsync("chat/completions", body, ct);
-            var text = await resp.Content.ReadAsStringAsync(ct);
+            var (resp, text) = await PostChat(SystemPrompt, user, 0.4, ct);
+            using var _ = resp;
             if (!resp.IsSuccessStatusCode) return new AutoTagResult(lineId, null, FriendlyError.Http("Your AI provider", (int)resp.StatusCode, text, FriendlyError.AiPlace));
             using var doc = JsonDocument.Parse(text);
             var content = doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()?.Trim() ?? "";
@@ -86,9 +76,8 @@ public sealed class AutoTagger : IDisposable
     {
         try
         {
-            var body = new { model = _model, temperature, messages = new object[] { new { role = "system", content = system }, new { role = "user", content = user } } };
-            using var resp = await _http.PostAsJsonAsync("chat/completions", body, ct);
-            var text = await resp.Content.ReadAsStringAsync(ct);
+            var (resp, text) = await PostChat(system, user, temperature, ct);
+            using var _ = resp;
             if (!resp.IsSuccessStatusCode) return (null, FriendlyError.Http("Your AI provider", (int)resp.StatusCode, text, FriendlyError.AiPlace));
             using var doc = JsonDocument.Parse(text);
             return (doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()?.Trim() ?? "", null);
@@ -98,6 +87,36 @@ public sealed class AutoTagger : IDisposable
             return (null, ex is JsonException or KeyNotFoundException or IndexOutOfRangeException
                 ? "The AI provider answered in a form DBVO Studio doesn't understand. Check that the endpoint is OpenAI-compatible (it usually ends in /v1)."
                 : FriendlyError.From(ex, "Your AI provider"));
+        }
+    }
+
+    // Models that refuse a temperature setting (newer Claude models answer "`temperature` is deprecated"), per address and model.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> NoTemperature = new();
+
+    /// <summary>One chat request; a model that rejects the temperature setting is asked again without it (and remembered).</summary>
+    private async Task<(HttpResponseMessage Resp, string Text)> PostChat(string system, string user, double temperature, CancellationToken ct)
+    {
+        var id = _http.BaseAddress + "|" + _model;
+        for (int attempt = 0; ; attempt++)
+        {
+            var body = new System.Text.Json.Nodes.JsonObject
+            {
+                ["model"] = _model,
+                ["messages"] = new System.Text.Json.Nodes.JsonArray(
+                    new System.Text.Json.Nodes.JsonObject { ["role"] = "system", ["content"] = system },
+                    new System.Text.Json.Nodes.JsonObject { ["role"] = "user", ["content"] = user }),
+            };
+            bool withTemp = !NoTemperature.ContainsKey(id);
+            if (withTemp) body["temperature"] = temperature;
+            var resp = await _http.PostAsJsonAsync("chat/completions", body, ct);
+            var text = await resp.Content.ReadAsStringAsync(ct);
+            if (withTemp && attempt == 0 && (int)resp.StatusCode is 400 or 422 && text.Contains("temperature", StringComparison.OrdinalIgnoreCase))
+            {
+                NoTemperature[id] = true;
+                resp.Dispose();
+                continue;
+            }
+            return (resp, text);
         }
     }
 
