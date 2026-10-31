@@ -1,7 +1,7 @@
 // Proofread lines (Phase 1): step through lines one at a time and fix spelling and grammar. Saved edits go into the
 // DBVO Fix plugin like any other edit. Optional AI suggestions come in batches ahead of where the user is; game
 // markup (<Alias=…>, (Persuade), [tags]) is locked in the editor and never sent to the AI.
-import { rpc, h, clear, modal, toast, fail, helpButton, segmented, inTopDialog } from './lib.js';
+import { rpc, h, clear, modal, toast, fail, helpButton, segmented, inTopDialog, debounce } from './lib.js';
 
 const MARKUP = /<[^<>]*>|\((?:[^()<>]|<[^<>]*>|\([^()]*\))*\)|\[[^[\]]*\]/g;
 const BATCH = 50;
@@ -43,7 +43,7 @@ function tagEditor(initial, spellcheck) {
   const api = {
     el,
     get: () => read(el).replace(/\u00a0/g, ' ').trim(), // spacing kept as typed (a doubled space is a fix too)
-    set(s) { clear(el).append(...withTags(s)); want = tokensOf(s); good = s; },
+    set(s) { clear(el).append(...withTags(s)); want = tokensOf(s); good = s; if (api.onInput) api.onInput(); },
     onInput: null,
   };
   const hitsTag = (ranges) => ranges.some((sr) => {
@@ -196,6 +196,18 @@ export async function proofreadDialog(opts) {
   const keysRow = h('div.pr-keys', h('kbd', 'Ctrl'), '+', h('kbd', 'Enter'), ' save & next · ', h('kbd', 'Alt'), '+', h('kbd', '→'), ' skip · ', h('kbd', 'Alt'), '+', h('kbd', '←'), ' back',
     useAi ? [' · ', h('kbd', 'Alt'), '+', h('kbd', 'A'), ' accept suggestion'] : null);
   const foot = h('div.row');
+  const ruleSlot = h('div');
+  // The xEdit script's verdict on the text in the box, as you type (a line it can't take stays silent in game).
+  let ruleSeq = 0;
+  const checkRules = debounce(async () => {
+    const seq = ++ruleSeq;
+    const text = editor ? editor.get() : '';
+    let r = null;
+    try { r = await rpc('rules.check', { text }); } catch { /* the check is a hint only */ }
+    if (seq !== ruleSeq || !open) return;
+    clear(ruleSlot);
+    if (r && r.problem && !r.isPlayerName) ruleSlot.append(h('div.banner.bad', { style: { margin: 0 } }, h('span', { style: { whiteSpace: 'pre-line' } }, h('b', 'DBVO can\'t voice this as written: '), r.problem)));
+  }, 250);
   let close = null;
 
   const dirty = () => !!editor && editor.get() !== base.trim();
@@ -219,6 +231,7 @@ export async function proofreadDialog(opts) {
         if (accepted && text === s.text) { stats.accepted.add(k); stats.declined.delete(k); }
         else if (changed || !stats.accepted.has(k)) { stats.accepted.delete(k); stats.declined.add(k); }
       }
+      busy = false; // before moving on: the next line may be passed over at once
       if (next && idx === at) go(at + 1);
       return true;
     } catch (e) { fail(e); return false; } finally { busy = false; }
@@ -319,7 +332,8 @@ export async function proofreadDialog(opts) {
       h('button.btn.ghost.sm', { title: 'Close', onclick: async () => { if (dirty() && !(await save(false))) return; finish(); } }, '✕'));
     prog.firstChild.style.width = (100 * (idx + 1)) / keys.length + '%';
     editor = tagEditor(base, useSpell);
-    editor.onInput = () => { if (accepted) { const s = sugg.get(keys[idx]); if (!s || editor.get() !== s.text) { accepted = false; paintAi(); } } paintFoot(); };
+    checkRules();
+    editor.onInput = () => { checkRules(); if (accepted) { const s = sugg.get(keys[idx]); if (!s || editor.get() !== s.text) { accepted = false; paintAi(); } } paintFoot(); };
     const fixRow = plugin.isTopicFile || !earlier ? null : h('div.row',
       h('span.dim', 'Back to'), h('button.btn.sm', { title: 'Put the mod\'s original text in the box', onclick: () => { editor.set(l.original); accepted = false; paintFoot(); } }, 'Original text'),
       h('div.spacer'), h('span.dim', 'DBVO Fix'),
@@ -334,6 +348,7 @@ export async function proofreadDialog(opts) {
       earlier ? h('div', h('div.field-label', 'Your earlier edit'), h('div.pr-box', withTags(l.final))) : null,
       aiSlot,
       h('div', h('div.field-label', 'In-game line (edit here)'), editor.el),
+      ruleSlot,
       fixRow, keysRow, foot);
     paintAi();
     paintFoot();

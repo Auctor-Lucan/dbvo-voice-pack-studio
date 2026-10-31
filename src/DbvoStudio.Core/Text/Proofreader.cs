@@ -20,6 +20,15 @@ public static class Proofreader
         spelling, typos, missing or doubled words, wrong word forms (their/there, it's/its, lose/loose), broken grammar and
         punctuation (including doubled spaces and a missing apostrophe).
 
+        The lines are matched to voice files by a script with strict rules, so a correction must never:
+        - use a semicolon (;) — use a comma or a period instead;
+        - use [square brackets], an asterisk (*), curly quotes (‘ ’ “ ”), an em or en dash (— –) or the single … character
+          (write ' " -- - ... instead);
+        - start the line with "...", "-" or "(";
+        - put a (parenthesis) anywhere but at the very end of the line;
+        - make the line longer than 150 characters.
+        Keep the line's own punctuation style otherwise: don't swap commas, periods and dashes around without a mistake.
+
         Do NOT change:
         - the character's voice: slang, bluntness, archaic or formal phrasing, dialect, deliberate misspellings that show
           an accent, Khajiit speaking of themselves in the third person, Orc or Argonian speech patterns;
@@ -85,6 +94,7 @@ public static class Proofreader
             if (kind is not ("spelling" or "grammar" or "punctuation" or "style")) kind = "style";
             var why = e.TryGetProperty("why", out var w) && w.ValueKind == JsonValueKind.String ? w.GetString()!.Trim() : "";
             var restored = Restore(te.GetString()!.Trim(), sent[i].Tokens);
+            if (restored != null) restored = ScriptSafe(sent[i].Text, restored);
             if (restored == null || restored == sent[i].Text.Trim()) continue;
             byIndex[i] = new ProofSuggestion(sent[i].Key, restored, kind, why.Length > 160 ? why[..160] + "…" : why);
         }
@@ -92,6 +102,24 @@ public static class Proofreader
     }
 
     /// <summary>The JSON array in a reply: past a reasoning model's &lt;think&gt; block, code fences and any prose around it.</summary>
+    /// <summary>
+    /// A suggestion as the DBVO xEdit script will take it: its plain-punctuation swaps are made (; → , and the tofu
+    /// characters), and a suggestion the script would then voice worse than the line as it is (reformat it, mark it
+    /// BROKEN or TOO LONG) is dropped (null).
+    /// </summary>
+    public static string? ScriptSafe(string original, string suggestion)
+    {
+        var s = Rules.ScriptRules.Detofu(suggestion).Replace(';', ',').Trim();
+        while (s.Contains("  ")) s = s.Replace("  ", " ");
+        static int Rank(string t) => Rules.ScriptRules.Classify(t, null).Kind switch
+        {
+            Rules.LineKind.Valid or Rules.LineKind.Empty or Rules.LineKind.SkippedEditorId => 0,
+            Rules.LineKind.Fixed => 1,
+            _ => 2, // Broken, TooLong
+        };
+        return Rank(s) <= Rank(original.Trim()) ? s : null;
+    }
+
     private static string? ExtractArray(string reply)
     {
         var s = Regex.Replace(reply, @"<think>[\s\S]*?</think>", "", RegexOptions.IgnoreCase);

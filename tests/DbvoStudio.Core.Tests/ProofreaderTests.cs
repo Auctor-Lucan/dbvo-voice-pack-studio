@@ -67,6 +67,19 @@ public class ProofreaderTests
         Assert.Single(tokens);
     }
 
+    [Theory]
+    [InlineData("I see your point, but no.", "I see your point; but no.", "I see your point, but no.")] // ; becomes , (here: nothing left to suggest)
+    [InlineData("Dont do that, it hurts.", "Don't do that; it hurts.", "Don't do that, it hurts.")]
+    [InlineData("Well I suppose.", "...Well, I suppose.", null)] // a leading ... would make DBVO pick the wrong file
+    [InlineData("Fine, lets go.", "Fine, let's go [sighs].", null)] // brackets: BROKEN
+    [InlineData("Its fine.", "It’s fine.", "It's fine.")] // curly apostrophe made plain
+    public void Suggestions_stay_inside_the_xedit_script_rules(string original, string suggestion, string? expected)
+    {
+        var got = Proofreader.ScriptSafe(original, suggestion);
+        if (expected == original) Assert.Equal(original, got);
+        else Assert.Equal(expected, got);
+    }
+
     [Fact]
     public void Unreadable_reply_throws()
     {
