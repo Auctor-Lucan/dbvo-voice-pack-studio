@@ -175,6 +175,22 @@ public sealed partial class Backend
             }
 
             // ---- Phase 2 extras
+            // AI Auto Tag: accept or undo the suggestions of many lines at once.
+            case "line2.bulkTagSuggestions":
+                return await Locked(() =>
+                {
+                    var patch = LoadPatch(S(p, "id"));
+                    var ids = Strings(p, "lineIds").ToHashSet();
+                    bool accept = B(p, "accept");
+                    foreach (var l in patch.Lines.Where(l => ids.Contains(l.LineId) && l.TagSuggestion != null))
+                    {
+                        if (accept) { l.Spoken = l.TagSuggestion!; l.SpokenEdited = true; }
+                        l.TagSuggestion = null;
+                        l.RefreshStale();
+                    }
+                    _lib.Save(patch);
+                    return PatchDto(patch);
+                });
             case "line2.bulkMark":
                 return await Locked(() =>
                 {

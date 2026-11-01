@@ -379,8 +379,8 @@ export async function patchView(id) {
     if (l.tagSuggestion) {
       return h('span.row', { style: { width: '100%' } },
         h('span.grow.ellipsis', { title: l.tagSuggestion }, diffAdded(l.spoken, l.tagSuggestion)),
-        h('button.icon-btn', { title: 'Accept tags', onclick: () => upd(l, 'acceptTags') }, '✓'),
-        h('button.icon-btn', { title: 'Undo', onclick: () => upd(l, 'rejectTags') }, '✕'));
+        h('button.icon-btn', { title: 'Accept the suggested tags. Shift-click: every line shown that has a suggestion.', onclick: (e) => { e.stopPropagation(); if (e.shiftKey) bulkSuggestions(grid.rows.filter((x) => x.tagSuggestion).map((x) => x.lineId), true); else upd(l, 'acceptTags'); } }, '✓'),
+        h('button.icon-btn', { title: 'Undo the suggestion. Shift-click: every line shown that has a suggestion.', onclick: (e) => { e.stopPropagation(); if (e.shiftKey) bulkSuggestions(grid.rows.filter((x) => x.tagSuggestion).map((x) => x.lineId), false); else upd(l, 'rejectTags'); } }, '✕'));
     }
     const inp = h('input', { type: 'text', value: l.spoken, disabled: l.omitted });
     if (l.differs) { inp.style.color = 'var(--link)'; inp.title = 'Blue: the spoken text differs from the in-game line (your edit). The arrow on the left restores it.'; }
@@ -789,7 +789,8 @@ export async function patchView(id) {
       reindex();
       grid.setRows(visible());
       renderCounts();
-      const bad = r.results.filter((x) => x.error);
+      renderActions(); // "AI tags (N) ▾" in the status bar
+      renderInspector();
       toast(autotagSummary(r.results), r.results.some((x) => x.error));
     } catch (e) { fail(e); }
   }
@@ -990,6 +991,7 @@ export async function patchView(id) {
       helpButton('generating'),
       h('span.stat', h('b', c.generated), ` / ${c.active} ${vc ? 'converted' : 'generated'}`, c.approved ? ` · ${c.approved} approved` : '', patch.exportApprovedOnly ? h('span', { title: 'Folders & options → Export: only approved lines are exported' }, ' · exporting approved only') : '', c.omitted ? ` · ${c.omitted} omitted` : '', c.excluded ? ` · ${c.excluded} excluded` : '', c.failed ? h('span', { style: { color: 'var(--bad)' } }, ` · ${c.failed} failed`) : '', c.stale ? ` · ${c.stale} edited since take` : '', vc && c.nosource ? ` · ${c.nosource} without source` : ''),
       h('div.spacer'),
+      c.suggestions ? suggestionsMenu(c) : null,
       sel.length || c.marked ? tickedMenu(sel, c) : null,
       reviewBtn,
       checkBtn,
@@ -999,10 +1001,32 @@ export async function patchView(id) {
       genBtn);
   }
 
+  // AI Auto Tag suggestions waiting: accept or undo all of them at once (or see them first).
+  function suggestionsMenu(c) {
+    const all = patch.lines.filter((l) => l.tagSuggestion).map((l) => l.lineId);
+    const btn = h('button.btn.sm.primary', { title: 'AI tag suggestions waiting for Accept or Undo' }, `AI tags (${c.suggestions}) ▾`);
+    btn.onclick = () => popupMenu(btn, [
+      { label: `✓ Accept all ${all.length}`, sub: 'Use every AI tag suggestion', onclick: () => bulkSuggestions(all, true) },
+      { label: `✕ Undo all ${all.length}`, sub: 'Drop every suggestion: the texts stay as they were', onclick: () => bulkSuggestions(all, false) },
+      { label: 'Show only these lines', sub: 'The "AI suggestions" filter, to check them one by one', onclick: () => { filter = 'suggestions'; store.set('patch:' + id, { filter }); renderCounts(); grid.setRows(visible()); } },
+    ]);
+    return btn;
+  }
+  async function bulkSuggestions(ids, accept) {
+    try {
+      patch = await rpc('line2.bulkTagSuggestions', { id, lineIds: ids, accept });
+      reindex(); grid.setRows(visible()); renderCounts(); renderActions(); renderInspector();
+      toast(`${ids.length} suggestion(s) ${accept ? 'accepted' : 'undone'}.`);
+    } catch (e) { fail(e); }
+  }
+
   // One menu for what to do with the ticked rows (and flags), so the status bar stays on one line.
   function tickedMenu(sel, c) {
     const btn = h('button.btn.sm.ghost', { title: sel.length ? `Exclude, include, flag or untick the ${sel.length} ticked line(s)` : 'Clear every flag' }, sel.length ? `Ticked (${sel.length}) ▾` : 'Flags ▾');
+    const tagged = sel.filter((x) => (index.get(x) || {}).tagSuggestion);
     btn.onclick = () => popupMenu(btn, [
+      tagged.length ? { label: `✓ Accept AI tags · ticked (${tagged.length})`, sub: 'Use the AI tag suggestion on each ticked line that has one', onclick: () => bulkSuggestions(tagged, true) } : null,
+      tagged.length ? { label: `✕ Undo AI tags · ticked (${tagged.length})`, sub: 'Drop the suggestions: the text stays as it was', onclick: () => bulkSuggestions(tagged, false) } : null,
       sel.length ? { label: '🚫 Exclude ticked', sub: 'Not generated or exported; they stop counting as missing', onclick: () => bulkExclude(sel, true) } : null,
       sel.length && sel.some((x) => (index.get(x) || {}).excluded) ? { label: 'Include ticked', sub: 'Generate and export them again', onclick: () => bulkExclude(sel, false) } : null,
       sel.length ? { label: '⚑ Flag ticked', sub: 'Mark them to revisit; Flagged lines makes new takes of them', onclick: () => bulkMark(sel, true) } : null,
