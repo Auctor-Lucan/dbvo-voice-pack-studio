@@ -587,7 +587,8 @@ public sealed class FomodService
         var res = new BuildResult();
         var archiveBase = SafeName($"{(string.IsNullOrWhiteSpace(p.Info.Name) ? p.Name : p.Info.Name)}{(string.IsNullOrWhiteSpace(p.Info.Version) ? "" : " " + p.Info.Version)}");
         var staging = Path.Combine(p.ReleaseFolder, "_staging", archiveBase);
-        if (Directory.Exists(staging)) Directory.Delete(staging, true);
+        void Step(string what) => progress?.Report(new GenerationProgress(0, 0, 0, null, what));
+        if (Directory.Exists(staging)) { Step("Removing the previous staging folder"); await Task.Run(() => Directory.Delete(staging, true), ct); }
         Directory.CreateDirectory(Path.Combine(staging, "fomod"));
         res.Staging = staging;
 
@@ -714,6 +715,7 @@ public sealed class FomodService
             var full = Path.GetFullPath(f);
             return full.StartsWith(stagingRoot, StringComparison.OrdinalIgnoreCase) || full.EndsWith(".part", StringComparison.OrdinalIgnoreCase) || ownArchives.Contains(full);
         }
+        Step("Listing the files to install");
         var pairs = new List<(string from, string to)>();
         foreach (var (from, to, folder) in jobs)
         {
@@ -766,7 +768,7 @@ public sealed class FomodService
                 if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe)) throw new InvalidOperationException(".7z archives need 7-Zip, and it isn't set. Pick 7z.exe in Global Settings → General & tools → Tools, or choose .zip.");
                 var archive = Path.Combine(p.ReleaseFolder, archiveBase + ".7z");
                 if (File.Exists(archive)) File.Delete(archive);
-                progress?.Report(new GenerationProgress(0, all.Count, 0, null, "Packing with 7-Zip (no progress shown by 7-Zip)"));
+                progress?.Report(new GenerationProgress(0, 0, 0, null, $"Packing {all.Count:N0} files with 7-Zip (7-Zip doesn't report its progress)"));
                 var r = await ExternalTools.RunAsync(exe, new[] { "a", "-t7z", "-mx=7", "-mmt=on", "-y", archive, Path.Combine(staging, "*") }, ct, TimeSpan.FromHours(6));
                 if (r.ExitCode != 0 || !File.Exists(archive)) throw new InvalidOperationException("7-Zip failed: " + r.StdErr + r.StdOut);
                 res.Archive = archive;

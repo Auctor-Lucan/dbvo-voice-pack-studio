@@ -172,10 +172,12 @@ on('progress', (p) => {
   // Check takes: the count is always shown once checking starts; where Whisper runs and the speed go in the tooltip.
   const label = qa
     ? (p.done === 0 && p.message ? `${p.message} · 0/${p.total}` : `Checking takes ${p.done.toLocaleString()}/${p.total.toLocaleString()}${p.rate ? ` · ${p.rate}/s` : ''}`)
-    : `${(p.kind === 'fomod' || p.kind === 'revoice') && p.message ? p.message : LABEL[p.kind] || 'Working'}${p.kind === 'revoice' ? '…' : ` ${p.done}/${p.total}`}`;
+    : `${(p.kind === 'fomod' || p.kind === 'revoice') && p.message ? p.message : LABEL[p.kind] || 'Working'}${p.kind === 'revoice' || !p.total ? '…' : ` ${(p.done || 0).toLocaleString()}/${p.total.toLocaleString()}`}`;
   jobEl.querySelector('.job-label').textContent = label + (p.failed ? ` · ${p.failed} failed` : '');
   jobEl.title = [qa && p.device ? p.device + (p.rate ? ` · ${p.rate} takes per second` : '') : null, p.current || null].filter(Boolean).join('\n');
-  jobEl.querySelector('.bar-fill').style.width = (p.total ? (100 * p.done) / p.total : 0) + '%';
+  const fill = jobEl.querySelector('.bar-fill');
+  fill.classList.toggle('indet', !p.total);
+  fill.style.width = (p.total ? (100 * p.done) / p.total : 0) + '%';
   document.dispatchEvent(new CustomEvent('job-progress', { detail: p }));
 });
 on('contextBilled', (d) => {

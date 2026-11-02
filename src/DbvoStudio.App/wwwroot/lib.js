@@ -25,10 +25,43 @@ if (webview) {
     const p = pending.get(msg.id);
     if (!p) return;
     pending.delete(msg.id);
+    busyEnd(msg.id);
     if ('error' in msg && msg.error) { const err = new Error(msg.error); err.fromHost = true; err.method = p.method; p.reject(err); }
     else p.resolve(msg.result);
   });
 }
+
+// ---- "Working…": any call that takes longer than a moment shows a spinner in the top bar (and the busy cursor), so a
+// pause while the app reads plugins, saves or loads a project never looks like a hang. Calls that wait for you (file
+// pickers) or run quietly in the background are left out; long tasks have their own bar.
+const QUIET = /^(pick\.|open\.|file\.dataUrl|fomod\.summary|job\.|audio\.|play|preview\.|clipboard)/;
+const BUSY_LABEL = { 'mod.import': 'Reading plugins', 'mod.create': 'Creating the mod', 'mod.get': 'Opening the mod', state: 'Loading', dropped: 'Reading dropped files',
+  'fomod.addPatches': 'Adding DBVO Patches', 'fomod.refresh': 'Updating linked options', 'fomod.validate': 'Checking the installer', 'fomod.import': 'Reading the FOMOD',
+  'fomod.build': 'Starting the build', 'fomod.save': 'Saving', 'fomod.get': 'Opening the FOMOD', 'fomod.simulate': 'Simulating', 'fomod.preview': 'Writing the XML' };
+const busyCalls = new Map();
+let busyEl = null, busyTimer = 0;
+function busyPaint() {
+  const now = Date.now();
+  const slow = [...busyCalls.values()].filter((c) => now - c.t >= 350);
+  if (!busyEl) {
+    const job = document.getElementById('job');
+    if (!job) return;
+    busyEl = h('div.busy-chip.hidden', h('span.busy-spin'), h('span.busy-text'));
+    job.before(busyEl);
+  }
+  busyEl.classList.toggle('hidden', !slow.length);
+  document.documentElement.classList.toggle('app-busy', slow.length > 0);
+  if (slow.length) {
+    const c = slow[slow.length - 1];
+    const secs = Math.floor((now - slow[0].t) / 1000);
+    busyEl.querySelector('.busy-text').textContent = (BUSY_LABEL[c.method] || 'Working') + '…' + (secs >= 3 ? ` ${secs} s` : '');
+    busyEl.title = slow.map((x) => x.method).join(', ');
+  }
+  clearTimeout(busyTimer);
+  if (busyCalls.size) busyTimer = setTimeout(busyPaint, slow.length ? 1000 : 360);
+}
+function busyStart(id, method) { if (QUIET.test(method)) return; busyCalls.set(id, { method, t: Date.now() }); if (busyCalls.size === 1) { clearTimeout(busyTimer); busyTimer = setTimeout(busyPaint, 360); } }
+function busyEnd(id) { if (busyCalls.delete(id)) busyPaint(); }
 
 /** Call a host method. */
 export function rpc(method, params = {}) {
@@ -36,6 +69,7 @@ export function rpc(method, params = {}) {
   const id = nextId++;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject, method });
+    busyStart(id, method);
     webview.postMessage({ id, method, params });
   });
 }
@@ -46,6 +80,7 @@ export function droppedPaths(fileList) {
   const id = nextId++;
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject, method: 'dropped' });
+    busyStart(id, 'dropped');
     webview.postMessageWithAdditionalObjects({ id, method: 'dropped', params: {} }, fileList);
   });
 }

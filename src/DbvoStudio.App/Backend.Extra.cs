@@ -682,13 +682,20 @@ public sealed partial class Backend
         {
             try
             {
+                var progress = new DirectProgress<GenerationProgress>(g => Emit("progress", new { kind = "fomod", g.Done, g.Total, g.Failed, g.Current, g.Message }));
+                // The bar shows at once, with what the build is doing before it can count files.
+                void Step(string what) => progress.Report(new GenerationProgress(0, 0, 0, null, what));
+                Step("Updating linked options");
                 var voice = _lib.LoadVoicePacks().FirstOrDefault(v => v.Id == proj.VoicePackId);
                 var svc = new FomodService(_lib, Runtime());
                 var orphans = svc.RefreshLinked(proj, _lib.LoadPatches(), _lib.LoadVoicePacks(), _lib.LoadMods());
+                ct.ThrowIfCancellationRequested();
+                Step("Checking the installer and its files");
                 var errors = svc.Validate(proj).Where(i => i.Level == "error").ToList();
                 if (errors.Count > 0) throw new InvalidOperationException("Fix these first: " + string.Join(" · ", errors.Take(5).Select(e => $"{e.Where}: {e.Message}")));
+                ct.ThrowIfCancellationRequested();
+                Step("Backing up the library");
                 _lib.Backup("before-fomod-build", _settings.BackupsToKeep, routine: true);
-                var progress = new DirectProgress<GenerationProgress>(g => Emit("progress", new { kind = "fomod", g.Done, g.Total, g.Failed, g.Current, g.Message }));
                 var res = await svc.BuildAsync(proj, voice?.Naming ?? NamingMode.Legacy, package, progress, ct);
                 foreach (var o in orphans) res.Warnings.Add($"\"{o}\" is no longer linked to a DBVO Patch (deleted, or its mod was removed): built as it was.");
                 await _gate.WaitAsync();

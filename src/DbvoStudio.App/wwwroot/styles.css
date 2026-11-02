@@ -1123,3 +1123,11 @@ body.col-dragging, body.col-dragging * { cursor: grabbing !important; user-selec
 table.pr-sum { border-collapse: collapse; width: 100%; }
 table.pr-sum td { padding: 6px 4px; border-bottom: 1px solid var(--line-soft); }
 table.pr-sum td:last-child { text-align: right; font-weight: 600; }
+
+/* "Working…" chip in the top bar while a call to the app takes more than a moment */
+.busy-chip { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line)); border-radius: var(--radius); background: var(--panel); color: var(--text); font-size: 13px; white-space: nowrap; animation: busy-in .15s ease-out; }
+.busy-chip.hidden { display: none; }
+.busy-spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); animation: spin .8s linear infinite; flex-shrink: 0; }
+html.app-busy, html.app-busy * { cursor: progress !important; }
+/* A task's bar before it can count anything: a moving stripe instead of 0 % */
+.job .bar-fill.indet { width: 100% !important; animation: busy-march .6s linear infinite; background-size: 18px 100%, 100% 100%; opacity: .8; }
