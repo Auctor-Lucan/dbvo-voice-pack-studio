@@ -39,7 +39,7 @@ public sealed class BsaArchive : IDisposable
         var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, FileOptions.RandomAccess);
         try
         {
-            var br = new BinaryReader(fs, Encoding.Latin1, leaveOpen: true);
+            var br = new BinaryReader(fs, DbvoStudio.Core.Text.Encodings.Cp1252, leaveOpen: true);
             if (Encoding.ASCII.GetString(br.ReadBytes(4)) != "BSA\0") throw new InvalidDataException($"{Path.GetFileName(path)} is not a BSA archive.");
             int version = br.ReadInt32();
             if (version != 103 && version != 104 && version != 105)
@@ -69,7 +69,7 @@ public sealed class BsaArchive : IDisposable
                 if ((flags & FlagDirNames) != 0)
                 {
                     int len = br.ReadByte();
-                    folder = Encoding.Latin1.GetString(br.ReadBytes(len)).TrimEnd('\0');
+                    folder = DbvoStudio.Core.Text.Encodings.Cp1252.GetString(br.ReadBytes(len)).TrimEnd('\0');
                 }
                 for (int j = 0; j < _.Count; j++)
                 {
@@ -88,7 +88,7 @@ public sealed class BsaArchive : IDisposable
                 for (int i = 0; i < block.Length; i++)
                 {
                     if (block[i] != 0) continue;
-                    names.Add(Encoding.Latin1.GetString(block, start, i - start));
+                    names.Add(DbvoStudio.Core.Text.Encodings.Cp1252.GetString(block, start, i - start));
                     start = i + 1;
                 }
             }

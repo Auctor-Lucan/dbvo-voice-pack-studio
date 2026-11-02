@@ -1,4 +1,5 @@
 using System.Text;
+using DbvoStudio.Core.Text;
 
 namespace DbvoStudio.Core.Archives;
 
@@ -15,6 +16,15 @@ public static class BsaWriter
 
     public sealed record Entry(string ArchivePath, string SourcePath);
 
+    /// <summary>
+    /// File and folder names are stored, and hashed, in Windows-1252: the code page Skyrim SE looks them up in on Western
+    /// systems. Latin-1 lost ’ “ ” … – — † ™ • œ and the like (they became "?", so the game never found those files).
+    /// </summary>
+    private static Encoding Names => Encodings.Cp1252;
+
+    /// <summary>True when Windows-1252 can hold the name exactly.</summary>
+    public static bool CanStore(string name) => Names.GetString(Names.GetBytes(name)) == name;
+
     public static ulong Hash(string name, bool folder)
     {
         name = name.ToLowerInvariant().Replace('/', '\\');
@@ -24,7 +34,7 @@ public static class BsaWriter
             int i = name.LastIndexOf('.');
             if (i > 0) { root = name[..i]; ext = name[i..]; }
         }
-        var b = Encoding.Latin1.GetBytes(root);
+        var b = Names.GetBytes(root);
         int n = b.Length;
         uint h1 = 0;
         if (n > 0) h1 = (uint)(b[n - 1] | ((n > 2 ? b[n - 2] : 0) << 8) | (n << 16) | (b[0] << 24));
@@ -32,7 +42,7 @@ public static class BsaWriter
         uint h2 = 0;
         if (n > 2) for (int i = 1; i < n - 2; i++) h2 = unchecked(h2 * 0x1003F + b[i]);
         uint h3 = 0;
-        foreach (var c in Encoding.Latin1.GetBytes(ext)) h3 = unchecked(h3 * 0x1003F + c);
+        foreach (var c in Names.GetBytes(ext)) h3 = unchecked(h3 * 0x1003F + c);
         return ((ulong)unchecked(h2 + h3) << 32) | h1;
     }
 
@@ -45,19 +55,25 @@ public static class BsaWriter
             .Select(g => (Folder: g.Key, Files: g.Select(x => (Name: x.Path[(x.Path.LastIndexOf('\\') + 1)..], x.SourcePath, x.Size))
                 .GroupBy(x => x.Name).Select(x => x.First()).OrderBy(x => Hash(x.Name, false)).ToList()))
             .OrderBy(f => Hash(f.Folder, true)).ToList();
+        // A name Windows-1252 can't hold would be written as "?" and never found by the game: refuse it and say which.
+        var bad = folders.SelectMany(f => (CanStore(f.Folder) ? Enumerable.Empty<string>() : new[] { f.Folder + "\\" })
+            .Concat(f.Files.Where(x => !CanStore(x.Name)).Select(x => (f.Folder.Length > 0 ? f.Folder + "\\" : "") + x.Name))).ToList();
+        if (bad.Count > 0)
+            throw new InvalidOperationException($"{bad.Count} file name(s) have characters a BSA can't store (Skyrim reads BSA names in the Windows-1252 code page), for example: "
+                + string.Join(", ", bad.Take(5).Select(b => "\"" + b + "\"")) + ". Keep these files loose, or change the line's text in Phase 1 so its file name uses plain characters.");
         long dataBytes = folders.Sum(f => f.Files.Sum(x => x.Size));
         if (dataBytes > MaxDataBytes) throw new InvalidOperationException($"{dataBytes / 1_000_000} MB is too much for one BSA (about 2,000 MB at most).");
         int fileCount = folders.Sum(f => f.Files.Count);
-        int folderNames = folders.Sum(f => Encoding.Latin1.GetByteCount(f.Folder) + 1);
-        int fileNames = folders.Sum(f => f.Files.Sum(x => Encoding.Latin1.GetByteCount(x.Name) + 1));
+        int folderNames = folders.Sum(f => Names.GetByteCount(f.Folder) + 1);
+        int fileNames = folders.Sum(f => f.Files.Sum(x => Names.GetByteCount(x.Name) + 1));
         long recordsStart = 36 + 24L * folders.Count;
-        long blocksLen = folders.Sum(f => 1 + Encoding.Latin1.GetByteCount(f.Folder) + 1 + 16L * f.Files.Count);
+        long blocksLen = folders.Sum(f => 1 + Names.GetByteCount(f.Folder) + 1 + 16L * f.Files.Count);
         long dataStart = recordsStart + blocksLen + fileNames;
 
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
         var tmp = path + ".part";
         using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
-        using (var bw = new BinaryWriter(fs, Encoding.Latin1))
+        using (var bw = new BinaryWriter(fs, Names))
         {
             bw.Write(Encoding.ASCII.GetBytes("BSA\0"));
             bw.Write(105); bw.Write(36u); bw.Write(FlagDirNames | FlagFileNames);
@@ -68,12 +84,12 @@ public static class BsaWriter
             {
                 bw.Write(Hash(f.Folder, true)); bw.Write(f.Files.Count); bw.Write(0u);
                 bw.Write((ulong)(blockOff + fileNames)); // Bethesda's quirk: the offset includes the file-name block length
-                blockOff += 1 + Encoding.Latin1.GetByteCount(f.Folder) + 1 + 16L * f.Files.Count;
+                blockOff += 1 + Names.GetByteCount(f.Folder) + 1 + 16L * f.Files.Count;
             }
             long dataOff = dataStart;
             foreach (var f in folders)
             {
-                var fb = Encoding.Latin1.GetBytes(f.Folder);
+                var fb = Names.GetBytes(f.Folder);
                 bw.Write((byte)(fb.Length + 1)); bw.Write(fb); bw.Write((byte)0);
                 foreach (var x in f.Files)
                 {
@@ -81,7 +97,7 @@ public static class BsaWriter
                     dataOff += x.Size;
                 }
             }
-            foreach (var f in folders) foreach (var x in f.Files) { bw.Write(Encoding.Latin1.GetBytes(x.Name)); bw.Write((byte)0); }
+            foreach (var f in folders) foreach (var x in f.Files) { bw.Write(Names.GetBytes(x.Name)); bw.Write((byte)0); }
             foreach (var f in folders)
                 foreach (var x in f.Files)
                 {
