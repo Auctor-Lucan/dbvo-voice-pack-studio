@@ -1,3 +1,4 @@
+using System.Globalization;
 using DbvoStudio.Core.Text;
 using System.IO.Compression;
 using System.Text.Json;
@@ -203,17 +204,38 @@ public sealed class FomodService
         o.Files.InsertRange(0, fresh.Where(f => !o.Files.Any(x => x.Destination.Equals(f.Destination, StringComparison.OrdinalIgnoreCase))));
     }
 
+    /// <summary>
+    /// The description a new option starts with (edit it freely afterwards):
+    /// the mod's name; its voiced lines, with the DBVO Fix notice under them when the option installs one; and its page
+    /// and version from Phase 1 (Mod details).
+    /// </summary>
+    public static string OptionDescription(Mod mod, int lines, bool hasFix)
+    {
+        var parts = new List<string> { mod.Name, "" };
+        parts.Add(lines.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + (lines == 1 ? " line" : " lines"));
+        if (hasFix) parts.Add("ℹ️ Contains formatting fix ESPFE patch. Let the plugin overwrite the original mod.");
+        var url = mod.NexusUrl.Trim();
+        var version = mod.Version.Trim();
+        if (url.Length > 0 || version.Length > 0)
+        {
+            parts.Add("");
+            if (url.Length > 0) parts.Add("⭐ " + url);
+            if (version.Length > 0) parts.Add(version.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? version : "v " + version);
+        }
+        return string.Join("\r\n", parts);
+    }
+
     /// <summary>A new option for one mod of a DBVO Patch, detecting the mod's own plugins.</summary>
     public FomodOption OptionFor(FomodProject p, DbvoPatch patch, VoicePack voice, Mod mod)
     {
         var plugins = mod.Plugins.Where(x => !x.IsTopicFile).Select(x => x.FileName).ToList();
         int lines = patch.Lines.Count(l => !l.IsOmitted && !l.Excluded && l.Sources.Any(s => s.ModId == mod.Id));
+        var files = FilesFor(p, patch, voice, mod);
         return new FomodOption
         {
             Name = mod.Name,
-            Description = $"{voice.Name} DBVO patch for {mod.Name}{(string.IsNullOrWhiteSpace(mod.Version) ? "" : " " + mod.Version)}: {lines} voiced lines."
-                          + (string.IsNullOrWhiteSpace(mod.NexusUrl) ? "" : "\r\n\r\n" + mod.NexusUrl),
-            Files = FilesFor(p, patch, voice, mod),
+            Description = OptionDescription(mod, lines, files.Any(f => f.Kind == "file" && f.Destination.EndsWith(".esp", StringComparison.OrdinalIgnoreCase))),
+            Files = files,
             Mode = plugins.Count > 0 ? DetectMode.Detect : DetectMode.Manual,
             Plugins = plugins,
             PatchId = patch.Id,

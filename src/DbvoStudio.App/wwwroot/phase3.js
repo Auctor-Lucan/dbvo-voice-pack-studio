@@ -483,7 +483,23 @@ export async function fomodView(id) {
     const patches = app.state.patches.filter((p) => !proj.voicePackId || p.voicePackId === proj.voicePackId);
     if (!patches.length) { toast('No DBVO Patches for this voice pack yet.', true); return; }
     const linked = new Set(proj.steps.flatMap((s) => s.groups.flatMap((g) => g.options.map((o) => o.patchId))).filter(Boolean));
-    const boxes = patches.map((p) => ({ p, box: h('input', { type: 'checkbox', checked: !linked.has(p.id) }) }));
+    // Nothing is ticked to start with: tick the patches to add (in an imported FOMOD most mods are already there under
+    // their own options, which aren't linked to a patch).
+    const optionNames = new Set(proj.steps.flatMap((s) => s.groups.flatMap((g) => g.options.map((o) => (o.name || '').trim().toLowerCase()))));
+    const boxes = patches.map((p) => ({ p, box: h('input', { type: 'checkbox', checked: false }) }));
+    const addBtnLabel = () => { const n = boxes.filter((x) => x.box.checked).length; const b = document.querySelector('#modal .modal-card .btn.primary'); if (b) b.textContent = n ? `Add ${n}` : 'Add'; };
+    boxes.forEach(({ box }) => box.addEventListener('change', addBtnLabel));
+    const listEl = h('div.box', { style: { maxHeight: '320px', overflow: 'auto' } });
+    let q = '';
+    const shown = () => boxes.filter(({ p }) => !q || p.name.toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q));
+    const paintList = () => clear(listEl).append(...shown().map(({ p, box }) => h('label.row', box, h('span.grow', p.name), h('span.faint', p.category),
+      linked.has(p.id) ? h('span.badge.b-skip', 'already in') : optionNames.has((p.name || '').trim().toLowerCase()) ? h('span.badge.b-skip', { title: 'An option with this name is already in the FOMOD (not linked to the patch)' }, 'same name in') : null)));
+    paintList();
+    const search = h('input', { type: 'text', placeholder: 'Find a patch or category…', style: { flex: '1' } });
+    search.addEventListener('input', () => { q = search.value.trim().toLowerCase(); paintList(); });
+    const tickTools = h('div.row', search,
+      h('button.btn.sm', { title: 'Tick every patch shown that isn\'t in this FOMOD yet', onclick: () => { shown().forEach(({ p, box }) => { box.checked = !linked.has(p.id) && !optionNames.has((p.name || '').trim().toLowerCase()); }); addBtnLabel(); } }, 'Tick new ones'),
+      h('button.btn.sm', { title: 'Untick every patch', onclick: () => { boxes.forEach(({ box }) => { box.checked = false; }); addBtnLabel(); } }, 'Untick all'));
     let sort = true;
     // With an option picked in the tree, the new ones can go right above or below it (in its group) instead of on their category's page.
     const anchor = (() => { const f = find(selKey); return f && f.kind === 'option' ? f : null; })();
@@ -495,11 +511,13 @@ export async function fomodView(id) {
     if (anchor) sortRow.classList.add('hidden');
     const ok = await modal('Add DBVO Patches', [
       h('div', 'Each mod becomes an option on the page of its category (made if missing), detecting the mod\'s plugins and installing its Sound folder and DBVO Fix plugins from the patch\'s final folder. Patches already in this FOMOD only get their files updated.'),
-      h('div.box', { style: { maxHeight: '320px', overflow: 'auto' } }, boxes.map(({ p, box }) => h('label.row', box, h('span.grow', p.name), h('span.faint', p.category), linked.has(p.id) ? h('span.badge.b-skip', 'already in') : null))),
+      tickTools,
+      listEl,
       placeRow,
       sortRow,
     ], [{ label: 'Cancel', value: false }, { label: 'Add', primary: true, value: true }], { help: '2-add-your-patches' });
     if (!ok) return;
+    if (!boxes.some((x) => x.box.checked)) { toast('Nothing ticked: no options added.'); return; }
     try {
       const r = await rpc('fomod.addPatches', { project: proj, patchIds: boxes.filter((x) => x.box.checked).map((x) => x.p.id), sort: sort && place === 'category' ? 'az' : '',
         ...(anchor && place !== 'category' ? { anchorId: anchor.option.id, where: place } : {}) });

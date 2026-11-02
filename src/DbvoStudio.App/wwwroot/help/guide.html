@@ -58,7 +58,7 @@
 <h2 id="phase-1-import-mods">Phase 1: Import Mods</h2>
 <p>Phase 1 turns a mod&#39;s plugins into DBVO-ready player lines. You review the lines DBVO&#39;s script flags, decide what is voiced and what goes into the DBVO Fix plugin, then continue to Phase 2. The work is shared by every voice pack, so you do it once per mod.</p>
 <h3 id="add-mods">Add mods</h3>
-<ul><li><p><strong>+ New mod</strong> creates one mod: a name, an optional version and a category. Then drop its plugins on the mod page.</p></li><li><p><strong>+ Add many mods…</strong>, or dropping plugins anywhere on the Mods list, opens a table with one row per plugin. Plugins given the same mod name become one mod, and a file such as &quot;Mod - Patch.esp&quot; dropped next to &quot;Mod.esp&quot; is named after it automatically. <strong>Paste names and categories</strong> fills the table from lines like <code>Plugin.esp | Mod Name | Category</code>.</p></li></ul>
+<ul><li><p><strong>+ New mod</strong> creates one mod: a name, an optional version, an optional mod page (Nexus, LoversLab or elsewhere) and a category. Then drop its plugins on the mod page. The version and page go into the description of the mod&#39;s option when you add its patch to a FOMOD; both can be changed later with the ✎ next to the mod&#39;s name.</p></li><li><p><strong>+ Add many mods…</strong>, or dropping plugins anywhere on the Mods list, opens a table with one row per plugin. Plugins given the same mod name become one mod, and a file such as &quot;Mod - Patch.esp&quot; dropped next to &quot;Mod.esp&quot; is named after it automatically. <strong>Paste names and categories</strong> fills the table from lines like <code>Plugin.esp | Mod Name | Category</code>.</p></li></ul>
 <figure><img src="help/img/phase1-batch.webp" alt="Add many mods: Skyrim.esm becomes the mod Skyrim; the three DLC plugins share the name Skyrim DLCs and become one mod" loading="lazy"><figcaption>Add many mods: Skyrim.esm becomes the mod Skyrim; the three DLC plugins share the name Skyrim DLCs and become one mod</figcaption></figure>
 <p><strong>Create mods and import</strong> makes a backup, imports each mod and reports missing masters and unreadable strings. It refuses while a row has no name, a name already exists, one mod&#39;s plugins sit in different categories, or a file appears twice.</p>
 <p>The Mods list groups cards by category. Each card shows its topic lines, how many go into a DBVO Fix plugin, its player-name lines, and a red <em>flagged to review</em> badge until every flagged line has been opened. Once a mod is fully reviewed it shrinks to a chip with its topic line count; the category header says <em>all reviewed ✓</em> or how many are left to review. NPC Revoice, Voiced Books and Player Grunts list their finished projects as chips the same way.</p>
@@ -249,6 +249,16 @@
 <p>To keep working on an installer made elsewhere, <strong>Import FOMOD…</strong> reads any <code>ModuleConfig.xml</code>, such as one from FOMOD Creation Tool. Pages, groups, options, descriptions, images, files, detection, flags, conditions and visibility are all kept. <strong>Re-import…</strong> replaces the open project the same way.</p>
 <h3 id="2-add-your-patches">2. Add your patches</h3>
 <p><strong>+ Add DBVO Patches…</strong> lists this voice pack&#39;s patches, with or without the Voice Changer on. Each mod becomes an option on the page of its category, made if missing. The option detects the mod&#39;s plugins and installs its Sound folder and DBVO Fix plugins from the patch&#39;s final folder.</p>
+<p>Nothing is ticked when the list opens: tick the patches to add, or use <strong>Tick new ones</strong> to tick every patch not in the FOMOD yet. A patch marked <em>already in</em> is linked to an option, and only gets its files updated; <em>same name in</em> means an option with that mod&#39;s name is already there but isn&#39;t linked to the patch, as in an imported FOMOD. The search box narrows the list by name or category.</p>
+<p>A new option&#39;s description starts as:</p>
+<pre><code>Mod name
+
+1,234 lines
+ℹ️ Contains formatting fix ESPFE patch. Let the plugin overwrite the original mod.
+
+⭐ https://www.nexusmods.com/…
+v 1.7.3</code></pre>
+<p>The ℹ️ line only appears when the option installs a DBVO Fix plugin, and the last two only when the mod has a page or version (Phase 1). Edit the description freely afterwards.</p>
 <figure><img src="help/img/phase3-addpatches.webp" alt="Add DBVO Patches" loading="lazy"><figcaption>Add DBVO Patches</figcaption></figure>
 <p>These options are <em>linked</em> (🔗). <strong>⟳ Refresh linked</strong> updates their files after you change folders or rebuild .fuz files, and every build does it too. <strong>Unlink</strong> stops updates for one option; if its patch is deleted, it is left as it was and reported.</p>
 <p>With an option picked in the tree, the dialog can put the new options right <strong>Above</strong> or <strong>Below</strong> it, in its group, instead of on their category&#39;s page. A new FOMOD&#39;s root folder follows the voice pack you pick until you type your own.</p>

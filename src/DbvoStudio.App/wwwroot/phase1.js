@@ -277,16 +277,18 @@ async function batchAdd(initial) {
 async function newMod() {
   const name = h('input', { type: 'text', placeholder: 'e.g. Legacy of the Dragonborn' });
   const version = h('input', { type: 'text', placeholder: 'e.g. 6.10.1' });
+  const page = h('input', { type: 'text', placeholder: 'https://www.nexusmods.com/skyrimspecialedition/mods/…' });
   let category = 'Misc';
   const cat = categorySelect(category, (c) => { category = c; if (![...cat.options].some((o) => o.value === c)) cat.prepend(h('option', { value: c, selected: true }, c)); cat.value = c; });
   const ok = await modal('New mod', [
     h('div.col', h('div.field-label', 'Mod name'), name),
     h('div.col', h('div.field-label', 'Mod version (optional)'), version),
+    h('div.col', h('div.field-label', 'Mod page (optional)'), page, h('div.faint', 'Nexus, LoversLab or anywhere else. With the version, it goes into the description of this mod\'s option in the FOMOD (Phase 3).')),
     h('div.col', h('div.field-label', 'Category'), cat, h('div.faint', 'Sorts this mod\'s DBVO Patches (Followers, NSFW, …). Never used in folder paths.')),
   ], [{ label: 'Cancel', value: false }, { label: 'Create', primary: true, value: true }]);
   if (!ok || !name.value.trim()) return;
   try {
-    const m = await rpc('mod.create', { name: name.value, version: version.value, category });
+    const m = await rpc('mod.create', { name: name.value, version: version.value, nexusUrl: page.value, category });
     go('mod', { id: m.id });
   } catch (e) { fail(e); }
 }
@@ -550,7 +552,7 @@ export async function modView(id) {
       h('h1', mod.name),
       helpButton('add-or-update-files-in-a-mod'),
       mod.version ? h('span.sub', 'v' + mod.version) : null,
-      h('button.icon-btn', { title: 'Rename / version', onclick: editMeta }, '✎'),
+      h('button.icon-btn', { title: 'Name, version and mod page', onclick: editMeta }, '✎'),
       h('span.faint', 'Mod Category'),
       h('span', { title: 'The category this mod and its patches are listed under' }, categorySelect(mod.category, async (c) => { try { await rpc('mod.setCategory', { id, category: c }); mod.category = c; await refreshState(); renderHead(); } catch (e) { fail(e); } })),
       h('div.spacer'),
@@ -960,7 +962,7 @@ export async function modView(id) {
     const r = await prompt('Mod details', [
       { name: 'name', label: 'Mod name', value: mod.name },
       { name: 'version', label: 'Mod version', value: mod.version },
-      { name: 'nexusUrl', label: 'Nexus page (optional)', value: mod.nexusUrl },
+      { name: 'nexusUrl', label: 'Mod page: Nexus, LoversLab… (optional, used in the FOMOD option\'s description)', value: mod.nexusUrl },
     ]);
     if (!r) return;
     mod = await rpc('mod.saveMeta', { id, ...r });

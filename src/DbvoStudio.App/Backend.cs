@@ -237,7 +237,7 @@ public sealed partial class Backend
             case "mod.create":
                 return await Locked(() =>
                 {
-                    var mod = new Mod { Name = S(p, "name").Trim(), Version = S(p, "version").Trim(), Category = S(p, "category", "Misc").Trim() };
+                    var mod = new Mod { Name = S(p, "name").Trim(), Version = S(p, "version").Trim(), NexusUrl = S(p, "nexusUrl").Trim(), Category = S(p, "category", "Misc").Trim() };
                     if (mod.Name.Length == 0) throw new InvalidOperationException("Give the mod a name.");
                     EnsureCategory(mod.Category);
                     _lib.Save(mod);
