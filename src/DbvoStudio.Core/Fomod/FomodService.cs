@@ -156,6 +156,41 @@ public sealed class FomodService
         _ => @"DragonbornVoiceOver\voice_packs\" + packId.ToLowerInvariant() + "_voice_pack.json",
     };
 
+    private static readonly string[] VoicePackFolders = { @"DragonbornVoiceOver\voice_packs", @"SKSE\Plugins\DBVO2\voice_packs", @"DBReV\voice_packs" };
+
+    /// <summary>
+    /// Voice pack JSON files the installer's own files already install (often the case in an imported FOMOD), as
+    /// "option: Data path". When there are any, the build adds no JSON of its own: one is enough.
+    /// </summary>
+    public List<string> ExistingJson(FomodProject p)
+    {
+        var hits = new List<string>();
+        var all = p.AllOptions().SelectMany(o => o.Files.Select(f => (o.Name, f))).Concat(p.RequiredInstallFiles.Select(f => ("Required files", f)));
+        foreach (var (owner, f) in all)
+        {
+            if (string.IsNullOrWhiteSpace(f.Source)) continue;
+            var d = (f.Destination ?? "").Replace('/', '\\').Trim('\\');
+            if (f.Kind == "file")
+            {
+                if (d.EndsWith(".json", StringComparison.OrdinalIgnoreCase) && VoicePackFolders.Any(v => d.StartsWith(v + "\\", StringComparison.OrdinalIgnoreCase)))
+                    hits.Add($"{owner}: {d}");
+                continue;
+            }
+            var src = Resolve(p, f.Source);
+            foreach (var v in VoicePackFolders)
+            {
+                string? sub = d.Length == 0 ? v
+                    : v.Equals(d, StringComparison.OrdinalIgnoreCase) ? ""
+                    : v.StartsWith(d + "\\", StringComparison.OrdinalIgnoreCase) ? v[(d.Length + 1)..] : null;
+                if (sub == null) continue;
+                var dir = Path.Combine(src, Os(sub));
+                if (!Directory.Exists(dir)) continue;
+                foreach (var j in Directory.EnumerateFiles(dir, "*.json")) hits.Add($"{owner}: {v}\\{Path.GetFileName(j)}");
+            }
+        }
+        return hits.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     public static string JsonText(DbvoJsonSettings j)
     {
         // The standard voice pack file: just the name shown in DBVO's menu and the ID (the Sound\DBVO\ folder).
@@ -349,7 +384,10 @@ public sealed class FomodService
         if (!string.IsNullOrWhiteSpace(p.ReleaseFolder) && !Path.IsPathRooted(p.ReleaseFolder)) Add("error", "Project", "The release folder must be a full path, such as D:\\DBVO\\Releases.");
         if (string.IsNullOrWhiteSpace(p.Info.Name)) Add("warning", "info.xml", "No mod name.");
         if (string.IsNullOrWhiteSpace(p.Info.Version)) Add("warning", "info.xml", "No version.");
-        if (p.Json.Enabled)
+        var existingJson = p.Json.Enabled ? ExistingJson(p) : new List<string>();
+        if (p.Json.Enabled && existingJson.Count > 0)
+            Add("warning", "DBVO JSON", $"Your installer already installs the voice pack JSON ({existingJson[0]}), so DBVO Studio adds none of its own. Turn off \"Add to the installer\" under DBVO voice pack JSON to hide this note.");
+        else if (p.Json.Enabled)
         {
             if (string.IsNullOrWhiteSpace(p.Json.VoicePackId)) Add("error", "DBVO JSON", "No voice_pack_id: the voice pack would be invisible in game (DBVO or Dragonborn ReVoiced).");
             int carriers = p.AllOptions().Count(o => o.CarriesJson);
@@ -641,7 +679,9 @@ public sealed class FomodService
 
         // DBVO JSON: written into _common\ and installed by the carrier option.
         var withJson = Clone(p);
-        if (p.Json.Enabled)
+        var ownJson = p.Json.Enabled ? ExistingJson(p) : new List<string>();
+        if (ownJson.Count > 0) res.Warnings.Add($"The installer already installs the voice pack JSON ({ownJson[0]}), so DBVO Studio added none of its own.");
+        if (p.Json.Enabled && ownJson.Count == 0)
         {
             var dest = JsonDestination(naming, p.Json.VoicePackId);
             var rel = "_common\\" + dest;

@@ -231,7 +231,7 @@ export async function fomodView(id) {
     };
     tree.append(
       node('project', 'step', h('span', '⚙ Installer & info.xml'), null),
-      node('json', 'step', h('span', '{ } DBVO voice pack JSON'), h('span.n', proj.json.enabled ? (proj.steps.some((s) => s.groups.some((g) => g.options.some((o) => o.carriesJson))) ? '✓' : '⚠') : 'off')));
+      node('json', 'step', h('span', '{ } DBVO voice pack JSON'), h('span.n', proj.json.enabled && (dto.existingJson || []).length ? '✓' : proj.json.enabled ? (proj.steps.some((s) => s.groups.some((g) => g.options.some((o) => o.carriesJson))) ? '✓' : '⚠') : 'off')));
     proj.steps.forEach((st, si) => {
       const open = !collapsed[st.id];
       const count = st.groups.reduce((a, g) => a + g.options.length, 0);
@@ -477,6 +477,9 @@ export async function fomodView(id) {
     };
     upd();
     return h('div', sec('DBVO voice pack JSON', h('div.row', helpButton('4-the-dbvo-json'), switchEl(j.enabled, (x) => { j.enabled = x; changed(true); renderEditor(); }, 'Add to the installer')),
+      (dto.existingJson || []).length ? h('div.banner.info', { style: { margin: '10px 0 0' } }, h('div',
+        h('b', 'Your installer already installs this file, so DBVO Studio adds none of its own. '),
+        'Found: ', (dto.existingJson || []).join(' · '), '. The settings below are only used if that file goes away; you can turn off "Add to the installer".')) : null,
       h('div.help', { style: { margin: '10px 0' } }, 'This small file makes the voice selectable in DBVO\'s MCM. It is written when you build and installed by the option marked "Carries the DBVO JSON" (normally a Required core option).',
         h('p', 'Location in the game\'s Data folder: ', h('span.mono', dto.jsonPath), ' (', dto.naming === 'Legacy' ? 'Legacy / DBVO 1' : dto.naming === 'Dbrev' ? 'DBReV' : 'DBVO 2.0', ', from the voice pack\'s pack format).')),
       srow('voice_pack_name', dto.naming === 'Dbrev' ? 'Shown in Dragonborn ReVoiced\'s menu.' : 'Shown in DBVO\'s menu.', txt(j, 'voicePackName', { after: upd })),

@@ -142,4 +142,23 @@ public class FomodRoundTripTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => svc.BuildAsync(p2, NamingMode.Legacy, false));
         Assert.True(File.Exists(Path.Combine(res.Staging, "mine.txt")));
     }
+
+    [Fact]
+    public async Task A_json_the_installer_already_installs_is_not_added_twice()
+    {
+        var lib = new Library(Tmp());
+        var root = Tmp(); var rel = Tmp();
+        var dv = Path.Combine(root, "Base", "DragonbornVoiceOver", "voice_packs"); Directory.CreateDirectory(dv);
+        File.WriteAllText(Path.Combine(dv, "vampira_voice_pack.json"), "{}");
+        var p = new FomodProject { RootFolder = root, ReleaseFolder = rel, Info = new FomodInfo { Name = "DVA", Version = "1" } };
+        p.Json.Enabled = true; p.Json.VoicePackId = "Vampira"; p.Json.VoicePackName = "Vampira";
+        p.Steps.Add(new FomodStep { Name = "s", Groups = { new FomodGroup { Name = "g", Options = {
+            new FomodOption { Name = "Base", Mode = "Required", CarriesJson = true, Files = { new FomodFile { Kind = "folder", Source = @"Base\DragonbornVoiceOver", Destination = "DragonbornVoiceOver" } } } } } } });
+        var svc = new FomodService(lib, new AppSettings());
+        Assert.Single(svc.ExistingJson(p));
+        Assert.DoesNotContain(svc.Validate(p), i => i.Level == "error");
+        var res = await svc.BuildAsync(p, NamingMode.Legacy, false);
+        Assert.False(Directory.Exists(Path.Combine(res.Staging, "_common")));
+        Assert.Single(Directory.EnumerateFiles(res.Staging, "*.json", SearchOption.AllDirectories));
+    }
 }

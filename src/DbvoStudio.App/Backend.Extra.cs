@@ -504,6 +504,11 @@ public sealed partial class Backend
 
     private FomodProject LoadFomod(string id) => _lib.LoadFomod(id) ?? throw new InvalidOperationException("FOMOD project not found.");
 
+    private List<string> SafeExistingJson(FomodProject p)
+    {
+        try { return new FomodService(_lib, Runtime()).ExistingJson(p); } catch { return new(); }
+    }
+
     private object FomodDto(FomodProject p)
     {
         var voice = _lib.LoadVoicePacks().FirstOrDefault(v => v.Id == p.VoicePackId);
@@ -513,6 +518,7 @@ public sealed partial class Backend
             voiceName = voice?.Name ?? "",
             naming = voice?.Naming.ToString() ?? "Legacy",
             jsonPath = FomodService.JsonDestination(voice?.Naming ?? NamingMode.Legacy, string.IsNullOrWhiteSpace(p.Json.VoicePackId) ? "packid" : p.Json.VoicePackId),
+            existingJson = SafeExistingJson(p),
         };
     }
 
