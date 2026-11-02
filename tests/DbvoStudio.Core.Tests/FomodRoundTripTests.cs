@@ -181,4 +181,18 @@ public class FomodRoundTripTests
         Assert.Contains(bsa.Entries, e => e.Path.EndsWith("i_do….fuz"));
         Assert.Equal(3, bsa.Entries.Count());
     }
+
+    [Fact]
+    public void A_linked_file_you_removed_is_not_added_back()
+    {
+        var o = new FomodOption { PatchId = "p", RemovedLinked = { "DBVO Fix - 018Auri.esp" },
+            Files = { new FomodFile { Kind = "folder", Source = "x\\Sound", Destination = "Sound", Linked = true } } };
+        FomodService.Relink(o, new List<FomodFile>
+        {
+            new() { Kind = "folder", Source = "x\\Sound", Destination = "Sound", Linked = true },
+            new() { Kind = "file", Source = "x\\DBVO Fix - 018Auri.esp", Destination = "DBVO Fix - 018Auri.esp", Linked = true },
+            new() { Kind = "file", Source = "x\\DBVO Fix - 018AuriVIGILANTpatch.esp", Destination = "DBVO Fix - 018AuriVIGILANTpatch.esp", Linked = true },
+        }, new Mod { Name = "Auri" });
+        Assert.Equal(new[] { "Sound", "DBVO Fix - 018AuriVIGILANTpatch.esp" }, o.Files.Select(f => f.Destination));
+    }
 }

@@ -62,6 +62,8 @@ public sealed class FomodOption
     /// <summary>When linked: the DBVO Patch and mod whose .fuz files and DBVO Fix plugins this option carries.</summary>
     public string? PatchId { get; set; }
     public string? ModId { get; set; }
+    /// <summary>Linked files you removed (by destination): Refresh linked and Build leave them out.</summary>
+    public List<string> RemovedLinked { get; set; } = new();
     /// <summary>Carries the DBVO voice pack JSON (exactly one option should).</summary>
     public bool CarriesJson { get; set; }
 }

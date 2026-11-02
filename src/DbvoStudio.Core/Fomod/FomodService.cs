@@ -218,7 +218,8 @@ public sealed class FomodService
         {
             new() { Kind = "folder", Source = MakeRelative(p, Path.Combine(folder, "Sound")), Destination = "Sound", Linked = true },
         };
-        foreach (var plugin in mod.Plugins.Where(x => x.NeedsFixPlugin))
+        // Only DBVO Fix plugins that were written: one you deleted (or never wrote) isn't added back.
+        foreach (var plugin in mod.Plugins.Where(x => x.NeedsFixPlugin && File.Exists(Path.Combine(folder, x.FixFileName))))
             files.Add(new FomodFile { Kind = "file", Source = MakeRelative(p, Path.Combine(folder, plugin.FixFileName)), Destination = plugin.FixFileName, Linked = true });
         return files;
     }
@@ -239,7 +240,8 @@ public sealed class FomodService
         o.Files.RemoveAll(f => f.Linked
                                || (f.Kind == "folder" && f.Destination.Equals("Sound", StringComparison.OrdinalIgnoreCase) && o.PatchId != null)
                                || (f.Kind == "file" && IsFix(f.Destination)));
-        o.Files.InsertRange(0, fresh.Where(f => !o.Files.Any(x => x.Destination.Equals(f.Destination, StringComparison.OrdinalIgnoreCase))));
+        o.Files.InsertRange(0, fresh.Where(f => !o.Files.Any(x => x.Destination.Equals(f.Destination, StringComparison.OrdinalIgnoreCase))
+                                              && !o.RemovedLinked.Contains(f.Destination, StringComparer.OrdinalIgnoreCase)));
     }
 
     /// <summary>

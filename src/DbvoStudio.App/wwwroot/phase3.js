@@ -525,7 +525,7 @@ export async function fomodView(id) {
 
   const blankOption = () => ({ id: newId(), name: 'New option', description: '', image: '', files: [], mode: 'Optional', plugins: [], requireAll: false, notUsableWhenMissing: true, typeDescriptorXml: null, conditionFlagsXml: null, flagsFirst: false, patchId: null, modId: null, carriesJson: false });
 
-  function filesTable(list) {
+  function filesTable(list, onRemove) {
     const tbody = h('tbody');
     const render = () => {
       clear(tbody);
@@ -540,7 +540,7 @@ export async function fomodView(id) {
         pr.addEventListener('change', () => { f.priority = Number(pr.value) || 0; changed(); });
         tbody.append(h('tr', h('td', { style: { width: '90px' } }, kind),
           h('td', h('div.path-input', src, h('button.btn.sm', { onclick: async () => { const p = f.kind === 'folder' ? await rpc('pick.folder', { title: 'Source folder' }) : await rpc('pick.file', { title: 'Source file' }); if (p) { f.source = relPath(p); src.value = f.source; changed(); } } }, '…'))),
-          h('td', dst), h('td', pr), h('td', h('button.icon-btn', { title: 'Remove', onclick: () => { list.splice(i, 1); render(); changed(); } }, '×'))));
+          h('td', dst), h('td', pr), h('td', h('button.icon-btn', { title: f.linked ? 'Remove (stays removed: Refresh linked and Build won\'t add it back)' : 'Remove', onclick: () => { list.splice(i, 1); if (onRemove) onRemove(f); render(); changed(); } }, '×'))));
       });
     };
     render();
@@ -592,7 +592,12 @@ export async function fomodView(id) {
             switchEl(o.notUsableWhenMissing, (x) => { o.notUsableWhenMissing = x; changed(); }, 'Grey out (Not usable) when missing')))) : null,
         o.mode === 'Advanced' ? srow('Type descriptor XML', 'Written exactly as typed.', txt(o, 'typeDescriptorXml', { area: true, rows: 12 })) : null,
         o.conditionFlagsXml != null ? srow('Condition flags XML', 'Flags this option sets for later pages or conditional installs.', txt(o, 'conditionFlagsXml', { area: true, rows: 4 })) : null),
-      sec('Files', null, filesTable(o.files)));
+      sec('Files', null, filesTable(o.files, (f) => {
+        // A linked file you remove stays removed: Refresh linked and Build leave it out from now on.
+        if (f.linked && o.patchId) { o.removedLinked = [...new Set([...(o.removedLinked || []), f.destination])]; renderEditor(); }
+      }),
+      (o.removedLinked || []).length ? h('div.row.wrap', { style: { marginTop: '8px' } }, h('span.faint', 'Removed from the linked files (not added back by Refresh linked or Build):'),
+        o.removedLinked.map((d) => h('span.chip', h('span.mono', d), h('button.icon-btn', { title: 'Put it back: the next Refresh linked or Build adds it again (when the file exists)', onclick: () => { o.removedLinked = o.removedLinked.filter((x) => x !== d); changed(); renderEditor(); } }, '↺')))) : null));
   }
 
   // ---- actions
