@@ -161,4 +161,24 @@ public class FomodRoundTripTests
         Assert.False(Directory.Exists(Path.Combine(res.Staging, "_common")));
         Assert.Single(Directory.EnumerateFiles(res.Staging, "*.json", SearchOption.AllDirectories));
     }
+
+    [Fact]
+    public async Task Bsa_option_packs_windows_1252_names_and_leaves_only_the_rest_loose()
+    {
+        var lib = new Library(Tmp());
+        var root = Tmp(); var rel = Tmp();
+        var dir = Path.Combine(root, "Inigo", "Sound", "DBVO", "Vampira"); Directory.CreateDirectory(dir);
+        foreach (var n in new[] { "you’ll_always_have_a_home_here..fuz", "i_do….fuz", "привет..fuz", "plain..fuz" }) File.WriteAllBytes(Path.Combine(dir, n), new byte[20]);
+        var p = new FomodProject { RootFolder = root, ReleaseFolder = rel, PackBsa = true, Info = new FomodInfo { Name = "B", Version = "1" } };
+        p.Json.Enabled = false;
+        p.Steps.Add(new FomodStep { Name = "s", Groups = { new FomodGroup { Name = "g", Options = {
+            new FomodOption { Name = "Inigo", Mode = "Optional", Files = { new FomodFile { Kind = "folder", Source = @"Inigo\Sound", Destination = "Sound" } } } } } } });
+        var res = await new FomodService(lib, new AppSettings()).BuildAsync(p, NamingMode.Legacy, false);
+        var loose = Directory.EnumerateFiles(Path.Combine(res.Staging, "_loose"), "*", SearchOption.AllDirectories).Select(Path.GetFileName).ToList();
+        Assert.Equal(new[] { "привет..fuz" }, loose);
+        using var bsa = DbvoStudio.Core.Archives.BsaArchive.Open(Directory.EnumerateFiles(Path.Combine(res.Staging, "_bsa"), "*.bsa").Single());
+        Assert.Contains(bsa.Entries, e => e.Path.EndsWith("you’ll_always_have_a_home_here..fuz"));
+        Assert.Contains(bsa.Entries, e => e.Path.EndsWith("i_do….fuz"));
+        Assert.Equal(3, bsa.Entries.Count());
+    }
 }

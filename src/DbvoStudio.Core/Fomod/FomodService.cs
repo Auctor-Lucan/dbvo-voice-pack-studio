@@ -722,14 +722,14 @@ public sealed class FomodService
                     : UniqueName(usedNames, SafeName($"DBVO - {(string.IsNullOrWhiteSpace(p.Json.VoicePackId) ? p.Name : p.Json.VoicePackId)} - {o.Name}"));
                 bool loader = fix == null || !Path.GetFileNameWithoutExtension(fix.Destination).Equals(baseName, StringComparison.OrdinalIgnoreCase);
                 foreach (var f in sound) o.Files.Remove(f);
-                // A BSA stores names as 8-bit text: names with letters beyond Latin-1 (Cyrillic, Greek, ł …) would turn
-                // into "?" and never be found in game. Those files go next to the archive as loose files instead.
+                // A BSA stores names in Windows-1252, as the game looks them up: ’ “ ” … – — go in; names it can't hold
+                // (Cyrillic, Greek, ł …) would turn into "?" and never be found, so those go next to the archive as loose files.
                 var loose = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var d in folders)
                     foreach (var file in Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories))
                     {
                         var rel = Path.GetRelativePath(d, file);
-                        if (rel.All(c => c <= 0xFF)) continue;
+                        if (Archives.BsaWriter.CanStore(rel)) continue;
                         loose.Add(Path.GetFullPath(file));
                         var stagedRel = "_loose\\" + baseName + "\\" + rel;
                         mapped[file + "|False"] = stagedRel;
