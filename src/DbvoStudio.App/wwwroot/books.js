@@ -1042,7 +1042,10 @@ export async function bookProjectView(id) {
   const refreshBook = (stem) => { booksToRefresh.add(stem); refreshBooks(); };
   let jobSeen = false;
   document.addEventListener('job-progress', () => { if (!jobSeen && document.body.contains(view)) { jobSeen = true; renderHead(); if (tab === 'books') { grid.paint(true); renderActions(); } } });
-  document.addEventListener('queue-dropped', (e) => { if (e.detail) inFlight.dropQueued(e.detail.queueId); if (partsInFlight.size && !app.job) dropParts([...partsInFlight]); });
+  // Removed once this page is gone (one listener per visit otherwise piles up).
+  const onQueueDropped = (e) => {
+    if (!document.body.contains(view)) { document.removeEventListener('queue-dropped', onQueueDropped); return; } if (e.detail) inFlight.dropQueued(e.detail.queueId); if (partsInFlight.size && !app.job) dropParts([...partsInFlight]); };
+  document.addEventListener('queue-dropped', onQueueDropped);
   document.addEventListener('job-done', async (e) => {
     jobSeen = false;
     if (!document.body.contains(view)) { offLine && offLine(); return; }

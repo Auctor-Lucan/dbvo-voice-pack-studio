@@ -362,6 +362,7 @@ public sealed partial class Backend
                 var rt = Runtime();
                 using var tagger = new AutoTagger(rt.AiProvider.Endpoint, rt.AiProvider.ApiKey, rt.AiProvider.Model);
                 var lines = proj.Lines.Where(l => ids.Contains(l.LineId) && !l.Gone).ToList();
+                var asked = lines.ToDictionary(l => l.LineId, l => l.Spoken);
                 var sem = new SemaphoreSlim(4);
                 var results = await Task.WhenAll(lines.Select(async l =>
                 {
@@ -372,14 +373,17 @@ public sealed partial class Backend
                 await _gate.WaitAsync();
                 try
                 {
+                    // The project as it is now (edits and takes made while the AI worked stay), and only lines whose text didn't change.
+                    proj = LoadRv(proj.Id);
                     foreach (var r in results.Where(r => r.Suggestion != null))
                     {
                         var l = proj.Lines.FirstOrDefault(x => x.LineId == r.LineId);
-                        if (l != null && r.Suggestion != l.Spoken) l.TagSuggestion = r.Suggestion;
+                        if (l != null && asked.TryGetValue(r.LineId, out var was) && l.Spoken == was && r.Suggestion != l.Spoken) l.TagSuggestion = r.Suggestion;
                     }
                     _lib.Save(proj);
                 }
                 finally { _gate.Release(); }
+                lines = proj.Lines.Where(l => ids.Contains(l.LineId) && !l.Gone).ToList();
                 return new { results, lines = lines.Select(RvLineDto).ToList() };
             }
             case "revoice.speakerChanges":

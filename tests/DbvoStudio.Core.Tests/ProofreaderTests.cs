@@ -81,6 +81,16 @@ public class ProofreaderTests
     }
 
     [Fact]
+    public void A_fix_that_breaks_the_markup_is_reported_not_taken_as_nothing_to_fix()
+    {
+        var (_, sent) = Proofreader.BuildBatch(new List<(string, string)> { ("A", "Dont go <Alias=Player>."), ("B", "Fine.") });
+        var r = Proofreader.ParseReply("[{\"i\":0,\"t\":\"Don't go.\",\"kind\":\"spelling\",\"why\":\"apostrophe\"}]", sent);
+        Assert.Null(r[0].Text);
+        Assert.Equal("unusable", r[0].Kind);
+        Assert.Equal("", r[1].Kind); // nothing to fix
+    }
+
+    [Fact]
     public void Unreadable_reply_throws()
     {
         var (_, sent) = Proofreader.BuildBatch(new List<(string, string)> { ("A", "Hi.") });

@@ -170,7 +170,7 @@ export async function proofreadDialog(opts) {
       paintAi();
       try {
         const r = await rpc('line1.proofread', { modId: mod.id, plugin: plugin.fileName, keys: batch });
-        for (const x of r.suggestions) sugg.set(x.key, x.text ? { text: x.text, kind: x.kind, why: x.why } : null);
+        for (const x of r.suggestions) sugg.set(x.key, x.text ? { text: x.text, kind: x.kind, why: x.why } : x.kind === 'unusable' ? { unusable: true, why: x.why } : null);
         for (const k of batch) if (!sugg.has(k)) sugg.set(k, null);
         aiError = null;
       } catch (e) {
@@ -210,7 +210,9 @@ export async function proofreadDialog(opts) {
   }, 250);
   let close = null;
 
-  const dirty = () => !!editor && editor.get() !== base.trim();
+  // The box reads a non-breaking space as a plain one; the original is compared the same way.
+  const plain = (s) => s.replace(/\u00a0/g, ' ').trim();
+  const dirty = () => !!editor && editor.get() !== plain(base);
 
   // One save at a time (a held Ctrl+Enter or a double click doesn't pass over the next line).
   async function save(next) {
@@ -219,7 +221,7 @@ export async function proofreadDialog(opts) {
     const l = line(k);
     if (!l) return true;
     const text = editor.get();
-    const changed = text !== base.trim();
+    const changed = text !== plain(base);
     busy = true;
     try {
       const r = await rpc('line1.update', { modId: mod.id, plugin: plugin.fileName, key: l.key, action: 'proofread', text: changed ? text : null });
@@ -227,14 +229,16 @@ export async function proofreadDialog(opts) {
       stats.seen.add(k);
       stats.skipped.delete(k);
       const s = sugg.get(k);
-      if (s) {
+      if (s && !s.unusable) {
         if (accepted && text === s.text) { stats.accepted.add(k); stats.declined.delete(k); }
         else if (changed || !stats.accepted.has(k)) { stats.accepted.delete(k); stats.declined.add(k); }
       }
-      busy = false; // before moving on: the next line may be passed over at once
+      // A suggestion was made from the text before your edit: coming back asks again about the new text.
+      if (changed) { sugg.delete(k); requested.delete(k); }
+      busy = false; // before moving on: the next line may be passed over at once (which sets busy again itself)
       if (next && idx === at) go(at + 1);
       return true;
-    } catch (e) { fail(e); return false; } finally { busy = false; }
+    } catch (e) { busy = false; fail(e); return false; }
   }
   // Skip leaves the line as it is and not proofread; text typed in it is saved instead.
   async function skip() {
@@ -289,6 +293,10 @@ export async function proofreadDialog(opts) {
       return;
     }
     const s = sugg.get(k);
+    if (s && s.unusable) {
+      aiSlot.append(h('div.pr-sugg', h('div.row', h('b.pr-ai', 'AI'), h('span.dim', 'The AI saw something to fix here', s.why ? ` (${s.why})` : '', ', but its fix broke the game markup or the DBVO script\'s rules, so it isn\'t shown. Check this line yourself.'))));
+      return;
+    }
     if (!s) { aiSlot.append(h('div.pr-sugg', h('div.row', h('b.pr-ai', 'AI'), h('span.dim', l && l.final != null && l.final !== l.original ? 'Nothing more to fix in your edit.' : 'Nothing to fix in this line.')))); return; }
     const style = s.kind === 'style';
     const acceptBtn = h('button.btn.sm' + (style ? '' : '.primary'), { title: 'Use the suggestion (Alt+A). Nothing is saved until you go to the next line.', disabled: accepted, onclick: () => accept() }, accepted ? 'Accepted' : 'Accept');
@@ -303,7 +311,7 @@ export async function proofreadDialog(opts) {
   }
   function accept() {
     const s = sugg.get(keys[idx]);
-    if (!s) return;
+    if (!s || s.unusable) return;
     editor.set(s.text);
     accepted = true;
     paintAi();
@@ -311,7 +319,8 @@ export async function proofreadDialog(opts) {
   }
 
   function paintFoot() {
-    const s = useAi ? sugg.get(keys[idx]) : null;
+    const s0 = useAi ? sugg.get(keys[idx]) : null;
+    const s = s0 && !s0.unusable ? s0 : null;
     const keepLabel = s && !accepted && !dirty() ? 'Keep original & next →' : 'Save & next →';
     clear(foot).append(
       h('button.btn', { disabled: idx === 0, title: 'The line before (Alt+←); text you typed here is saved first', onclick: back }, '← Back'),

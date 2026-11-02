@@ -1,5 +1,5 @@
 // Phase 3: FOMOD Creation — import any ModuleConfig.xml, options from DBVO Patches, the DBVO JSON, validate, simulate, build.
-import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, switchEl, segmented, popupMenu, helpButton, keepScroll, dragSource, dragTarget, closeAllModals } from './lib.js';
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, switchEl, segmented, popupMenu, helpButton, keepScroll, dragSource, dragTarget, closeAllModals, withBusy } from './lib.js';
 import { app, go, refreshState } from './app.js';
 import { voiceChip } from './phase2.js';
 
@@ -99,6 +99,9 @@ async function importFomod(into) {
 
 // ------------------------------------------------------------------ editor
 
+// The open editor's job-done listener (and its save-on-leave): one at a time.
+let offJobDone = null;
+
 export async function fomodView(id) {
   await refreshState();
   let dto = await rpc('fomod.get', { id });
@@ -118,19 +121,28 @@ export async function fomodView(id) {
   // (Add DBVO Patches, Refresh linked, Build) first drop the pending save and wait for one in flight, so an older copy
   // can't land on disk after theirs.
   let saveTimer = 0, saving = Promise.resolve();
+  // saveNow's promise rejects when the save failed (after saying so), so actions that need it saved stop there.
+  let saveFailed = false;
   const saveNow = () => {
     clearTimeout(saveTimer); saveTimer = 0;
     const snapshot = JSON.parse(JSON.stringify(proj));
-    saving = saving.then(async () => {
+    const job = saving.then(async () => {
       try {
         await rpc('fomod.save', { project: snapshot });
+        saveFailed = false;
         if (!saveTimer) { savedEl.textContent = 'Saved ✓'; savedEl.className = 'saved ok'; }
-      } catch (e) { savedEl.textContent = 'Not saved'; savedEl.className = 'saved bad'; fail(e); }
+      } catch (e) { saveFailed = true; savedEl.textContent = 'Not saved'; savedEl.className = 'saved bad'; fail(e); throw e; }
     });
-    return saving;
+    saving = job.catch(() => {});
+    return job;
   };
-  const persist = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); };
-  const settleSaves = async () => { clearTimeout(saveTimer); saveTimer = 0; await saving; };
+  const persist = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => saveNow().catch(() => {}), 500); };
+  // Before an action the backend saves itself: send the waiting save now (not drop it) and wait for every save.
+  const settleSaves = async () => { if (saveTimer) await saveNow(); else { await saving; if (saveFailed) throw new Error('The last change could not be saved; see the message about it.'); } };
+  // Leaving the editor (another page, closing the app) sends a waiting save straight away.
+  const flushOnLeave = () => { if (saveTimer) saveNow().catch(() => {}); };
+  window.addEventListener('pagehide', flushOnLeave);
+  window.addEventListener('beforeunload', flushOnLeave);
   const changed = (rerenderTree = false) => { savedEl.textContent = 'Saving…'; savedEl.className = 'saved'; persist(); if (rerenderTree) renderTree(); };
   // A change to the structure (order, pages, groups): the tree and the open panel both show it.
   const restructure = () => { changed(); renderTree(); renderEditor(); };
@@ -190,12 +202,15 @@ export async function fomodView(id) {
   const deleteStep = async (st) => {
     if (!await confirmBox('Delete page?', `Delete "${st.name}" and its ${st.groups.reduce((a, g) => a + g.options.length, 0)} option(s)?`, 'Delete', true)) return;
     const i = proj.steps.indexOf(st); if (i < 0) return;
-    proj.steps.splice(i, 1); changed(); select(proj.steps[Math.min(i, proj.steps.length - 1)]?.id || 'project');
+    proj.steps.splice(i, 1); changed();
+    // What you had open stays open, unless it was on that page.
+    select(find(selKey).kind !== 'project' || selKey === 'project' || selKey === 'json' ? selKey : proj.steps[Math.min(i, proj.steps.length - 1)]?.id || 'project');
   };
   const deleteGroup = async (st, g) => {
     if (!await confirmBox('Delete group?', `Delete "${g.name}" and its ${g.options.length} option(s)?`, 'Delete', true)) return;
     const i = st.groups.indexOf(g); if (i < 0) return;
-    st.groups.splice(i, 1); changed(); select(st.id);
+    st.groups.splice(i, 1); changed();
+    select(find(selKey).kind !== 'project' || selKey === 'project' || selKey === 'json' ? selKey : st.id);
   };
 
   function renderHead() {
@@ -243,7 +258,7 @@ export async function fomodView(id) {
         accepts: (d) => (d && d.step && d.step !== st ? `Put above ${st.name || 'this page'}` : d && d.group ? `Move to the end of ${st.name || 'this page'}` : null),
         onDrop: (d) => {
           if (d.step) { makeExplicit(proj.steps); proj.steps.splice(proj.steps.indexOf(d.step), 1); proj.steps.splice(proj.steps.indexOf(st), 0, d.step); }
-          else { d.fromStep.groups.splice(d.fromStep.groups.indexOf(d.group), 1); st.groups.push(d.group); }
+          else { makeExplicit(st.groups); d.fromStep.groups.splice(d.fromStep.groups.indexOf(d.group), 1); st.groups.push(d.group); }
           restructure();
         },
       });
@@ -269,7 +284,7 @@ export async function fomodView(id) {
         dragTarget(gn, {
           accepts: (d) => (d && d.option ? `Move to the end of ${g.name || 'this group'}` : d && d.group && d.group !== g ? `Put above ${g.name || 'this group'}` : null),
           onDrop: (d) => {
-            if (d.option) { d.fromGroup.options.splice(d.fromGroup.options.indexOf(d.option), 1); g.options.push(d.option); }
+            if (d.option) { makeExplicit(g.options); d.fromGroup.options.splice(d.fromGroup.options.indexOf(d.option), 1); g.options.push(d.option); }
             else { makeExplicit(st.groups); d.fromStep.groups.splice(d.fromStep.groups.indexOf(d.group), 1); st.groups.splice(st.groups.indexOf(g), 0, d.group); }
             restructure();
           },
@@ -339,11 +354,14 @@ export async function fomodView(id) {
   const descArea = (obj, key, rows) => {
     const area = txt(obj, key, { area: true, rows });
     const insert = (ch) => {
-      const a = area.selectionStart ?? area.value.length, b = area.selectionEnd ?? a;
+      // Never clicked into: at the end, not the start.
+      const focused = document.activeElement === area || area.__touched;
+      const a = focused ? area.selectionStart : area.value.length, b = focused ? area.selectionEnd : a;
       area.setRangeText(ch, a, b, 'end');
       area.focus();
       area.dispatchEvent(new Event('input'));
     };
+    area.addEventListener('focus', () => { area.__touched = true; });
     return h('div.col', { style: { gap: '4px' } },
       h('div.row.icon-bar', ICONS.map(([ch, name]) => h('button.btn.sm.ghost', { type: 'button', title: `Insert ${ch} (${name}) at the cursor`, onmousedown: (e) => e.preventDefault(), onclick: () => insert(ch) }, ch))),
       area);
@@ -355,21 +373,27 @@ export async function fomodView(id) {
   };
   const imagePicker = (obj, key, cls = '') => {
     const prev = h('div');
+    let ticket = 0;
     const load = async () => {
+      const mine = ++ticket; // only the latest preview is shown
       clear(prev);
+      removeBtn.classList.toggle('hidden', !obj[key]);
       if (!obj[key]) return;
+      let el;
       try {
         const url = await rpc('file.dataUrl', { path: obj[key], root: proj.rootFolder });
-        prev.append(url ? h('img.img-preview' + cls, { src: url }) : h('div.faint', 'Image not found (relative to the FOMOD root).'));
-      } catch (e) { prev.append(h('div.faint', e.message)); }
+        el = url ? h('img.img-preview' + cls, { src: url }) : h('div.faint', 'Image not found (relative to the FOMOD root).');
+      } catch (e) { el = h('div.faint', e.message); }
+      if (mine === ticket) clear(prev).append(el);
     };
+    const removeBtn = h('button.btn.sm.ghost', { title: 'Remove this image from the installer (the file itself stays)', onclick: () => { i.value = ''; obj[key] = ''; changed(); load(); } }, 'Remove');
     const i = h('input', { type: 'text', value: obj[key] || '', placeholder: 'Images\\Header.png' });
     i.addEventListener('change', () => { obj[key] = i.value.trim(); changed(); load(); });
     load();
     return h('div.col', h('div.path-input', i, h('button.btn.sm', { onclick: async () => {
       const f = await rpc('pick.file', { title: 'Choose an image', filter: 'Images|*.png;*.jpg;*.jpeg;*.gif;*.bmp' });
       if (f) { i.value = relPath(f); obj[key] = i.value; changed(); load(); }
-    } }, 'Browse'), obj[key] ? h('button.btn.sm.ghost', { title: 'Remove this image from the installer (the file itself stays)', onclick: () => { i.value = ''; obj[key] = ''; changed(); load(); } }, 'Remove') : null), prev);
+    } }, 'Browse'), removeBtn), prev);
   };
 
   let shownKey = null;
@@ -607,15 +631,30 @@ export async function fomodView(id) {
   }
 
   // ---- actions
+  // While the backend works on the whole project (and answers with its new copy), the editor takes no input at all,
+  // keyboard included: an edit made meanwhile would be overwritten by that answer.
+  async function editorWaits(promise, title) {
+    if (document.activeElement && view.contains(document.activeElement)) document.activeElement.blur();
+    view.inert = true;
+    try { return await withBusy(promise, title); } finally { view.inert = false; }
+  }
   async function addPatches() {
     await refreshState();
     // Every patch of this voice pack, Voice Changer on or off: both build .fuz files into the final folder.
     const patches = app.state.patches.filter((p) => !proj.voicePackId || p.voicePackId === proj.voicePackId);
     if (!patches.length) { toast('No DBVO Patches for this voice pack yet.', true); return; }
-    const linked = new Set(proj.steps.flatMap((s) => s.groups.flatMap((g) => g.options.map((o) => o.patchId))).filter(Boolean));
+    // A patch makes one option per mod, named after the mod: it is "already in" when every one of its mods has its
+    // linked option, and "same name in" when an option of one of its mods' names is there but not linked to it.
+    const allOpts = proj.steps.flatMap((s) => s.groups.flatMap((g) => g.options));
+    const pairs = new Set(allOpts.filter((o) => o.patchId).map((o) => o.patchId + '|' + o.modId));
+    const optionNames = new Set(allOpts.map((o) => (o.name || '').trim().toLowerCase()));
+    const modName = (mid) => ((app.state.mods || []).find((m) => m.id === mid) || {}).name || '';
+    const modsOf = (p) => (p.modIds || []);
+    const isIn = (p) => modsOf(p).length > 0 && modsOf(p).every((mid) => pairs.has(p.id + '|' + mid));
+    const partlyIn = (p) => !isIn(p) && modsOf(p).some((mid) => pairs.has(p.id + '|' + mid));
+    const sameName = (p) => modsOf(p).some((mid) => !pairs.has(p.id + '|' + mid) && optionNames.has(modName(mid).trim().toLowerCase()));
     // Nothing is ticked to start with: tick the patches to add (in an imported FOMOD most mods are already there under
     // their own options, which aren't linked to a patch).
-    const optionNames = new Set(proj.steps.flatMap((s) => s.groups.flatMap((g) => g.options.map((o) => (o.name || '').trim().toLowerCase()))));
     const boxes = patches.map((p) => ({ p, box: h('input', { type: 'checkbox', checked: false }) }));
     const addBtnLabel = () => { const n = boxes.filter((x) => x.box.checked).length; const b = document.querySelector('#modal .modal-card .btn.primary'); if (b) b.textContent = n ? `Add ${n}` : 'Add'; };
     boxes.forEach(({ box }) => box.addEventListener('change', addBtnLabel));
@@ -623,12 +662,20 @@ export async function fomodView(id) {
     let q = '';
     const shown = () => boxes.filter(({ p }) => !q || p.name.toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q));
     const paintList = () => clear(listEl).append(...shown().map(({ p, box }) => h('label.row', box, h('span.grow', p.name), h('span.faint', p.category),
-      linked.has(p.id) ? h('span.badge.b-skip', 'already in') : optionNames.has((p.name || '').trim().toLowerCase()) ? h('span.badge.b-skip', { title: 'An option with this name is already in the FOMOD (not linked to the patch)' }, 'same name in') : null)));
+      isIn(p) ? h('span.badge.b-skip', 'already in') : sameName(p) ? h('span.badge.b-skip', { title: 'An option named like one of its mods is already in the FOMOD (not linked to this patch): adding would make a second one' }, 'same name in')
+        : partlyIn(p) ? h('span.badge.b-skip', { title: 'Some of its mods are in the FOMOD already; adding puts in the others' }, 'partly in') : null)));
     paintList();
     const search = h('input', { type: 'text', placeholder: 'Find a patch or category…', style: { flex: '1' } });
     search.addEventListener('input', () => { q = search.value.trim().toLowerCase(); paintList(); });
     const tickTools = h('div.row', search,
-      h('button.btn.sm', { title: 'Tick every patch shown that isn\'t in this FOMOD yet', onclick: () => { shown().forEach(({ p, box }) => { box.checked = !linked.has(p.id) && !optionNames.has((p.name || '').trim().toLowerCase()); }); addBtnLabel(); } }, 'Tick new ones'),
+      h('button.btn.sm', { title: 'Tick every patch shown that isn\'t in this FOMOD yet (one patch per mod: a second patch of the same mod is left for you to pick)', onclick: () => {
+        const claimed = new Set(allOpts.filter((o) => o.modId).map((o) => o.modId));
+        shown().forEach(({ p, box }) => {
+          box.checked = !isIn(p) && !sameName(p) && !(modsOf(p).length && modsOf(p).every((mid) => claimed.has(mid)));
+          if (box.checked) modsOf(p).forEach((mid) => claimed.add(mid));
+        });
+        addBtnLabel();
+      } }, 'Tick new ones'),
       h('button.btn.sm', { title: 'Untick every patch', onclick: () => { boxes.forEach(({ box }) => { box.checked = false; }); addBtnLabel(); } }, 'Untick all'));
     let sort = true;
     // With an option picked in the tree, the new ones can go right above or below it (in its group) instead of on their category's page.
@@ -649,9 +696,12 @@ export async function fomodView(id) {
     if (!ok) return;
     if (!boxes.some((x) => x.box.checked)) { toast('Nothing ticked: no options added.'); return; }
     try {
-      await settleSaves();
-      const r = await rpc('fomod.addPatches', { project: proj, patchIds: boxes.filter((x) => x.box.checked).map((x) => x.p.id), sort: sort && place === 'category' ? 'az' : '',
-        ...(anchor && place !== 'category' ? { anchorId: anchor.option.id, where: place } : {}) });
+      // The editor waits while the backend adds them (an edit made meanwhile would be overwritten by its answer).
+      const r = await editorWaits((async () => {
+        await settleSaves();
+        return rpc('fomod.addPatches', { project: proj, patchIds: boxes.filter((x) => x.box.checked).map((x) => x.p.id), sort: sort && place === 'category' ? 'az' : '',
+          ...(anchor && place !== 'category' ? { anchorId: anchor.option.id, where: place } : {}) });
+      })(), 'Adding DBVO Patches');
       dto = r.project; proj = dto.project;
       toast(`${r.added} option(s) added, ${r.updated} updated.`);
       renderAll();
@@ -660,8 +710,7 @@ export async function fomodView(id) {
 
   async function refreshLinked() {
     try {
-      await settleSaves();
-      const r = await rpc('fomod.refresh', { project: proj });
+      const r = await editorWaits((async () => { await settleSaves(); return rpc('fomod.refresh', { project: proj }); })(), 'Updating linked options');
       dto = r.project; proj = dto.project; renderAll();
       toast(r.orphans && r.orphans.length ? `Linked options updated. Not linked any more (left as they are): ${r.orphans.join(', ')}` : 'Linked options updated.');
     } catch (e) { fail(e); }
@@ -754,21 +803,32 @@ export async function fomodView(id) {
       const fresh = new Map();
       for (const st of built.steps || []) for (const g of st.groups || []) for (const o of g.options || []) fresh.set(o.id, o);
       // Only the linked files come from the build; files you added, removed or edited meanwhile stay as they are.
+      const low = (x) => (x.destination || '').toLowerCase();
+      let openChanged = false;
+      const openOpt = find(selKey).option;
       for (const st of proj.steps) for (const g of st.groups) for (const o of g.options) {
         const f = fresh.get(o.id);
         if (!f || !o.patchId) continue;
         const removed = new Set((o.removedLinked || []).map((d) => d.toLowerCase()));
         const mine = o.files.filter((x) => !x.linked);
-        const linked = f.files.filter((x) => x.linked && !removed.has((x.destination || '').toLowerCase()) && !mine.some((m) => (m.destination || '').toLowerCase() === (x.destination || '').toLowerCase()));
-        o.files = [...linked, ...mine];
+        const was = new Map(o.files.filter((x) => x.linked).map((x) => [low(x), x]));
+        const linked = f.files.filter((x) => x.linked && !removed.has(low(x)) && !mine.some((m) => low(m) === low(x)))
+          .map((x) => { const w = was.get(low(x)); return w ? { ...x, priority: w.priority } : x; }); // your priority stays
+        const next = [...linked, ...mine];
+        if (JSON.stringify(next) === JSON.stringify(o.files)) continue;
+        o.files.splice(0, o.files.length, ...next); // the same list: an open file table keeps writing into it
+        if (o === openOpt) openChanged = true;
       }
       changed();
-      renderTree(); renderEditor();
+      renderTree();
+      if (openChanged) renderEditor();
     }
     renderHead();
     paintSummary();
   };
+  if (offJobDone) offJobDone();
   document.addEventListener('job-done', onJobDone);
+  offJobDone = () => { document.removeEventListener('job-done', onJobDone); window.removeEventListener('pagehide', flushOnLeave); window.removeEventListener('beforeunload', flushOnLeave); flushOnLeave(); };
 
   function renderAll() { renderHead(); renderTree(); renderEditor(); }
   renderAll();

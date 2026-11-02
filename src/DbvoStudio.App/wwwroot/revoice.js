@@ -1253,7 +1253,10 @@ export async function revoiceView(id) {
   });
   let jobSeen = false;
   document.addEventListener('job-progress', () => { if (!jobSeen && document.body.contains(view)) { jobSeen = true; renderHead(); if (tab === 'lines') { grid.paint(true); renderActions(); } } });
-  document.addEventListener('queue-dropped', (e) => { if (e.detail) inFlight.dropQueued(e.detail.queueId); });
+  // Removed once this page is gone (one listener per visit otherwise piles up).
+  const onQueueDropped = (e) => {
+    if (!document.body.contains(view)) { document.removeEventListener('queue-dropped', onQueueDropped); return; } if (e.detail) inFlight.dropQueued(e.detail.queueId); };
+  document.addEventListener('queue-dropped', onQueueDropped);
   document.addEventListener('job-done', async (e) => {
     jobSeen = false;
     if (!document.body.contains(view)) return;

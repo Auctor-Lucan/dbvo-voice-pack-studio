@@ -165,7 +165,12 @@ const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to L
 // bring back the job bar and keep buttons disabled.
 let lastDone = null;
 on('progress', (p) => {
-  if (lastDone && lastDone.kind === p.kind && Date.now() - lastDone.t < 1500) return;
+  // A late report of the finished job is ignored; the first report of the next job (a queued one starts at once),
+  // which starts from nothing done, is not.
+  if (lastDone && lastDone.kind === p.kind && Date.now() - lastDone.t < 1500) {
+    if (p.done > 0 && p.total > 0) return;
+    lastDone = null;
+  }
   app.job = p;
   jobEl.classList.remove('hidden');
   const qa = p.kind === 'qa' || p.kind === 'revoice-qa';

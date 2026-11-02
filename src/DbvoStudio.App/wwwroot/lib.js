@@ -34,7 +34,7 @@ if (webview) {
 // ---- "Working…": any call that takes longer than a moment shows a spinner in the top bar (and the busy cursor), so a
 // pause while the app reads plugins, saves or loads a project never looks like a hang. Calls that wait for you (file
 // pickers) or run quietly in the background are left out; long tasks have their own bar.
-const QUIET = /^(pick\.|open\.|file\.dataUrl|fomod\.summary|job\.|audio\.|play|preview\.|clipboard)/;
+const QUIET = /^(pick\.|open\.|file\.dataUrl|fomod\.summary|job\.|audio\.|play|preview\.|clipboard|line1\.proofread$|rules\.check$|patch\.sharedFiles$|eleven\.subscriptionInfo$|window\.ready$)/;
 const BUSY_LABEL = { 'mod.import': 'Reading plugins', 'mod.create': 'Creating the mod', 'mod.get': 'Opening the mod', state: 'Loading', dropped: 'Reading dropped files',
   'fomod.addPatches': 'Adding DBVO Patches', 'fomod.refresh': 'Updating linked options', 'fomod.validate': 'Checking the installer', 'fomod.import': 'Reading the FOMOD',
   'fomod.build': 'Starting the build', 'fomod.save': 'Saving', 'fomod.get': 'Opening the FOMOD', 'fomod.simulate': 'Simulating', 'fomod.preview': 'Writing the XML' };

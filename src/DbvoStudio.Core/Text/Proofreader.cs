@@ -95,7 +95,10 @@ public static class Proofreader
             var why = e.TryGetProperty("why", out var w) && w.ValueKind == JsonValueKind.String ? w.GetString()!.Trim() : "";
             var restored = Restore(te.GetString()!.Trim(), sent[i].Tokens);
             if (restored != null) restored = ScriptSafe(sent[i].Text, restored);
-            if (restored == null || restored == sent[i].Text.Trim()) continue;
+            // The AI saw something to fix but its fix can't be used (it broke the markup or the script's rules): say so,
+            // so the line isn't passed over as if nothing were wrong.
+            if (restored == null) { byIndex[i] = new ProofSuggestion(sent[i].Key, null, "unusable", why.Length > 160 ? why[..160] + "…" : why); continue; }
+            if (restored == sent[i].Text.Trim()) continue;
             byIndex[i] = new ProofSuggestion(sent[i].Key, restored, kind, why.Length > 160 ? why[..160] + "…" : why);
         }
         return sent.Select((s, i) => byIndex.TryGetValue(i, out var x) ? x : new ProofSuggestion(s.Key, null, "", "")).ToList();

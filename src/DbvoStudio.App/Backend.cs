@@ -1089,10 +1089,11 @@ public sealed partial class Backend
                 line.UndoSpoken = line.Spoken;
                 line.Spoken = SpokenText.DefaultFor(line.FinalLine);
                 line.SpokenEdited = false;
+                line.TagSuggestion = null; // made from the text just replaced
                 line.RefreshStale();
                 break;
             case "undoReset":
-                if (line.UndoSpoken != null) { line.Spoken = line.UndoSpoken; line.SpokenEdited = line.Spoken != SpokenText.DefaultFor(line.FinalLine); }
+                if (line.UndoSpoken != null) { line.Spoken = line.UndoSpoken; line.SpokenEdited = line.Spoken != SpokenText.DefaultFor(line.FinalLine); line.TagSuggestion = null; }
                 line.UndoSpoken = null;
                 line.RefreshStale();
                 break;
@@ -1169,6 +1170,7 @@ public sealed partial class Backend
             {
                 n++;
                 line.SpokenEdited = true;
+                line.TagSuggestion = null; // an AI tag suggestion was made from the text before this change
                 line.RefreshStale();
             }
         }
@@ -1568,6 +1570,8 @@ public sealed partial class Backend
         var rt = Runtime();
         using var tagger = new AutoTagger(rt.AiProvider.Endpoint, rt.AiProvider.ApiKey, rt.AiProvider.Model);
         var lines = patch.Lines.Where(l => ids.Contains(l.LineId)).ToList();
+        // The text each suggestion was made from: a line edited while the AI worked gets no (outdated) suggestion.
+        var asked = lines.ToDictionary(l => l.LineId, l => l.Spoken);
         var sem = new SemaphoreSlim(4);
         var results = await Task.WhenAll(lines.Select(async l =>
         {
@@ -1578,10 +1582,12 @@ public sealed partial class Backend
         await _gate.WaitAsync();
         try
         {
+            // The patch as it is now, not as it was before the AI calls: everything changed meanwhile (edits, new takes) stays.
+            patch = LoadPatch(patch.Id);
             foreach (var r in results.Where(r => r.Suggestion != null))
             {
                 var l = patch.Lines.FirstOrDefault(x => x.LineId == r.LineId);
-                if (l != null && r.Suggestion != l.Spoken) l.TagSuggestion = r.Suggestion;
+                if (l != null && asked.TryGetValue(r.LineId, out var was) && l.Spoken == was && r.Suggestion != l.Spoken) l.TagSuggestion = r.Suggestion;
             }
             _lib.Save(patch);
         }

@@ -588,7 +588,7 @@ export async function patchView(id) {
   function tagsContextRow() {
     if (vc || voice.engine !== 'elevenlabs' || /v3/i.test((voice.eleven || {}).modelId || '')) return null; // eleven_v3 takes no context
     return h('div.pause-row',
-      switchEl(!!patch.tagsAsContext, async (v) => { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: v }); reindex(); renderAll(); } catch (e) { fail(e); renderAll(); } }, 'Leading tags as context', { title: 'This patch, new takes: the [tags] at the start of a line are sent to ElevenLabs as context (the text before the line) instead of as part of the line. Context isn\'t counted against your credits, and short lines no longer get doubled words from their tags. Tags later in the line stay in the text.' }),
+      switchEl(!!patch.tagsAsContext, async (v) => { if (blockedWhileGenerating()) { renderAll(); return; } try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: v }); reindex(); renderAll(); } catch (e) { fail(e); renderAll(); } }, 'Leading tags as context', { title: 'This patch, new takes: the [tags] at the start of a line are sent to ElevenLabs as context (the text before the line) instead of as part of the line. Context isn\'t counted against your credits, and short lines no longer get doubled words from their tags. Tags later in the line stay in the text.' }),
       h('div.faint', 'Leading [tags] don\'t use credits, but they come through weaker: add "Extremely", e.g. [British Extremely Baleful] instead of [British Baleful] (in tests it only strengthens the next word; "Very" barely helped). Check the billed credits in the takes window.'));
   }
   function outputGroup(fields, o) {
@@ -1475,7 +1475,15 @@ export async function patchView(id) {
     } catch (e) { fail(e); renderHead(); }
   }
 
+  // While takes are being made, the patch's folders and options can't change (the backend refuses, to keep paid
+  // takes): say so before you fill in a dialog that couldn't be saved.
+  const blockedWhileGenerating = () => {
+    if (!(app.job && app.job.kind === 'generate')) return false;
+    toast('Takes are being made. Folders & options can be changed when the generation ends (or after Cancel at the top).', true);
+    return true;
+  };
   async function openOptions() {
+    if (blockedWhileGenerating()) return;
     await refreshState();
     const s = app.state;
     const name = h('input', { type: 'text', value: patch.name });
@@ -1623,7 +1631,10 @@ export async function patchView(id) {
   });
   let jobSeen = false;
   document.addEventListener('job-progress', () => { if (!jobSeen && document.body.contains(view)) { jobSeen = true; grid.paint(true); renderActions(); } });
-  document.addEventListener('queue-dropped', (e) => { if (e.detail) inFlight.dropQueued(e.detail.queueId); });
+  // Removed once this page is gone (one listener per visit otherwise piles up).
+  const onQueueDropped = (e) => {
+    if (!document.body.contains(view)) { document.removeEventListener('queue-dropped', onQueueDropped); return; } if (e.detail) inFlight.dropQueued(e.detail.queueId); };
+  document.addEventListener('queue-dropped', onQueueDropped);
   document.addEventListener('job-done', async (e) => {
     jobSeen = false;
     if (!document.body.contains(view)) return;
@@ -1669,7 +1680,7 @@ export async function patchView(id) {
         h('div.faint', 'Tags later in a line stay in the text and are billed as before. You can turn it off for any patch in the toolbar: Output ▾ → Leading tags as context. Existing patches are unchanged.'),
         h('div.faint', 'More in Global Settings → General & tools → Leading tags as context: the default for new patches, which each patch can change for itself.'),
       ], [{ label: 'Turn it off for this patch', value: 'off' }, { label: 'Keep it on', primary: true, value: 'on' }], { help: 'leading-tags-as-context' });
-      if (v === 'off') { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: false }); reindex(); renderAll(); } catch (e) { fail(e); } }
+      if (v === 'off' && !blockedWhileGenerating()) { try { patch = await rpc('patch.saveMeta', { id, tagsAsContext: false }); reindex(); renderAll(); } catch (e) { fail(e); } }
     }, 400);
   }
   loadEngine();
