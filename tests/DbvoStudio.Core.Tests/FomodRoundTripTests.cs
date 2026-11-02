@@ -116,4 +116,30 @@ public class FomodRoundTripTests
         var r = new FomodService(lib, new AppSettings()).Simulate(p, Array.Empty<string>());
         Assert.Equal(new[] { "Alpha", "Zeta" }, r.Steps.Select(s => s.Name));
     }
+
+    [Fact]
+    public async Task The_unpacked_installer_sits_next_to_the_archive_and_never_replaces_your_own_folder()
+    {
+        var lib = new Library(Tmp());
+        var rel = Tmp(); var root = Tmp();
+        Directory.CreateDirectory(Path.Combine(root, "Sound")); File.WriteAllText(Path.Combine(root, "Sound", "a.fuz"), "A");
+        var p = new FomodProject { RootFolder = root, ReleaseFolder = rel, Info = new FomodInfo { Name = "Mod", Version = "1.0" } };
+        p.Json.Enabled = false;
+        p.Steps.Add(new FomodStep { Name = "s", Groups = { new FomodGroup { Name = "g", Options = {
+            new FomodOption { Name = "o", Mode = "Optional", Files = { new FomodFile { Kind = "folder", Source = "Sound", Destination = "Sound" } } } } } } });
+        var svc = new FomodService(lib, new AppSettings());
+        var res = await svc.BuildAsync(p, NamingMode.Legacy, false);
+        Assert.Equal(Path.Combine(rel, "Mod 1.0"), res.Staging);
+        Assert.True(File.Exists(Path.Combine(res.Staging, "Sound", "a.fuz")));
+        await svc.BuildAsync(p, NamingMode.Legacy, false); // its own earlier build is replaced
+        // A folder of that name that isn't a build stays untouched.
+        Directory.Delete(res.Staging, true); Directory.CreateDirectory(res.Staging); File.WriteAllText(Path.Combine(res.Staging, "mine.txt"), "x");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.BuildAsync(p, NamingMode.Legacy, false));
+        Assert.True(File.Exists(Path.Combine(res.Staging, "mine.txt")));
+        // The FOMOD root itself named like the archive: refused.
+        var p2 = new FomodProject { RootFolder = Path.Combine(rel, "Mod 1.0"), ReleaseFolder = rel, Info = new FomodInfo { Name = "Mod", Version = "1.0" } };
+        p2.Json.Enabled = false;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.BuildAsync(p2, NamingMode.Legacy, false));
+        Assert.True(File.Exists(Path.Combine(res.Staging, "mine.txt")));
+    }
 }

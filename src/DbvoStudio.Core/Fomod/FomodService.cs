@@ -576,8 +576,8 @@ public sealed class FomodService
 
     // ------------------------------------------------------------------ build and package
 
-    /// <summary>The folder in the release folder that holds each finished, unpacked installer (what gets zipped).</summary>
-    public const string UnpackedFolder = "Unpacked installers";
+    /// <summary>Folders earlier versions built in, inside the release folder; never copied into an installer.</summary>
+    private static readonly string[] OldBuildFolders = { "_staging", "Unpacked installers" };
 
     /// <summary>
     /// Stage the installer (fomod\ files, every option's files hardlinked, images, the DBVO JSON) and pack it.
@@ -589,9 +589,18 @@ public sealed class FomodService
         if (!Path.IsPathRooted(p.ReleaseFolder)) throw new InvalidOperationException("The release folder must be a full path, such as D:\\DBVO\\Releases.");
         var res = new BuildResult();
         var archiveBase = SafeName($"{(string.IsNullOrWhiteSpace(p.Info.Name) ? p.Name : p.Info.Name)}{(string.IsNullOrWhiteSpace(p.Info.Version) ? "" : " " + p.Info.Version)}");
-        var staging = Path.Combine(p.ReleaseFolder, UnpackedFolder, archiveBase);
+        // The unpacked installer sits right next to its archive, with the same name: the shortest path for the long
+        // file names of Legacy .fuz files, and the folder you'd zip by hand.
+        var staging = Path.Combine(p.ReleaseFolder, archiveBase);
+        var stagingFull = Path.GetFullPath(staging).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        bool Inside(string path) => (Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar).StartsWith(stagingFull, StringComparison.OrdinalIgnoreCase);
+        // That folder is emptied before each build, so it must not be (or hold) anything of yours.
+        if (Inside(p.RootFolder) || p.AllOptions().SelectMany(o => o.Files).Concat(p.RequiredInstallFiles).Any(f => !string.IsNullOrWhiteSpace(f.Source) && Inside(Resolve(p, f.Source))))
+            throw new InvalidOperationException($"The build would empty \"{staging}\", which holds your own FOMOD files. Pick another release folder, or change the mod name or version.");
+        if (Directory.Exists(staging) && Directory.EnumerateFileSystemEntries(staging).Any() && !File.Exists(Path.Combine(staging, "fomod", "ModuleConfig.xml")))
+            throw new InvalidOperationException($"\"{staging}\" already exists and isn't an installer DBVO Studio built. Move or rename it, or pick another release folder.");
         void Step(string what) => progress?.Report(new GenerationProgress(0, 0, 0, null, what));
-        if (Directory.Exists(staging)) { Step("Removing the previous unpacked installer"); await Task.Run(() => Directory.Delete(staging, true), ct); }
+        if (Directory.Exists(staging)) { Step("Removing the previous unpacked installer folder"); await Task.Run(() => Directory.Delete(staging, true), ct); }
         Directory.CreateDirectory(Path.Combine(staging, "fomod"));
         res.Staging = staging;
 
@@ -711,14 +720,12 @@ public sealed class FomodService
         // (a release folder inside the FOMOD root would otherwise be copied into itself).
         // Only the build's own output is skipped: the _staging folder and archives being written (the release
         // folder may well be the FOMOD root itself).
-        var stagingRoot = Path.GetFullPath(Path.Combine(p.ReleaseFolder, UnpackedFolder)).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        // The folder builds before 11.0.3 used, never copied in either.
-        var oldStagingRoot = Path.GetFullPath(Path.Combine(p.ReleaseFolder, "_staging")).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var oldRoots = OldBuildFolders.Select(x => Path.GetFullPath(Path.Combine(p.ReleaseFolder, x)).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar).ToList();
         var ownArchives = new[] { ".zip", ".7z" }.Select(x => Path.GetFullPath(Path.Combine(p.ReleaseFolder, archiveBase + x))).ToHashSet(StringComparer.OrdinalIgnoreCase);
         bool InRelease(string f)
         {
             var full = Path.GetFullPath(f);
-            return full.StartsWith(stagingRoot, StringComparison.OrdinalIgnoreCase) || full.StartsWith(oldStagingRoot, StringComparison.OrdinalIgnoreCase) || full.EndsWith(".part", StringComparison.OrdinalIgnoreCase) || ownArchives.Contains(full);
+            return full.StartsWith(stagingFull, StringComparison.OrdinalIgnoreCase) || oldRoots.Any(r => full.StartsWith(r, StringComparison.OrdinalIgnoreCase)) || full.EndsWith(".part", StringComparison.OrdinalIgnoreCase) || ownArchives.Contains(full);
         }
         Step("Listing the files to install");
         var pairs = new List<(string from, string to)>();
