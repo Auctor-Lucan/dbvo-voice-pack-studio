@@ -378,11 +378,23 @@ public sealed partial class Backend
                     if (!string.IsNullOrWhiteSpace(existingId))
                     {
                         var old = LoadFomod(existingId);
+                        _lib.Backup("before-fomod-reimport", _settings.BackupsToKeep);
                         proj.Id = old.Id;
                         proj.VoicePackId = old.VoicePackId;
                         proj.ReleaseFolder = old.ReleaseFolder;
                         proj.Json = old.Json;
                         proj.ArchiveFormat = old.ArchiveFormat;
+                        proj.PackBsa = old.PackBsa;
+                        proj.Encoding = old.Encoding;
+                        // Options linked to a DBVO Patch stay linked (matched by name), with the files they had from it.
+                        var oldByName = old.AllOptions().Where(o => o.PatchId != null).GroupBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+                        foreach (var o in proj.AllOptions())
+                        {
+                            if (!oldByName.TryGetValue(o.Name, out var was)) continue;
+                            o.PatchId = was.PatchId; o.ModId = was.ModId; o.RemovedLinked = new List<string>(was.RemovedLinked);
+                            foreach (var f in o.Files)
+                                f.Linked = was.Files.Any(x => x.Linked && x.Destination.Equals(f.Destination, StringComparison.OrdinalIgnoreCase));
+                        }
                     }
                     else
                     {
@@ -715,10 +727,13 @@ public sealed partial class Backend
                     {
                         saved.LastBuildUtc = proj.LastBuildUtc; saved.LastArchive = proj.LastArchive;
                         var fresh = proj.Steps.SelectMany(st => st.Groups).SelectMany(g => g.Options).GroupBy(o => o.Id).ToDictionary(g => g.Key, g => g.First());
+                        var modsById = _lib.LoadMods().ToDictionary(m => m.Id);
+                        // Only the linked files come from the build; everything you changed meanwhile (files you added,
+                        // removed or edited, linked files you removed) stays as you left it.
                         foreach (var o in saved.Steps.SelectMany(st => st.Groups).SelectMany(g => g.Options))
                             if (o.PatchId != null && fresh.TryGetValue(o.Id, out var f))
-                                // the build's linked files, plus files added by hand meanwhile
-                                o.Files = f.Files.Concat(o.Files.Where(x => !x.Linked && !f.Files.Any(y => y.Destination.Equals(x.Destination, StringComparison.OrdinalIgnoreCase)))).ToList();
+                                FomodService.Relink(o, f.Files.Where(x => x.Linked).Select(x => new FomodFile { Kind = x.Kind, Source = x.Source, Destination = x.Destination, Priority = x.Priority, AlwaysInstall = x.AlwaysInstall, InstallIfUsable = x.InstallIfUsable, Linked = true }).ToList(),
+                                    o.ModId != null && modsById.TryGetValue(o.ModId, out var m) ? m : new Mod());
                     }
                     _lib.Save(saved);
                 }

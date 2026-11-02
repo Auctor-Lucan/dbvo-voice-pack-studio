@@ -536,10 +536,16 @@ export async function fomodView(id) {
         src.addEventListener('input', () => { f.source = src.value; changed(); });
         const dst = h('input', { type: 'text', value: f.destination, placeholder: f.kind === 'folder' ? 'e.g. Sound' : 'e.g. DBVO Fix - Mod.esp' });
         dst.addEventListener('input', () => { f.destination = dst.value; changed(); });
+        // A linked file comes from the DBVO Patch and is rewritten from it by Refresh linked and Build: its kind, source
+        // and destination can't be edited here (remove it with ×, then add your own); its priority can.
+        if (f.linked) {
+          const why = 'From the DBVO Patch: Refresh linked and Build keep it up to date. To use something else, remove it (×) and add your own.';
+          for (const el of [kind, src, dst]) { el.disabled = true; el.title = why; }
+        }
         const pr = h('input', { type: 'number', value: f.priority || 0, style: { width: '60px' } });
         pr.addEventListener('change', () => { f.priority = Number(pr.value) || 0; changed(); });
         tbody.append(h('tr', h('td', { style: { width: '90px' } }, kind),
-          h('td', h('div.path-input', src, h('button.btn.sm', { onclick: async () => { const p = f.kind === 'folder' ? await rpc('pick.folder', { title: 'Source folder' }) : await rpc('pick.file', { title: 'Source file' }); if (p) { f.source = relPath(p); src.value = f.source; changed(); } } }, '…'))),
+          h('td', h('div.path-input', src, h('button.btn.sm', { disabled: !!f.linked, onclick: async () => { const p = f.kind === 'folder' ? await rpc('pick.folder', { title: 'Source folder' }) : await rpc('pick.file', { title: 'Source file' }); if (p) { f.source = relPath(p); src.value = f.source; changed(); } } }, '…'))),
           h('td', dst), h('td', pr), h('td', h('button.icon-btn', { title: f.linked ? 'Remove (stays removed: Refresh linked and Build won\'t add it back)' : 'Remove', onclick: () => { list.splice(i, 1); if (onRemove) onRemove(f); render(); changed(); } }, '×'))));
       });
     };
@@ -747,7 +753,15 @@ export async function fomodView(id) {
       proj.lastBuildUtc = built.lastBuildUtc; proj.lastArchive = built.lastArchive;
       const fresh = new Map();
       for (const st of built.steps || []) for (const g of st.groups || []) for (const o of g.options || []) fresh.set(o.id, o);
-      for (const st of proj.steps) for (const g of st.groups) for (const o of g.options) { const f = fresh.get(o.id); if (f && o.patchId) o.files = f.files; }
+      // Only the linked files come from the build; files you added, removed or edited meanwhile stay as they are.
+      for (const st of proj.steps) for (const g of st.groups) for (const o of g.options) {
+        const f = fresh.get(o.id);
+        if (!f || !o.patchId) continue;
+        const removed = new Set((o.removedLinked || []).map((d) => d.toLowerCase()));
+        const mine = o.files.filter((x) => !x.linked);
+        const linked = f.files.filter((x) => x.linked && !removed.has((x.destination || '').toLowerCase()) && !mine.some((m) => (m.destination || '').toLowerCase() === (x.destination || '').toLowerCase()));
+        o.files = [...linked, ...mine];
+      }
       changed();
       renderTree(); renderEditor();
     }

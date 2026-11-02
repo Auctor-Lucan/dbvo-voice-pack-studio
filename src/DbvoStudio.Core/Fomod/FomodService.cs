@@ -230,18 +230,23 @@ public sealed class FomodService
     /// </summary>
     public static void Relink(FomodOption o, List<FomodFile> fresh, Mod mod)
     {
-        // The "DBVO Fix - " name rule only applies to options from before the Linked flag; a fix plugin of another mod
-        // that you added yourself to a linked option stays.
-        bool preFlag = !o.Files.Any(f => f.Linked);
-        bool IsFix(string dest) =>
-            dest.EndsWith(".esp", StringComparison.OrdinalIgnoreCase)
-            && (mod.Plugins.Any(pl => dest.Equals(pl.FixFileName, StringComparison.OrdinalIgnoreCase))
-                || (preFlag && dest.StartsWith(FixPluginWriterPrefix, StringComparison.OrdinalIgnoreCase)));
-        o.Files.RemoveAll(f => f.Linked
-                               || (f.Kind == "folder" && f.Destination.Equals("Sound", StringComparison.OrdinalIgnoreCase) && o.PatchId != null)
-                               || (f.Kind == "file" && IsFix(f.Destination)));
-        o.Files.InsertRange(0, fresh.Where(f => !o.Files.Any(x => x.Destination.Equals(f.Destination, StringComparison.OrdinalIgnoreCase))
-                                              && !o.RemovedLinked.Contains(f.Destination, StringComparer.OrdinalIgnoreCase)));
+        // Only the files marked Linked are replaced: anything you added yourself (another Sound folder, a fix plugin
+        // of another mod) stays. Options saved before the Linked flag existed have no marks, so there the patch's
+        // files are recognised by destination: the Sound folder and DBVO Fix plugins.
+        bool preFlag = !o.Files.Any(f => f.Linked) && o.RemovedLinked.Count == 0;
+        bool OldLinked(FomodFile f) => preFlag && (
+            (f.Kind == "folder" && f.Destination.Trim('\\', '/').Equals("Sound", StringComparison.OrdinalIgnoreCase))
+            || (f.Kind == "file" && f.Destination.EndsWith(".esp", StringComparison.OrdinalIgnoreCase)
+                && (f.Destination.StartsWith(FixPluginWriterPrefix, StringComparison.OrdinalIgnoreCase)
+                    || mod.Plugins.Any(pl => f.Destination.Equals(pl.FixFileName, StringComparison.OrdinalIgnoreCase)))));
+        // Settings you changed on a linked file (priority, install flags) carry over to its fresh copy.
+        var before = o.Files.Where(f => f.Linked || OldLinked(f)).GroupBy(f => f.Destination, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        o.Files.RemoveAll(f => f.Linked || OldLinked(f));
+        var add = fresh.Where(f => !o.Files.Any(x => x.Destination.Equals(f.Destination, StringComparison.OrdinalIgnoreCase))
+                                   && !o.RemovedLinked.Contains(f.Destination, StringComparer.OrdinalIgnoreCase)).ToList();
+        foreach (var f in add)
+            if (before.TryGetValue(f.Destination, out var b)) { f.Priority = b.Priority; f.AlwaysInstall = b.AlwaysInstall; f.InstallIfUsable = b.InstallIfUsable; }
+        o.Files.InsertRange(0, add);
     }
 
     /// <summary>
@@ -420,7 +425,7 @@ public sealed class FomodService
                         if (string.IsNullOrWhiteSpace(f.Source)) Add("warning", where, f.Kind == "folder" ? "A folder with no source installs the whole FOMOD root folder. Check that this is meant." : "A file with no source.", o.Id);
                         var abs = Resolve(p, f.Source);
                         bool exists = f.Kind == "folder" ? Directory.Exists(abs) : File.Exists(abs);
-                        if (!exists) Add(o.PatchId != null ? "warning" : "error", where, $"Missing {f.Kind}: {f.Source}" + (o.PatchId != null ? " (build the .fuz files in Phase 2 first)" : ""), o.Id);
+                        if (!exists) Add(o.PatchId != null ? "warning" : "error", where, $"Missing {f.Kind}: {f.Source}" + (o.PatchId != null ? " (build the .fuz files in Phase 2 first; until then it is left out of the installer)" : ""), o.Id);
                         if (string.IsNullOrWhiteSpace(f.Destination) && f.Kind == "file") Add("warning", where, $"No destination for {f.Source}.", o.Id);
                     }
                 }
@@ -440,6 +445,20 @@ public sealed class FomodService
             if (string.IsNullOrWhiteSpace(f.Source)) Add("warning", "Required files", f.Kind == "folder" ? "A folder with no source installs the whole FOMOD root folder. Check that this is meant." : "A file with no source.");
             var abs = Resolve(p, f.Source);
             if (!(f.Kind == "folder" ? Directory.Exists(abs) : File.Exists(abs))) Add("error", "Required files", $"Missing {f.Kind}: {f.Source}");
+        }
+        if (!string.IsNullOrWhiteSpace(p.ConditionalFileInstallsXml))
+        {
+            try
+            {
+                foreach (var e in System.Xml.Linq.XElement.Parse(p.ConditionalFileInstallsXml).Descendants().Where(x => x.Name.LocalName is "file" or "folder"))
+                {
+                    var src = (string?)e.Attribute("source");
+                    if (string.IsNullOrWhiteSpace(src)) continue;
+                    var abs = Resolve(p, src);
+                    if (!(e.Name.LocalName == "folder" ? Directory.Exists(abs) : File.Exists(abs))) Add("warning", "Conditional file installs", $"Missing {e.Name.LocalName}: {src} (left out of the installer)");
+                }
+            }
+            catch (System.Xml.XmlException ex) { Add("error", "Conditional file installs", "The XML can't be read: " + ex.Message); }
         }
         return issues;
     }
@@ -494,7 +513,8 @@ public sealed class FomodService
                 }
                 if (g.Type is "SelectExactlyOne" or "SelectAtMostOne")
                 {
-                    var sel = sg.Options.Where(x => x.Selected).ToList();
+                    // One pick: the one you chose in the simulator wins over a pre-ticked one.
+                    var sel = sg.Options.Where(x => x.Selected).OrderBy(x => choices != null && choices.TryGetValue(x.Id, out var c) && c ? 0 : 1).ToList();
                     foreach (var extra in sel.Skip(1)) extra.Selected = false;
                     if (g.Type == "SelectExactlyOne" && sel.Count == 0)
                     {
@@ -628,7 +648,9 @@ public sealed class FomodService
         if (string.IsNullOrWhiteSpace(p.ReleaseFolder)) throw new InvalidOperationException("Set the release folder first.");
         if (!Path.IsPathRooted(p.ReleaseFolder)) throw new InvalidOperationException("The release folder must be a full path, such as D:\\DBVO\\Releases.");
         var res = new BuildResult();
-        var archiveBase = SafeName($"{(string.IsNullOrWhiteSpace(p.Info.Name) ? p.Name : p.Info.Name)}{(string.IsNullOrWhiteSpace(p.Info.Version) ? "" : " " + p.Info.Version)}");
+        var archiveBase0 = SafeName($"{(string.IsNullOrWhiteSpace(p.Info.Name) ? p.Name : p.Info.Name)}{(string.IsNullOrWhiteSpace(p.Info.Version) ? "" : " " + p.Info.Version)}");
+        // Never empty: the unpacked installer folder is named after it, and an empty name would be the release folder itself.
+        var archiveBase = string.IsNullOrWhiteSpace(archiveBase0.Trim('.', ' ')) ? "FOMOD" : archiveBase0;
         // The unpacked installer sits right next to its archive, with the same name: the shortest path for the long
         // file names of Legacy .fuz files, and the folder you'd zip by hand.
         var staging = Path.Combine(p.ReleaseFolder, archiveBase);
@@ -681,6 +703,27 @@ public sealed class FomodService
 
         // DBVO JSON: written into _common\ and installed by the carrier option.
         var withJson = Clone(p);
+        // A file, folder or image that isn't on disk is left out of the installer's XML too, not only out of the copy:
+        // an installer listing a file it doesn't contain fails when that option is ticked.
+        foreach (var (owner, files) in withJson.AllOptions().Select(o => (o.Name, o.Files)).Append(("Required files", withJson.RequiredInstallFiles)))
+            files.RemoveAll(f =>
+            {
+                if (string.IsNullOrWhiteSpace(f.Source)) return false;
+                var abs = Resolve(p, f.Source);
+                if (f.Kind == "folder" ? Directory.Exists(abs) : File.Exists(abs)) return false;
+                res.Warnings.Add($"{owner}: {f.Kind} not found, left out of the installer: {f.Source}");
+                return true;
+            });
+        foreach (var o in withJson.AllOptions().Where(o => !string.IsNullOrWhiteSpace(o.Image) && !File.Exists(Resolve(p, o.Image))))
+        {
+            res.Warnings.Add($"{o.Name}: image not found, left out: {o.Image}");
+            o.Image = "";
+        }
+        if (!string.IsNullOrWhiteSpace(withJson.ModuleImage) && !File.Exists(Resolve(p, withJson.ModuleImage)))
+        {
+            res.Warnings.Add($"Header image not found, left out: {withJson.ModuleImage}");
+            withJson.ModuleImage = "";
+        }
         var ownJson = p.Json.Enabled ? ExistingJson(p) : new List<string>();
         if (ownJson.Count > 0) res.Warnings.Add($"The installer already installs the voice pack JSON ({ownJson[0]}), so DBVO Studio added none of its own.");
         if (p.Json.Enabled && ownJson.Count == 0)
@@ -752,6 +795,21 @@ public sealed class FomodService
             }
         }
 
+        // Conditional file installs (kept as XML from an imported FOMOD) install files too: copy those and point the XML at the copies.
+        if (!string.IsNullOrWhiteSpace(withJson.ConditionalFileInstallsXml))
+        {
+            var cfi = System.Xml.Linq.XElement.Parse(withJson.ConditionalFileInstallsXml);
+            foreach (var e in cfi.Descendants().Where(x => x.Name.LocalName is "file" or "folder").ToList())
+            {
+                var src = (string?)e.Attribute("source");
+                if (string.IsNullOrWhiteSpace(src)) continue;
+                bool folder = e.Name.LocalName == "folder";
+                var abs = Resolve(p, src);
+                if (!(folder ? Directory.Exists(abs) : File.Exists(abs))) { res.Warnings.Add($"Conditional install: {(folder ? "folder" : "file")} not found, left out: {src}"); e.Remove(); continue; }
+                e.SetAttributeValue("source", Map(src, "Conditional", folder));
+            }
+            withJson.ConditionalFileInstallsXml = cfi.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+        }
         var moduleConfig = FomodXml.WriteModuleConfig(withJson, s => mapped.TryGetValue(s + "|True", out var hit) ? hit : MapSource(s), MapImage);
         var info = FomodXml.WriteInfo(withJson);
         await File.WriteAllBytesAsync(Path.Combine(staging, "fomod", "ModuleConfig.xml"), FomodXml.Encode(moduleConfig, p.Encoding), ct);
@@ -821,10 +879,27 @@ public sealed class FomodService
                 var exe = _settings.SevenZipPath;
                 if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe)) throw new InvalidOperationException(".7z archives need 7-Zip, and it isn't set. Pick 7z.exe in Global Settings → General & tools → Tools, or choose .zip.");
                 var archive = Path.Combine(p.ReleaseFolder, archiveBase + ".7z");
-                if (File.Exists(archive)) File.Delete(archive);
+                // Packed under a temporary name and moved into place at the end: a cancelled or failed build leaves the
+                // previous archive as it was, never a half-written one.
+                var tmp = archive + ".part";
+                if (File.Exists(tmp)) File.Delete(tmp);
                 progress?.Report(new GenerationProgress(0, 0, 0, null, $"Packing {all.Count:N0} files with 7-Zip (7-Zip doesn't report its progress)"));
-                var r = await ExternalTools.RunAsync(exe, new[] { "a", "-t7z", "-mx=7", "-mmt=on", "-y", archive, Path.Combine(staging, "*") }, ct, TimeSpan.FromHours(6));
-                if (r.ExitCode != 0 || !File.Exists(archive)) throw new InvalidOperationException("7-Zip failed: " + r.StdErr + r.StdOut);
+                try
+                {
+                    var r = await ExternalTools.RunAsync(exe, new[] { "a", "-t7z", "-mx=7", "-mmt=on", "-y", tmp, Path.Combine(staging, "*") }, ct, TimeSpan.FromHours(6));
+                    if (r.ExitCode != 0 || !File.Exists(tmp)) throw new InvalidOperationException("7-Zip failed: " + r.StdErr + r.StdOut);
+                }
+                catch (Exception) when (ct.IsCancellationRequested)
+                {
+                    try { File.Delete(tmp); } catch { }
+                    throw new OperationCanceledException(ct);
+                }
+                catch
+                {
+                    try { File.Delete(tmp); } catch { }
+                    throw;
+                }
+                File.Move(tmp, archive, true);
                 res.Archive = archive;
             }
             else
