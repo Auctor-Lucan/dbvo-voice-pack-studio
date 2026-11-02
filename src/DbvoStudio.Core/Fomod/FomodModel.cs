@@ -129,6 +129,8 @@ public sealed class FomodProject
     public FomodInfo Info { get; set; } = new();
     public string ModuleName { get; set; } = "";
     public string ModuleImage { get; set; } = "";
+    /// <summary>Raw &lt;moduleImage&gt; attributes other than path (showImage, showFade, height), kept as imported.</summary>
+    public Dictionary<string, string> ModuleImageAttributes { get; set; } = new();
     /// <summary>Raw &lt;moduleName&gt; attributes such as position and colour, kept as imported.</summary>
     public Dictionary<string, string> ModuleNameAttributes { get; set; } = new();
     /// <summary>Raw &lt;moduleDependencies&gt; XML, kept as imported.</summary>

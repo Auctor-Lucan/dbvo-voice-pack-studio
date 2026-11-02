@@ -395,8 +395,14 @@ public sealed partial class Backend
                         }
                     }
                     // An imported FOMOD that already installs the DBVO JSON folder: mark that option as the carrier.
-                    var carrier = proj.AllOptions().FirstOrDefault(o => o.Files.Any(f => f.Destination.Equals("DragonbornVoiceOver", StringComparison.OrdinalIgnoreCase)
-                                                                                    || f.Destination.StartsWith(@"SKSE\Plugins\DBVO2", StringComparison.OrdinalIgnoreCase)));
+                    // Its folder, or the file itself deeper down (DragonbornVoiceOver\voice_packs\x.json), with \ or / and any DBVO flavour.
+                    static bool InstallsJson(FomodFile f)
+                    {
+                        var d = f.Destination.Replace('/', '\\').Trim('\\');
+                        bool under(string root) => d.Equals(root, StringComparison.OrdinalIgnoreCase) || d.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase);
+                        return under("DragonbornVoiceOver") || under(@"SKSE\Plugins\DBVO2") || (under("DBReV") && (f.Kind == "folder" || d.EndsWith(".json", StringComparison.OrdinalIgnoreCase)));
+                    }
+                    var carrier = proj.AllOptions().FirstOrDefault(o => o.Files.Any(InstallsJson));
                     if (carrier != null) { proj.Json.Enabled = false; }
                     // A Voiced Books installer has no DBVO voice pack file to install.
                     if (B(p, "books")) proj.Json.Enabled = false;
@@ -411,6 +417,7 @@ public sealed partial class Backend
                     var mods = _lib.LoadMods();
                     var voices = _lib.LoadVoicePacks();
                     int added = 0, updated = 0;
+                    var touched = new HashSet<FomodGroup>();
                     // Above or below a picked option, in its group (in the order given), instead of on the category's page.
                     var anchorId = S(p, "anchorId");
                     FomodGroup? anchorGroup = null;
@@ -421,7 +428,8 @@ public sealed partial class Backend
                     foreach (var pid in Strings(p, "patchIds"))
                     {
                         var patch = LoadPatch(pid);
-                        var voice = voices.First(v => v.Id == patch.VoicePackId);
+                        var voice = voices.FirstOrDefault(v => v.Id == patch.VoicePackId)
+                            ?? throw new InvalidOperationException($"The voice pack of the DBVO Patch \"{patch.Name}\" was deleted. Pick another voice pack for that patch in Phase 2 first.");
                         foreach (var mod in mods.Where(x => patch.ModIds.Contains(x.Id)))
                         {
                             var existing = proj.AllOptions().FirstOrDefault(o => o.PatchId == patch.Id && o.ModId == mod.Id);
@@ -433,12 +441,13 @@ public sealed partial class Backend
                             }
                             var opt = svc.OptionFor(proj, patch, voice, mod);
                             if (anchorGroup != null) anchorGroup.Options.Insert(Math.Clamp(insertAt++, 0, anchorGroup.Options.Count), opt);
-                            else FomodService.GroupFor(proj, mod.Category).Options.Add(opt);
+                            else { var tg = FomodService.GroupFor(proj, mod.Category); tg.Options.Add(opt); touched.Add(tg); }
                             added++;
                         }
                     }
+                    // Only the groups that got new options: your own order elsewhere (Core, imported pages) stays.
                     if (S(p, "sort") == "az")
-                        foreach (var g in proj.Steps.SelectMany(s => s.Groups))
+                        foreach (var g in touched)
                             g.Options = g.Options.OrderBy(o => o.Mode == DetectMode.Required ? 0 : 1).ThenBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
                     _lib.Save(proj);
                     return new { project = FomodDto(proj), added, updated };

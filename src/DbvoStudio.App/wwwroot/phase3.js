@@ -114,13 +114,26 @@ export async function fomodView(id) {
   const edit = h('div.fedit');
   view.append(head, h('div.fomod', tree, edit));
 
-  const persist = debounce(async () => {
-    try {
-      await rpc('fomod.save', { project: proj });
-      savedEl.textContent = 'Saved ✓'; savedEl.className = 'saved ok';
-    } catch (e) { savedEl.textContent = 'Not saved'; savedEl.className = 'saved bad'; fail(e); }
-  }, 500);
+  // Saves go out one at a time, in order, half a second after the last change. Actions the backend saves itself
+  // (Add DBVO Patches, Refresh linked, Build) first drop the pending save and wait for one in flight, so an older copy
+  // can't land on disk after theirs.
+  let saveTimer = 0, saving = Promise.resolve();
+  const saveNow = () => {
+    clearTimeout(saveTimer); saveTimer = 0;
+    const snapshot = JSON.parse(JSON.stringify(proj));
+    saving = saving.then(async () => {
+      try {
+        await rpc('fomod.save', { project: snapshot });
+        if (!saveTimer) { savedEl.textContent = 'Saved ✓'; savedEl.className = 'saved ok'; }
+      } catch (e) { savedEl.textContent = 'Not saved'; savedEl.className = 'saved bad'; fail(e); }
+    });
+    return saving;
+  };
+  const persist = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); };
+  const settleSaves = async () => { clearTimeout(saveTimer); saveTimer = 0; await saving; };
   const changed = (rerenderTree = false) => { savedEl.textContent = 'Saving…'; savedEl.className = 'saved'; persist(); if (rerenderTree) renderTree(); };
+  // A change to the structure (order, pages, groups): the tree and the open panel both show it.
+  const restructure = () => { changed(); renderTree(); renderEditor(); };
 
   // ---- lookup helpers
   const find = (key) => {
@@ -136,7 +149,54 @@ export async function fomodView(id) {
   };
   const newId = () => Math.random().toString(36).slice(2, 10);
   const select = (key) => { selKey = key; store.set('fomodSel:' + id, key); renderTree(); renderEditor(); };
-  const move = (arr, i, d) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; changed(true); };
+  // Moves look the item up when clicked (not when the panel was drawn), so clicking ↑ again keeps going up.
+  // Which setting orders a list: the pages (stepsOrder), a page's groups (groupsOrder) or a group's options (order).
+  const orderOf = (arr) => {
+    if (arr === proj.steps) return [proj, 'stepsOrder'];
+    for (const st of proj.steps) { if (st.groups === arr) return [st, 'groupsOrder']; for (const g of st.groups) if (g.options === arr) return [g, 'order']; }
+    return [null, null];
+  };
+  const byName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+  // A list the installer sorts A–Z or Z–A ignores its stored order, so moving something in it would change nothing in
+  // MO2 or Vortex. Before the first move it takes the order the installer showed, and keeps your order from then on.
+  const makeExplicit = (arr) => {
+    const [owner, key] = orderOf(arr);
+    if (!owner || !owner[key] || owner[key] === 'Explicit') return;
+    arr.sort(owner[key] === 'Descending' ? (a, b) => byName(b, a) : byName);
+    owner[key] = 'Explicit';
+    toast(`${key === 'stepsOrder' ? 'Pages' : key === 'groupsOrder' ? 'Groups on this page' : 'Options in this group'} were sorted by name in the installer; they now keep the order you set.`);
+  };
+  const move = (arr, item, d) => {
+    makeExplicit(arr);
+    const i = arr.indexOf(item); if (i < 0) return;
+    const j = d === 'top' ? 0 : d === 'bottom' ? arr.length - 1 : i + d;
+    if (j < 0 || j >= arr.length || j === i) return;
+    arr.splice(i, 1); arr.splice(j, 0, item); restructure();
+  };
+  const moveButtons = (arr, item, what) => {
+    const i = arr.indexOf(item), last = arr.length - 1;
+    return [
+      h('button.btn.sm', { title: `Move this ${what} to the top`, disabled: i <= 0, onclick: () => move(arr, item, 'top') }, '⤒'),
+      h('button.btn.sm', { title: 'Move up', disabled: i <= 0, onclick: () => move(arr, item, -1) }, '↑'),
+      h('button.btn.sm', { title: 'Move down', disabled: i >= last, onclick: () => move(arr, item, 1) }, '↓'),
+      h('button.btn.sm', { title: `Move this ${what} to the bottom`, disabled: i >= last, onclick: () => move(arr, item, 'bottom') }, '⤓'),
+    ];
+  };
+  const blankGroup = () => ({ id: newId(), name: 'New group', type: 'SelectAny', order: 'Explicit', options: [] });
+  const blankStep = () => ({ id: newId(), name: 'New page', visibleXml: null, groupsOrder: 'Explicit', groups: [blankGroup()] });
+  // A new page at index at (the end when left out), then opened.
+  const addStep = (at) => { makeExplicit(proj.steps); const st = blankStep(); proj.steps.splice(at ?? proj.steps.length, 0, st); changed(); select(st.id); };
+  const addGroup = (st, at) => { if (at != null) makeExplicit(st.groups); const g = blankGroup(); st.groups.splice(at ?? st.groups.length, 0, g); if (collapsed[st.id]) { delete collapsed[st.id]; store.set('fomodCollapsed:' + id, collapsed); } changed(); select(g.id); };
+  const deleteStep = async (st) => {
+    if (!await confirmBox('Delete page?', `Delete "${st.name}" and its ${st.groups.reduce((a, g) => a + g.options.length, 0)} option(s)?`, 'Delete', true)) return;
+    const i = proj.steps.indexOf(st); if (i < 0) return;
+    proj.steps.splice(i, 1); changed(); select(proj.steps[Math.min(i, proj.steps.length - 1)]?.id || 'project');
+  };
+  const deleteGroup = async (st, g) => {
+    if (!await confirmBox('Delete group?', `Delete "${g.name}" and its ${g.options.length} option(s)?`, 'Delete', true)) return;
+    const i = st.groups.indexOf(g); if (i < 0) return;
+    st.groups.splice(i, 1); changed(); select(st.id);
+  };
 
   function renderHead() {
     const build = h('button.btn.primary', { title: 'Stage the installer and pack the archive' }, 'Build ▾');
@@ -175,14 +235,53 @@ export async function fomodView(id) {
     proj.steps.forEach((st, si) => {
       const open = !collapsed[st.id];
       const count = st.groups.reduce((a, g) => a + g.options.length, 0);
-      tree.append(node(st.id, 'step', h('span.row', h('span.faint', { onclick: (e) => { e.stopPropagation(); collapsed[st.id] = open; store.set('fomodCollapsed:' + id, collapsed); renderTree(); } }, open ? '▾' : '▸'), h('span.ellipsis', st.name || '(page)')),
-        h('span.n', count)));
+      const sn = node(st.id, 'step', h('span.row', h('span.faint', { onclick: (e) => { e.stopPropagation(); collapsed[st.id] = open; store.set('fomodCollapsed:' + id, collapsed); renderTree(); } }, open ? '▾' : '▸'), h('span.ellipsis', st.name || '(page)')),
+        h('span.n', count));
+      sn.title = 'Drag to reorder pages; right-click for more';
+      dragSource(sn, { data: () => ({ step: st }), label: () => st.name || '(page)' });
+      dragTarget(sn, {
+        accepts: (d) => (d && d.step && d.step !== st ? `Put above ${st.name || 'this page'}` : d && d.group ? `Move to the end of ${st.name || 'this page'}` : null),
+        onDrop: (d) => {
+          if (d.step) { makeExplicit(proj.steps); proj.steps.splice(proj.steps.indexOf(d.step), 1); proj.steps.splice(proj.steps.indexOf(st), 0, d.step); }
+          else { d.fromStep.groups.splice(d.fromStep.groups.indexOf(d.group), 1); st.groups.push(d.group); }
+          restructure();
+        },
+      });
+      sn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const i = proj.steps.indexOf(st), last = proj.steps.length - 1;
+        popupMenu(sn, [
+          { label: '+ Page above', onclick: () => addStep(proj.steps.indexOf(st)) },
+          { label: '+ Page below', onclick: () => addStep(proj.steps.indexOf(st) + 1) },
+          { label: '+ Group on this page', onclick: () => addGroup(st) },
+          { label: 'Move to the top', disabled: i === 0, onclick: () => move(proj.steps, st, 'top') },
+          { label: 'Move up', disabled: i === 0, onclick: () => move(proj.steps, st, -1) },
+          { label: 'Move down', disabled: i === last, onclick: () => move(proj.steps, st, 1) },
+          { label: 'Move to the bottom', disabled: i === last, onclick: () => move(proj.steps, st, 'bottom') },
+          { label: 'Delete page…', onclick: () => deleteStep(st) },
+        ]);
+      });
+      tree.append(sn);
       if (!open) return;
       st.groups.forEach((g) => {
         const gn = node(g.id, 'group', h('span.ellipsis', g.name || '(group)'), h('span.row', { style: { marginLeft: 'auto' } }, h('span.kind', (GROUP_TYPES.find((t) => t[0] === g.type) || [0, g.type])[1]), h('span.n', g.options.length)));
+        dragSource(gn, { data: () => ({ group: g, fromStep: st }), label: () => g.name || '(group)' });
         dragTarget(gn, {
-          accepts: (d) => (d && d.option ? `Move to the end of ${g.name || 'this group'}` : null),
-          onDrop: (d) => { d.fromGroup.options.splice(d.fromGroup.options.indexOf(d.option), 1); g.options.push(d.option); changed(true); },
+          accepts: (d) => (d && d.option ? `Move to the end of ${g.name || 'this group'}` : d && d.group && d.group !== g ? `Put above ${g.name || 'this group'}` : null),
+          onDrop: (d) => {
+            if (d.option) { d.fromGroup.options.splice(d.fromGroup.options.indexOf(d.option), 1); g.options.push(d.option); }
+            else { makeExplicit(st.groups); d.fromStep.groups.splice(d.fromStep.groups.indexOf(d.group), 1); st.groups.splice(st.groups.indexOf(g), 0, d.group); }
+            restructure();
+          },
+        });
+        gn.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          popupMenu(gn, [
+            { label: '+ Group above', onclick: () => addGroup(st, st.groups.indexOf(g)) },
+            { label: '+ Group below', onclick: () => addGroup(st, st.groups.indexOf(g) + 1) },
+            { label: '+ Option', onclick: () => { const o = blankOption(); g.options.push(o); changed(); select(o.id); } },
+            { label: 'Delete group…', onclick: () => deleteGroup(st, g) },
+          ]);
         });
         tree.append(gn);
         g.options.forEach((o) => {
@@ -193,17 +292,26 @@ export async function fomodView(id) {
           dragTarget(on, {
             accepts: (d) => (d && d.option && d.option !== o ? `Put above ${o.name || 'this option'}` : null),
             onDrop: (d) => {
+              makeExplicit(g.options);
               d.fromGroup.options.splice(d.fromGroup.options.indexOf(d.option), 1);
               g.options.splice(g.options.indexOf(o), 0, d.option);
-              changed(true);
+              restructure();
             },
           });
           tree.append(on);
         });
       });
     });
-    tree.append(h('div.row', { style: { padding: '10px 8px' } }, h('button.btn.sm', { title: 'Add an installer page', onclick: () => { const st = { id: newId(), name: 'New page', visibleXml: null, groupsOrder: 'Explicit', groups: [{ id: newId(), name: 'New group', type: 'SelectAny', order: 'Explicit', options: [] }] }; proj.steps.push(st); changed(); select(st.id); } }, '+ Page'),
-      h('span.faint', 'Drag options between groups.')));
+    // With a page (or something on it) open, + Page goes right below that page; otherwise at the end.
+    const at = (() => { const f = find(selKey); return f.step ? proj.steps.indexOf(f.step) + 1 : proj.steps.length; })();
+    const endRow = h('div.row', { style: { padding: '10px 8px' } },
+      h('button.btn.sm', { title: at < proj.steps.length ? `Add a page below “${proj.steps[at - 1].name}”` : 'Add a page at the end', onclick: () => addStep(at) }, at < proj.steps.length ? '+ Page below this one' : '+ Page'),
+      h('span.faint', 'Drag pages, groups and options to reorder. Right-click a page or group for more.'));
+    dragTarget(endRow, {
+      accepts: (d) => (d && d.step ? 'Move to the end' : null),
+      onDrop: (d) => { makeExplicit(proj.steps); proj.steps.splice(proj.steps.indexOf(d.step), 1); proj.steps.push(d.step); restructure(); },
+    });
+    tree.append(endRow);
   }
 
   // ---- editor panels
@@ -375,33 +483,36 @@ export async function fomodView(id) {
   }
 
   function stepPanel(st) {
-    const si = proj.steps.indexOf(st);
     return h('div', sec('Page (install step)', h('div.row', h('div.spacer'),
-      h('button.btn.sm', { title: 'Move up', disabled: si === 0, onclick: () => move(proj.steps, si, -1) }, '↑'),
-      h('button.btn.sm', { title: 'Move down', disabled: si === proj.steps.length - 1, onclick: () => move(proj.steps, si, 1) }, '↓'),
-      h('button.btn.sm.danger', { title: 'Delete this page and its groups (asks first)', onclick: async () => { if (await confirmBox('Delete page?', `Delete "${st.name}" and its ${st.groups.reduce((a, g) => a + g.options.length, 0)} option(s)?`, 'Delete', true)) { proj.steps.splice(si, 1); changed(); select('project'); } } }, 'Delete')),
+      ...moveButtons(proj.steps, st, 'page'),
+      h('button.btn.sm', { title: 'Add a new page right above this one', onclick: () => addStep(proj.steps.indexOf(st)) }, '+ Page above'),
+      h('button.btn.sm', { title: 'Add a new page right below this one', onclick: () => addStep(proj.steps.indexOf(st) + 1) }, '+ Page below'),
+      h('button.btn.sm.danger', { title: 'Delete this page and its groups (asks first)', onclick: () => deleteStep(st) }, 'Delete')),
+      h('div.faint', { style: { padding: '8px 0 0' } }, `Page ${proj.steps.indexOf(st) + 1} of ${proj.steps.length}`),
       srow('Name', null, txt(st, 'name', { tree: true })),
+      srow('Order of the pages', 'All pages. As listed keeps the order in the tree; A–Z and Z–A sort them by name in the installer, whatever their order here.', segmented([['Explicit', 'As listed'], ['Ascending', 'A–Z'], ['Descending', 'Z–A']], proj.stepsOrder || 'Explicit', (x) => { proj.stepsOrder = x; changed(); renderEditor(); })),
+      srow('Order of the groups', 'On this page.', segmented([['Explicit', 'As listed'], ['Ascending', 'A–Z'], ['Descending', 'Z–A']], st.groupsOrder || 'Explicit', (x) => { st.groupsOrder = x; changed(); renderEditor(); })),
       srow('Visibility', 'Optional conditions (flags / plugins) for showing this page. Kept from imports; edit as XML.', st.visibleXml != null ? txt(st, 'visibleXml', { area: true, rows: 4 })
         : h('button.btn.sm', { title: 'Show this page only when a condition is met (starts with an example you can edit)', onclick: () => { st.visibleXml = '<visible operator="And">\n  <fileDependency file="Example.esp" state="Active" />\n</visible>'; changed(); renderEditor(); } }, '+ Add a condition')),
       srow('Groups', null, h('div.col', st.groups.map((g) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); select(g.id); } }, `${g.name} · ${g.options.length} option(s)`)),
-        h('button.btn.sm', { title: 'Add a group of options to this page', style: { alignSelf: 'flex-start' }, onclick: () => { const g = { id: newId(), name: 'New group', type: 'SelectAny', order: 'Explicit', options: [] }; st.groups.push(g); changed(); select(g.id); } }, '+ Group')))));
+        h('button.btn.sm', { title: 'Add a group of options to this page', style: { alignSelf: 'flex-start' }, onclick: () => addGroup(st) }, '+ Group')))));
   }
 
   function groupPanel(st, g) {
-    const gi = st.groups.indexOf(g);
     const typeSel = h('select', GROUP_TYPES.map(([v, t]) => h('option', { value: v, selected: v === g.type }, t)));
     const typeHelp = h('div.faint', (GROUP_TYPES.find((t) => t[0] === g.type) || [])[2] || '');
     typeSel.addEventListener('change', () => { g.type = typeSel.value; typeHelp.textContent = (GROUP_TYPES.find((t) => t[0] === g.type) || [])[2] || ''; changed(true); });
     return h('div', sec('Group', h('div.row', h('div.spacer'),
-      h('button.btn.sm', { title: 'Move up', disabled: gi === 0, onclick: () => move(st.groups, gi, -1) }, '↑'),
-      h('button.btn.sm', { title: 'Move down', disabled: gi === st.groups.length - 1, onclick: () => move(st.groups, gi, 1) }, '↓'),
-      h('button.btn.sm.danger', { title: 'Delete this group and its options (asks first)', onclick: async () => { if (await confirmBox('Delete group?', `Delete "${g.name}" and its ${g.options.length} option(s)?`, 'Delete', true)) { st.groups.splice(gi, 1); changed(); select(st.id); } } }, 'Delete')),
+      ...moveButtons(st.groups, g, 'group'),
+      h('button.btn.sm', { title: 'Add a new group right below this one, on the same page', onclick: () => addGroup(st, st.groups.indexOf(g) + 1) }, '+ Group below'),
+      h('button.btn.sm.danger', { title: 'Delete this group and its options (asks first)', onclick: () => deleteGroup(st, g) }, 'Delete')),
+      h('div.faint', { style: { padding: '8px 0 0' } }, st.name),
       srow('Name', null, txt(g, 'name', { tree: true })),
       srow('Selection', null, h('div.col', typeSel, typeHelp)),
       srow('Order', 'Explicit keeps your order; Ascending sorts A–Z in the installer.', segmented([['Explicit', 'As listed'], ['Ascending', 'A–Z'], ['Descending', 'Z–A']], g.order, (x) => { g.order = x; changed(); renderEditor(); })),
       srow('Options', null, h('div.col',
         h('div.row', h('button.btn.sm', { title: 'Add an empty option to this group', onclick: () => { const o = blankOption(); g.options.push(o); changed(); select(o.id); } }, '+ Option'),
-          h('button.btn.sm', { title: 'Put Required options first, then sort the rest by name', onclick: () => { g.options.sort((a, b) => (a.mode === 'Required' ? -1 : 0) - (b.mode === 'Required' ? -1 : 0) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })); changed(true); renderEditor(); } }, 'Sort A–Z')),
+          h('button.btn.sm', { title: 'Put Required options first, then sort the rest by name', onclick: () => { g.options.sort((a, b) => (a.mode === 'Required' ? -1 : 0) - (b.mode === 'Required' ? -1 : 0) || (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' })); restructure(); } }, 'Sort A–Z')),
         g.options.map((o) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); select(o.id); } }, o.name || '(option)'))))));
   }
 
@@ -434,7 +545,6 @@ export async function fomodView(id) {
   }
 
   function optionPanel(st, g, o) {
-    const oi = g.options.indexOf(o);
     const modeSel = h('select', MODES.filter(([v]) => v !== 'Advanced' || o.mode === 'Advanced' || true).map(([v, t]) => h('option', { value: v, selected: v === o.mode }, t)));
     const modeHelp = h('div.faint', (MODES.find((m) => m[0] === o.mode) || [])[2] || '');
     modeSel.addEventListener('change', () => {
@@ -452,10 +562,12 @@ export async function fomodView(id) {
     renderPlugins();
     return h('div',
       sec('Option', h('div.row', h('div.spacer'),
-        h('button.btn.sm', { title: 'Move up', disabled: oi === 0, onclick: () => move(g.options, oi, -1) }, '↑'),
-        h('button.btn.sm', { title: 'Move down', disabled: oi === g.options.length - 1, onclick: () => move(g.options, oi, 1) }, '↓'),
-        h('button.btn.sm', { title: 'Make a copy of this option in the same group', onclick: () => { const c = structuredClone(o); c.id = newId(); c.name += ' (copy)'; c.carriesJson = false; g.options.splice(oi + 1, 0, c); changed(); select(c.id); } }, 'Duplicate'),
-        h('button.btn.sm.danger', { title: 'Delete this option (asks first)', onclick: async () => { if (await confirmBox('Delete option?', `Delete "${o.name}"?`, 'Delete', true)) { g.options.splice(oi, 1); changed(); select(g.id); } } }, 'Delete')),
+        ...moveButtons(g.options, o, 'option'),
+        h('button.btn.sm', { title: 'Make a copy of this option in the same group (not linked to the DBVO Patch, so Refresh linked leaves it alone)', onclick: () => { const c = structuredClone(o); c.id = newId(); c.name += ' (copy)'; c.carriesJson = false; c.patchId = null; c.modId = null; g.options.splice(g.options.indexOf(o) + 1, 0, c); changed(); select(c.id); } }, 'Duplicate'),
+        h('button.btn.sm.danger', { title: 'Delete this option (asks first)', onclick: async () => {
+          if (!await confirmBox('Delete option?', `Delete "${o.name}"?` + (o.carriesJson ? ' It carries the DBVO JSON: tick "Carries the DBVO JSON" on another Required option afterwards.' : ''), 'Delete', true)) return;
+          const i = g.options.indexOf(o); if (i >= 0) { g.options.splice(i, 1); changed(); select(g.id); }
+        } }, 'Delete')),
         h('div.faint', { style: { padding: '8px 0 0' } }, `${st.name} › ${g.name}`),
         srow('Name', null, txt(o, 'name', { tree: true })),
         srow('Description', 'Shown when the user hovers the option. Links can be copied from here by your users.', descArea(o, 'description', 7)),
@@ -463,7 +575,7 @@ export async function fomodView(id) {
         o.patchId ? srow('Linked to', 'Files below come from this DBVO Patch; "⟳ Refresh linked" updates them.', h('div.row', h('span.badge.b-fixed', '🔗 ' + ((app.state.patches.find((p) => p.id === o.patchId) || {}).name || 'a DBVO Patch')),
           h('button.btn.sm.ghost', { title: 'Stop updating this option\'s files from the DBVO Patch', onclick: () => { o.patchId = null; o.modId = null; changed(true); renderEditor(); } }, 'Unlink'))) : null,
         srow('Carries the DBVO JSON', 'The voice pack file is installed with this option. Use a Required one.', switchEl(o.carriesJson, (x) => {
-          for (const s2 of proj.steps) for (const g2 of s2.groups) for (const o2 of g2.options) if (x) o2.carriesJson = false;
+          if (x) for (const s2 of proj.steps) for (const g2 of s2.groups) for (const o2 of g2.options) o2.carriesJson = false;
           o.carriesJson = x; changed(true); renderEditor();
         }))),
       sec('Offered as', helpButton('3-edit-pages-groups-and-options'),
@@ -519,6 +631,7 @@ export async function fomodView(id) {
     if (!ok) return;
     if (!boxes.some((x) => x.box.checked)) { toast('Nothing ticked: no options added.'); return; }
     try {
+      await settleSaves();
       const r = await rpc('fomod.addPatches', { project: proj, patchIds: boxes.filter((x) => x.box.checked).map((x) => x.p.id), sort: sort && place === 'category' ? 'az' : '',
         ...(anchor && place !== 'category' ? { anchorId: anchor.option.id, where: place } : {}) });
       dto = r.project; proj = dto.project;
@@ -529,6 +642,7 @@ export async function fomodView(id) {
 
   async function refreshLinked() {
     try {
+      await settleSaves();
       const r = await rpc('fomod.refresh', { project: proj });
       dto = r.project; proj = dto.project; renderAll();
       toast(r.orphans && r.orphans.length ? `Linked options updated. Not linked any more (left as they are): ${r.orphans.join(', ')}` : 'Linked options updated.');
@@ -604,7 +718,8 @@ export async function fomodView(id) {
 
   async function runBuild(pack) {
     try {
-      await rpc('fomod.save', { project: proj });
+      await settleSaves();
+      await saveNow();
       await rpc('fomod.build', { project: proj, package: pack });
       renderHead();
     } catch (e) { fail(e); }

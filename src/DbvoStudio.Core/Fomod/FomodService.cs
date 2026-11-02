@@ -194,10 +194,13 @@ public sealed class FomodService
     /// </summary>
     public static void Relink(FomodOption o, List<FomodFile> fresh, Mod mod)
     {
+        // The "DBVO Fix - " name rule only applies to options from before the Linked flag; a fix plugin of another mod
+        // that you added yourself to a linked option stays.
+        bool preFlag = !o.Files.Any(f => f.Linked);
         bool IsFix(string dest) =>
             dest.EndsWith(".esp", StringComparison.OrdinalIgnoreCase)
-            && (dest.StartsWith(FixPluginWriterPrefix, StringComparison.OrdinalIgnoreCase)
-                || mod.Plugins.Any(pl => dest.Equals(pl.FixFileName, StringComparison.OrdinalIgnoreCase)));
+            && (mod.Plugins.Any(pl => dest.Equals(pl.FixFileName, StringComparison.OrdinalIgnoreCase))
+                || (preFlag && dest.StartsWith(FixPluginWriterPrefix, StringComparison.OrdinalIgnoreCase)));
         o.Files.RemoveAll(f => f.Linked
                                || (f.Kind == "folder" && f.Destination.Equals("Sound", StringComparison.OrdinalIgnoreCase) && o.PatchId != null)
                                || (f.Kind == "file" && IsFix(f.Destination)));
@@ -374,6 +377,7 @@ public sealed class FomodService
                     CheckImage(p, o.Image, where, o.Id, issues);
                     foreach (var f in o.Files)
                     {
+                        if (string.IsNullOrWhiteSpace(f.Source)) Add("warning", where, f.Kind == "folder" ? "A folder with no source installs the whole FOMOD root folder. Check that this is meant." : "A file with no source.", o.Id);
                         var abs = Resolve(p, f.Source);
                         bool exists = f.Kind == "folder" ? Directory.Exists(abs) : File.Exists(abs);
                         if (!exists) Add(o.PatchId != null ? "warning" : "error", where, $"Missing {f.Kind}: {f.Source}" + (o.PatchId != null ? " (build the .fuz files in Phase 2 first)" : ""), o.Id);
@@ -393,6 +397,7 @@ public sealed class FomodService
         }
         foreach (var f in p.RequiredInstallFiles)
         {
+            if (string.IsNullOrWhiteSpace(f.Source)) Add("warning", "Required files", f.Kind == "folder" ? "A folder with no source installs the whole FOMOD root folder. Check that this is meant." : "A file with no source.");
             var abs = Resolve(p, f.Source);
             if (!(f.Kind == "folder" ? Directory.Exists(abs) : File.Exists(abs))) Add("error", "Required files", $"Missing {f.Kind}: {f.Source}");
         }
@@ -407,6 +412,14 @@ public sealed class FomodService
 
     // ------------------------------------------------------------------ simulated install
 
+    /// <summary>The order the installer shows a list in: as listed (Explicit), or sorted by name (Ascending / Descending).</summary>
+    public static IEnumerable<T> InstallerOrder<T>(IEnumerable<T> list, string? order, Func<T, string> name) => order switch
+    {
+        "Ascending" => list.OrderBy(name, StringComparer.OrdinalIgnoreCase),
+        "Descending" => list.OrderByDescending(name, StringComparer.OrdinalIgnoreCase),
+        _ => list,
+    };
+
     /// <summary>
     /// Walk the installer the way Mod Organizer / Vortex do with the given active plugins: compute each option's
     /// type, pre-select Required and Recommended, apply flags in step order and list the files that would install.
@@ -419,17 +432,17 @@ public sealed class FomodService
         var install = new List<(FomodFile f, string option)>();
         install.AddRange(p.RequiredInstallFiles.Select(f => (f, "Required files")));
 
-        foreach (var step in p.Steps.Where(s => s.Groups.Any(g => g.Options.Count > 0)))
+        foreach (var step in InstallerOrder(p.Steps.Where(s => s.Groups.Any(g => g.Options.Count > 0)), p.StepsOrder, s => s.Name))
         {
             var ss = new SimStep { Name = step.Name };
             if (!string.IsNullOrWhiteSpace(step.VisibleXml)) ss.Visible = Eval(XElement.Parse(step.VisibleXml), active, flags);
             result.Steps.Add(ss);
             if (!ss.Visible) continue;
-            foreach (var g in step.Groups.Where(g => g.Options.Count > 0))
+            foreach (var g in InstallerOrder(step.Groups.Where(g => g.Options.Count > 0), step.GroupsOrder, g => g.Name))
             {
                 var sg = new SimGroup { Name = g.Name, Type = g.Type };
                 ss.Groups.Add(sg);
-                foreach (var o in g.Options)
+                foreach (var o in InstallerOrder(g.Options, g.Order, o => o.Name))
                 {
                     var type = TypeOf(o, active, flags);
                     var so = new SimOption { Id = o.Id, Name = o.Name, Type = type, Locked = type is "Required" or "NotUsable" };
@@ -579,11 +592,23 @@ public sealed class FomodService
         res.Staging = staging;
 
         var mapped = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var relOwner = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // staged path → its source
         var jobs = new List<(string from, string to, bool folder)>();
         string Map(string source, string owner, bool folder)
         {
             if (mapped.TryGetValue(source + "|" + folder, out var m)) return m;
-            string rel = Path.IsPathRooted(source) ? "_external\\" + SafeName(owner) + "\\" + Path.GetFileName(Os(source).TrimEnd(Path.DirectorySeparatorChar)) : source;
+            string rel = source;
+            if (Path.IsPathRooted(source))
+            {
+                // Two sources with the same name (two "Sound" folders of options called alike, two preview.png images)
+                // get their own staged names: "Sound 2", "preview 2.png".
+                var dir = "_external\\" + SafeName(owner) + "\\";
+                var name = Path.GetFileName(Os(source).TrimEnd(Path.DirectorySeparatorChar));
+                rel = dir + name;
+                for (int n = 2; relOwner.TryGetValue(rel, out var other) && !other.Equals(source, StringComparison.OrdinalIgnoreCase); n++)
+                    rel = dir + (folder ? $"{name} {n}" : $"{Path.GetFileNameWithoutExtension(name)} {n}{Path.GetExtension(name)}");
+            }
+            relOwner[rel] = source;
             mapped[source + "|" + folder] = rel;
             jobs.Add((Resolve(p, source), Path.Combine(staging, Os(rel)), folder));
             return rel;

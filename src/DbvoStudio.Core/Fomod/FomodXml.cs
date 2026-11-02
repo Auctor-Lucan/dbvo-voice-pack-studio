@@ -29,6 +29,14 @@ public static class FomodXml
         if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) return Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
         if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
         if (bytes.Length >= 2 && bytes[1] == 0 && bytes[0] != 0) return Encoding.Unicode.GetString(bytes);
+        // No BOM: the declaration's encoding, such as windows-1252 or iso-8859-1 (UTF-8 when it names none or one we can't read).
+        var head = Encoding.ASCII.GetString(bytes, 0, Math.Min(bytes.Length, 200));
+        var m = System.Text.RegularExpressions.Regex.Match(head, @"^\s*<\?xml[^>]*encoding\s*=\s*[""']([A-Za-z0-9._:-]+)[""']");
+        if (m.Success && !m.Groups[1].Value.StartsWith("utf", StringComparison.OrdinalIgnoreCase))
+        {
+            try { _ = DbvoStudio.Core.Text.Encodings.Cp1252; return Encoding.GetEncoding(m.Groups[1].Value).GetString(bytes); }
+            catch (ArgumentException) { }
+        }
         return Encoding.UTF8.GetString(bytes);
     }
 
@@ -42,7 +50,19 @@ public static class FomodXml
     private static string? Attr(XElement e, string name) => e.Attribute(name)?.Value;
     private static IEnumerable<XElement> Kids(XElement e, string name) => e.Elements().Where(x => x.Name.LocalName == name);
     private static XElement? Kid(XElement e, string name) => e.Elements().FirstOrDefault(x => x.Name.LocalName == name);
-    private static string Raw(XElement e) => e.ToString(SaveOptions.DisableFormatting);
+    /// <summary>An element kept as XML text, without the source file's namespace (ModuleConfig 5.0 has none).</summary>
+    private static string Raw(XElement e)
+    {
+        var c = new XElement(e);
+        foreach (var x in c.DescendantsAndSelf())
+        {
+            x.Name = x.Name.LocalName;
+            x.Attributes().Where(a => a.IsNamespaceDeclaration && a.Name.LocalName != "xsi").Remove();
+        }
+        return c.ToString(SaveOptions.DisableFormatting);
+    }
+    /// <summary>xs:boolean: true, false, 1 or 0.</summary>
+    private static bool? XBool(string? v) => v?.Trim().ToLowerInvariant() switch { "true" or "1" => true, "false" or "0" => false, _ => null };
 
     public static FomodProject Read(string moduleConfigXml, string? infoXml)
     {
@@ -57,7 +77,11 @@ public static class FomodXml
             foreach (var a in mn.Attributes()) p.ModuleNameAttributes[a.Name.LocalName] = a.Value;
         }
         var mi = Kid(config, "moduleImage");
-        if (mi != null) p.ModuleImage = Attr(mi, "path") ?? "";
+        if (mi != null)
+        {
+            p.ModuleImage = Attr(mi, "path") ?? "";
+            foreach (var a in mi.Attributes().Where(a => a.Name.LocalName != "path" && !a.IsNamespaceDeclaration)) p.ModuleImageAttributes[a.Name.LocalName] = a.Value;
+        }
         var md = Kid(config, "moduleDependencies");
         if (md != null) p.ModuleDependenciesXml = Raw(md);
         var req = Kid(config, "requiredInstallFiles");
@@ -126,8 +150,8 @@ public static class FomodXml
             Source = Attr(e, "source") ?? "",
             Destination = Attr(e, "destination") ?? "",
             Priority = int.TryParse(Attr(e, "priority"), out var pr) ? pr : 0,
-            AlwaysInstall = bool.TryParse(Attr(e, "alwaysInstall"), out var ai) ? ai : null,
-            InstallIfUsable = bool.TryParse(Attr(e, "installIfUsable"), out var iu) ? iu : null,
+            AlwaysInstall = XBool(Attr(e, "alwaysInstall")),
+            InstallIfUsable = XBool(Attr(e, "installIfUsable")),
         }).ToList();
 
     private static FomodOption ReadOption(XElement pe)
@@ -224,7 +248,12 @@ public static class FomodXml
         var mn = new XElement("moduleName", string.IsNullOrWhiteSpace(p.ModuleName) ? p.Info.Name : p.ModuleName);
         foreach (var kv in p.ModuleNameAttributes) mn.SetAttributeValue(kv.Key, kv.Value);
         config.Add(mn);
-        if (!string.IsNullOrWhiteSpace(p.ModuleImage)) config.Add(new XElement("moduleImage", new XAttribute("path", mapImage(p.ModuleImage))));
+        if (!string.IsNullOrWhiteSpace(p.ModuleImage))
+        {
+            var mi = new XElement("moduleImage", new XAttribute("path", mapImage(p.ModuleImage)));
+            foreach (var kv in p.ModuleImageAttributes) mi.SetAttributeValue(kv.Key, kv.Value);
+            config.Add(mi);
+        }
         if (!string.IsNullOrWhiteSpace(p.ModuleDependenciesXml)) config.Add(XElement.Parse(p.ModuleDependenciesXml));
         if (p.RequiredInstallFiles.Count > 0) config.Add(FilesElement("requiredInstallFiles", p.RequiredInstallFiles, mapSource));
         var steps = p.Steps.Where(s => s.Groups.Any(g => g.Options.Count > 0)).ToList();
