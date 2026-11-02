@@ -131,14 +131,16 @@ export async function fomodView(id) {
         await rpc('fomod.save', { project: snapshot });
         saveFailed = false;
         if (!saveTimer) { savedEl.textContent = 'Saved ✓'; savedEl.className = 'saved ok'; }
-      } catch (e) { saveFailed = true; savedEl.textContent = 'Not saved'; savedEl.className = 'saved bad'; fail(e); throw e; }
+      } catch (e) { saveFailed = true; savedEl.textContent = 'Not saved'; savedEl.className = 'saved bad'; fail(e); e.shown = true; throw e; }
     });
     saving = job.catch(() => {});
     return job;
   };
   const persist = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => saveNow().catch(() => {}), 500); };
   // Before an action the backend saves itself: send the waiting save now (not drop it) and wait for every save.
-  const settleSaves = async () => { if (saveTimer) await saveNow(); else { await saving; if (saveFailed) throw new Error('The last change could not be saved; see the message about it.'); } };
+  const settleSaves = async () => { if (saveTimer) await saveNow(); else { await saving; if (saveFailed) { const e = new Error('The last change could not be saved.'); e.shown = true; throw e; } } };
+  // An error the save already showed isn't shown twice.
+  const failOnce = (e) => { if (!e || !e.shown) fail(e); };
   // Leaving the editor (another page, closing the app) sends a waiting save straight away.
   const flushOnLeave = () => { if (saveTimer) saveNow().catch(() => {}); };
   window.addEventListener('pagehide', flushOnLeave);
@@ -636,7 +638,7 @@ export async function fomodView(id) {
   async function editorWaits(promise, title) {
     if (document.activeElement && view.contains(document.activeElement)) document.activeElement.blur();
     view.inert = true;
-    try { return await withBusy(promise, title); } finally { view.inert = false; }
+    try { return await withBusy(promise, title, ''); } finally { view.inert = false; }
   }
   async function addPatches() {
     await refreshState();
@@ -705,7 +707,7 @@ export async function fomodView(id) {
       dto = r.project; proj = dto.project;
       toast(`${r.added} option(s) added, ${r.updated} updated.`);
       renderAll();
-    } catch (e) { fail(e); }
+    } catch (e) { failOnce(e); }
   }
 
   async function refreshLinked() {
@@ -713,7 +715,7 @@ export async function fomodView(id) {
       const r = await editorWaits((async () => { await settleSaves(); return rpc('fomod.refresh', { project: proj }); })(), 'Updating linked options');
       dto = r.project; proj = dto.project; renderAll();
       toast(r.orphans && r.orphans.length ? `Linked options updated. Not linked any more (left as they are): ${r.orphans.join(', ')}` : 'Linked options updated.');
-    } catch (e) { fail(e); }
+    } catch (e) { failOnce(e); }
   }
 
   async function validate() {
@@ -786,10 +788,9 @@ export async function fomodView(id) {
   async function runBuild(pack) {
     try {
       await settleSaves();
-      await saveNow();
       await rpc('fomod.build', { project: proj, package: pack });
       renderHead();
-    } catch (e) { fail(e); }
+    } catch (e) { failOnce(e); }
   }
 
   const onJobDone = (e) => {
@@ -810,9 +811,12 @@ export async function fomodView(id) {
         const f = fresh.get(o.id);
         if (!f || !o.patchId) continue;
         const removed = new Set((o.removedLinked || []).map((d) => d.toLowerCase()));
-        const mine = o.files.filter((x) => !x.linked);
+        // Options saved before files were marked linked: their Sound folder and DBVO Fix plugins are the patch's (as in Relink).
+        const preFlag = !o.files.some((x) => x.linked) && !(o.removedLinked || []).length;
+        const oldLinked = (x) => preFlag && ((x.kind === 'folder' && low(x).replace(/^[\\/]+|[\\/]+$/g, '') === 'sound') || (x.kind === 'file' && low(x).endsWith('.esp') && low(x).startsWith('dbvo fix - ')));
+        const mine = o.files.filter((x) => !x.linked && !oldLinked(x));
         const was = new Map(o.files.filter((x) => x.linked).map((x) => [low(x), x]));
-        const linked = f.files.filter((x) => x.linked && !removed.has(low(x)) && !mine.some((m) => low(m) === low(x)))
+        const linked = f.files.filter((x) => x.linked && !removed.has(low(x)) && !mine.some((m) => low(m) === low(x) && (x.kind === 'file' || (m.source || '').toLowerCase() === (x.source || '').toLowerCase())))
           .map((x) => { const w = was.get(low(x)); return w ? { ...x, priority: w.priority } : x; }); // your priority stays
         const next = [...linked, ...mine];
         if (JSON.stringify(next) === JSON.stringify(o.files)) continue;

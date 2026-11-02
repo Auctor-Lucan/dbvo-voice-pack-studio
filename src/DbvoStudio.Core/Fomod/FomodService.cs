@@ -242,8 +242,11 @@ public sealed class FomodService
         // Settings you changed on a linked file (priority, install flags) carry over to its fresh copy.
         var before = o.Files.Where(f => f.Linked || OldLinked(f)).GroupBy(f => f.Destination, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
         o.Files.RemoveAll(f => f.Linked || OldLinked(f));
-        var add = fresh.Where(f => !o.Files.Any(x => x.Destination.Equals(f.Destination, StringComparison.OrdinalIgnoreCase))
-                                   && !o.RemovedLinked.Contains(f.Destination, StringComparer.OrdinalIgnoreCase)).ToList();
+        // A file of yours at the same destination wins over the patch's; folders merge, so a folder of yours installed to
+        // Sound sits next to the patch's Sound folder (only the same folder isn't added twice).
+        bool Taken(FomodFile f) => o.Files.Any(x => x.Destination.Equals(f.Destination, StringComparison.OrdinalIgnoreCase)
+                                                    && (f.Kind == "file" || x.Source.Equals(f.Source, StringComparison.OrdinalIgnoreCase)));
+        var add = fresh.Where(f => !Taken(f) && !o.RemovedLinked.Contains(f.Destination, StringComparer.OrdinalIgnoreCase)).ToList();
         foreach (var f in add)
             if (before.TryGetValue(f.Destination, out var b)) { f.Priority = b.Priority; f.AlwaysInstall = b.AlwaysInstall; f.InstallIfUsable = b.InstallIfUsable; }
         o.Files.InsertRange(0, add);
@@ -514,7 +517,7 @@ public sealed class FomodService
                 if (g.Type is "SelectExactlyOne" or "SelectAtMostOne")
                 {
                     // One pick: the one you chose in the simulator wins over a pre-ticked one.
-                    var sel = sg.Options.Where(x => x.Selected).OrderBy(x => choices != null && choices.TryGetValue(x.Id, out var c) && c ? 0 : 1).ToList();
+                    var sel = sg.Options.Where(x => x.Selected).OrderBy(x => x.Locked ? 0 : 1).ThenBy(x => choices != null && choices.TryGetValue(x.Id, out var c) && c ? 0 : 1).ToList();
                     foreach (var extra in sel.Skip(1)) extra.Selected = false;
                     if (g.Type == "SelectExactlyOne" && sel.Count == 0)
                     {

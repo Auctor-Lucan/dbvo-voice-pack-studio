@@ -30,6 +30,7 @@ public class FomodSweepTests
         FomodService.Relink(o, new() { new() { Kind = "folder", Source = "x\\Sound", Destination = "Sound", Linked = true } }, new Mod { Name = "A" });
         _o.WriteLine(string.Join(", ", o.Files.Select(f => f.Source)));
         Assert.Contains(o.Files, f => f.Source == "Extra\\Sound");
+        Assert.Contains(o.Files, f => f.Source == "x\\Sound" && f.Linked); // the patch's own audio stays too
     }
     [Fact] public void AllLinkedRemoved_ManualOtherFixDropped()
     {

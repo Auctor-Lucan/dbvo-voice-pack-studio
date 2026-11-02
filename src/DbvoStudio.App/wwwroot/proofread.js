@@ -159,6 +159,7 @@ export async function proofreadDialog(opts) {
   // ---- AI suggestions, fetched in batches ahead of the line shown
   const sugg = new Map(); // key → { text, kind, why } | null (nothing to fix)
   const requested = new Set();
+  const stale = new Set(); // lines edited after their suggestion came: asked again only when you go back to them
   let aiError = null;
   async function fetchFrom(i) {
     if (!useAi || !open) return;
@@ -234,7 +235,7 @@ export async function proofreadDialog(opts) {
         else if (changed || !stats.accepted.has(k)) { stats.accepted.delete(k); stats.declined.add(k); }
       }
       // A suggestion was made from the text before your edit: coming back asks again about the new text.
-      if (changed) { sugg.delete(k); requested.delete(k); }
+      if (changed) { sugg.delete(k); stale.add(k); }
       busy = false; // before moving on: the next line may be passed over at once (which sets busy again itself)
       if (next && idx === at) go(at + 1);
       return true;
@@ -257,6 +258,7 @@ export async function proofreadDialog(opts) {
     if (i >= keys.length) { finish(); return; }
     idx = Math.max(0, i);
     cameBack = !forward;
+    if (stale.has(keys[idx])) { stale.delete(keys[idx]); requested.delete(keys[idx]); }
     render();
     fetchFrom(idx);
     if (forward) autoSkipIfNothing();
