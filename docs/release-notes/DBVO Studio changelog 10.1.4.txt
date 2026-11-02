@@ -1,0 +1,2 @@
+Version 10.1.4
+- AI Auto Tag (Phase 2): suggestions could only be accepted or undone one line at a time. Now "AI tags (N) ▾" in the status bar accepts or undoes all of them at once (or shows only those lines), Ticked ▾ does it for the ticked lines, and Shift-click on a row's ✓ or ✕ does it for every line shown. The status bar now updates as soon as the suggestions arrive.

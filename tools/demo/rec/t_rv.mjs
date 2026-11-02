@@ -1,0 +1,11 @@
+import { start } from './bridge.mjs';
+import { sleep } from './shots_common.mjs';
+const s = await start({ width: 1600, height: 1000, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const l = await rpc('revoice.list', {}); const p = l.find((x) => x.lines > 0) || l[0];
+await page.evaluate((id) => { localStorage.setItem('rv-tab:' + id, JSON.stringify('setup')); return import('/app.js').then((m) => m.go('revoice', { id })); }, p.id); await sleep(2000);
+await page.click('.view-head button:has-text("Setup"), button:text-is("Setup")').catch(()=>{}); await sleep(1200); await page.screenshot({ path: process.env.OUTP + '/rv_setup.png' });
+await page.click('text=/^Speakers/'); await sleep(1500);
+await page.screenshot({ path: process.env.OUTP + '/rv_speakers.png' });
+process.exit(0);

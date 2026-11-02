@@ -1,0 +1,26 @@
+import { start } from './bridge.mjs';
+import { OUT, sleep } from './shots_common.mjs';
+const s = await start({ width: 1920, height: 1040, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html');
+const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+const results = []; const ok = (n, c, x = '') => results.push(`${c ? 'PASS' : 'FAIL'}  ${n}${x ? '  · ' + x : ''}`);
+await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const go = async (v, p) => { await page.evaluate(([v, p]) => import('/app.js').then((m) => m.go(v, p)), [v, p]); await sleep(1300); };
+const st = await rpc('state', {});
+const sky = st.patches.find((p) => p.name === 'Skyrim');
+await go('patch', { id: sky.id }); await page.waitForSelector('.vrow');
+await page.click('.statusbar button:has-text("Check takes")'); await sleep(500);
+const txt = await page.locator('#modal').innerText();
+ok('Dialog has options', /Whisper model/.test(txt) && /Quick decoding/.test(txt) && /Only unchecked/.test(txt), txt.replace(/\n/g, ' | ').slice(0, 200));
+await page.screenshot({ path: `${OUT}/v80-qa.png`, clip: { x: 460, y: 60, width: 1000, height: 940 } });
+// words off: levels only
+await page.locator('#modal .srow:has-text("Check the words") .switch, #modal .srow:has-text("Check the words") input').first().click(); await sleep(200);
+await page.locator('#modal .srow:has-text("Which takes") button:has-text("All")').click().catch(() => {}); await sleep(200);
+await page.click('#modal .btn.primary'); await sleep(6000);
+const P = await rpc('patch.get', { id: sky.id });
+const checked = P.lines.flatMap((l) => l.takes).filter((t) => t.qa && t.qa.lufs != null).length;
+ok('Levels-only check ran', checked > 0, `${checked} takes measured`);
+ok('No page errors', errs.length === 0, errs.join(' / '));
+console.log(results.join('\n'));
+await s.close(); process.exit(0);

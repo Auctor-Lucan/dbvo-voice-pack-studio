@@ -1,0 +1,4 @@
+Version 10.1.2
+- Proofread lines: AI suggestions now stay inside the DBVO script's rules. A semicolon becomes a comma and curly quotes and dashes become plain ones; a suggestion the script would then reformat, mark BROKEN or TOO LONG (brackets, a leading "...", a parenthesis in the middle) is dropped, so a fix can no longer make a line silent in game.
+- Proofread lines: text you type is checked as you go, with a red note when DBVO couldn't voice it as written.
+- Proofread lines: Save & next goes straight to the next line with something to fix (when Skip lines the AI finds nothing wrong with is on), instead of stopping on the line after.

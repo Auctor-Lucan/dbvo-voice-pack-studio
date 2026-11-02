@@ -1,0 +1,14 @@
+import { start } from './bridge.mjs';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const s = await start({ width: 1600, height: 900, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards'); await page.evaluate(() => localStorage.setItem('dbvo:seen:tags-context', 'true'));
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const st = await rpc('state', {}); const P = st.patches.find((x) => x.name === 'Skyrim');
+await page.evaluate((id) => import('/app.js').then((m) => m.go('patch', { id })), P.id); await sleep(2500);
+await page.locator('.vrow input[type=checkbox]').first().click(); await sleep(200);
+await page.getByText('Post-processing ▾').click(); await sleep(300);
+await page.getByText('Effects…').click(); await sleep(600);
+const box = await page.locator('.menu').boundingBox();
+console.log('menu box', JSON.stringify(box), 'scroll', await page.locator('.menu').evaluate((m) => [m.scrollHeight, m.clientHeight]));
+await page.screenshot({ path: process.env.OUTP + '/fx_menu.png' });
+process.exit(0);

@@ -1,0 +1,10 @@
+import { boot, shooter, sleep } from './shots_common.mjs';
+const s = await boot(); const { page } = s; const S = shooter(page);
+await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const sky = (await rpc('state', {})).patches.find((p) => p.name === 'Skyrim');
+await page.evaluate((id) => import('/app.js').then((m) => m.go('patch', { id })), sky.id); await page.waitForSelector('.vrow'); await sleep(800);
+await page.evaluate(() => import('/lib.js').then((l) => { l.withBusy(new Promise((r) => setTimeout(r, 3000)), 'Loading voice lines', 'Looking for WAV + LIP files in the folders and matching them to the lines…'); }));
+await sleep(1100);
+await S.full('busy-screen');
+await s.close(); process.exit(0);

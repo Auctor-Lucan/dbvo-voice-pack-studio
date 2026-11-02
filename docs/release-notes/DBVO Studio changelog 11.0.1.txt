@@ -1,0 +1,4 @@
+Version 11.0.1
+- Add DBVO Patches (Phase 3): nothing is ticked when the list opens, so an imported FOMOD no longer needs every patch unticked by hand. "Tick new ones" ticks every patch not in the FOMOD yet, "Untick all" clears the list, and a search box narrows it by name or category. Patches whose mod name already matches an option (as in an imported FOMOD) are marked "same name in" and left out of "Tick new ones". The Add button shows how many are ticked.
+- New mod (Phase 1): an optional mod page field (Nexus, LoversLab or elsewhere) next to the version. Both can still be changed with ✎ beside the mod's name.
+- A new FOMOD option's description now starts as the mod's name, its number of lines, the DBVO Fix notice when the option installs a fix plugin ("ℹ️ Contains formatting fix ESPFE patch. Let the plugin overwrite the original mod."), then ⭐ and the mod page, and the version.

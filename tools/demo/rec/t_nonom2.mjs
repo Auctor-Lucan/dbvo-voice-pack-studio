@@ -1,0 +1,12 @@
+import { start } from './bridge.mjs';
+import { sleep } from './driver.mjs';
+import fs from 'fs'; import { globSync } from 'fs';
+const s = await start(); const { page } = s;
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-checks');
+const id = '3ynvitrq';
+console.log('id', id);
+await page.evaluate((id) => import('/app.js').then((m) => m.go('patch', { id })), id); await sleep(1500);
+console.log(await page.locator('span.chip').allTextContents().then(a=>a.join(' | ')));
+await page.click('span.chip:has-text("All non-omitted")'); await sleep(500); console.log('non-omitted rows', await page.locator('.vrow').count());
+await page.click('span.chip:has-text("All")>>nth=0'); await sleep(500); console.log('all rows', await page.locator('.vrow').count());
+await s.close(); process.exit(0);

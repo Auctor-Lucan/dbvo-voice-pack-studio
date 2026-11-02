@@ -1,0 +1,12 @@
+import { boot, sleep } from './shots_common.mjs';
+const s = await boot(); const { page } = s;
+const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+await page.waitForSelector('.home-quote');
+await page.click('#tools-btn'); await sleep(400); await page.click('text=Replace NPC voice files in any mod'); await sleep(1200);
+await page.click('.card >> nth=0').catch(() => {}); await page.click('text=Example Town revoiced').catch(() => {}); await sleep(1500);
+const sw = page.locator('.switch:has-text("Voice Changer"), label:has-text("Voice Changer")').first();
+await sw.click(); await sleep(1200);
+console.log('modal open:', await page.evaluate(() => !document.getElementById('modal').classList.contains('hidden')));
+console.log('vc on:', await page.evaluate(() => [...document.querySelectorAll('input[type=checkbox]')].some((c) => c.closest('label,.switch')?.textContent.includes('Voice Changer') && c.checked)));
+await sw.click(); await sleep(800);
+console.log('errors:', errs); process.exit(0);

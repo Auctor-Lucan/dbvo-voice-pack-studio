@@ -1,0 +1,16 @@
+import { start } from './bridge.mjs';
+import { sleep } from './shots_common.mjs';
+const s = await start({ width: 1400, height: 900, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards');
+await page.evaluate(() => localStorage.removeItem('seen:tags-context'));
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const st = await rpc('state', {}); const m = st.mods.find((x) => x.name.startsWith('Skyrim'));
+const np = await rpc('patch.create', { name: 'Context test', voicePackId: st.voicePacks[0].id, modIds: [m.id], kind: 'tts', sourceFolders: [] });
+console.log('new patch tagsAsContext', np.tagsAsContext, 'old', st.patches[0].id && (await rpc('patch.get', { id: st.patches[0].id })).tagsAsContext);
+await page.evaluate((id) => import('/app.js').then((x) => x.go('patch', { id })), np.id); await sleep(3000);
+console.log('popup', await page.locator('#modal:not(.hidden) h2').allInnerTexts());
+await page.screenshot({ path: process.env.OUTP + '/tcpop.png' });
+await page.click('#modal button:has-text("Turn it off for this patch")'); await sleep(800);
+console.log('after off', (await rpc('patch.get', { id: np.id })).tagsAsContext);
+await rpc('patch.delete', { id: np.id });
+process.exit(0);

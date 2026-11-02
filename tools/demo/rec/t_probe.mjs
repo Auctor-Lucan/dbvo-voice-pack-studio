@@ -1,0 +1,10 @@
+import { start } from './bridge.mjs';
+const s = await start({ width: 1920, height: 1040, scale: 1 });
+await s.page.goto('https://app.dbvo/index.html');
+await s.page.waitForSelector('.home-cards');
+const rpc = (m, p) => s.page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const st = await rpc('state', {});
+console.log('patches', st.patches.map((p) => p.name + ':' + p.lines));
+console.log('revoice', (await rpc('revoice.list', {})).map((r) => r.name + ':' + r.lines + ':' + r.generated));
+console.log('fomods', st.fomods ? st.fomods.length : Object.keys(st));
+process.exit(0);

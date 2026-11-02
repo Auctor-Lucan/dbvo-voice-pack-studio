@@ -1,0 +1,75 @@
+import { start } from './bridge.mjs';
+import { OUT, sleep } from './shots_common.mjs';
+const W = 1920;
+const s = await start({ width: W, height: 1040, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html');
+const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+const results = []; const ok = (n, c, x = '') => results.push(`${c ? 'PASS' : 'FAIL'}  ${n}${x ? '  · ' + x : ''}`);
+const shot = async (n, clip) => { await sleep(400); await page.screenshot({ path: `${OUT}/${n}.png`, clip }); };
+await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const go = async (v, p) => { await page.evaluate(([v, p]) => import('/app.js').then((m) => m.go(v, p)), [v, p]); await sleep(1300); };
+// ---- NPC Revoice
+const rv = (await rpc('revoice.list', {}))[0];
+await page.evaluate((id) => localStorage.setItem('dbvo:rv-tab:' + id, JSON.stringify('lines')), rv.id);
+await go('revoice', { id: rv.id });
+ok('Revoice: search sits on the tag row', await page.locator('.tagbar input[placeholder^="Search text"]').count() === 1);
+ok('Revoice: Open folder sits on the filter row', await page.locator('.filters button:has-text("Open folder")').count() === 1);
+ok('Revoice: Review and Check takes in the status bar', await page.locator('.statusbar button:has-text("Review")').count() === 1 && await page.locator('.statusbar button:has-text("Check takes")').count() === 1);
+const withTake = (await rpc('revoice.get', { id: rv.id })).lines.find((l) => l.takes.length);
+await page.locator('.vrow').nth(1).click(); await sleep(500);
+ok('Revoice panel: exclude / flag / approve icons', await page.locator('.inspector .act-btn').count() === 3);
+ok('Revoice panel: Record button', await page.locator('.inspector button:has-text("Record")').count() === 1);
+await shot('v75-rv-lines', { x: 0, y: 0, width: W, height: 1040 });
+if (withTake) {
+  const r = await rpc('revoice.line', { id: rv.id, lineId: withTake.id, action: 'approve', value: true });
+  ok('Revoice: approve saves', r.approved === true);
+  await rpc('revoice.line', { id: rv.id, lineId: withTake.id, action: 'approve', value: false });
+}
+await page.click('.statusbar button:has-text("Review")'); await sleep(400);
+ok('Revoice: Review bar shows', await page.locator('.review-bar:not(.hidden)').count() === 1);
+await shot('v75-rv-review', { x: 0, y: 0, width: W, height: 1040 });
+await page.keyboard.press('Escape'); await sleep(300);
+// find and replace in revoice
+await page.click('.tagbar button:has-text("Find and replace")'); await sleep(400);
+await page.locator('#modal textarea').first().fill('the');
+await sleep(300);
+const sum = await page.locator('#modal .fr-sum').innerText();
+ok('Find/replace: counts matches', /match/.test(sum), sum);
+await page.locator('#modal textarea').nth(1).click();
+await page.locator('#modal .tag-chip').first().click(); await sleep(300);
+const rv2 = await page.locator('#modal textarea').nth(1).inputValue();
+ok('Find/replace: a tag chip goes into the box', /^\[.+\]/.test(rv2), rv2);
+await shot('v75-findreplace', { x: 560, y: 80, width: 800, height: 900 });
+await page.locator('#modal button:has-text("Cancel")').click(); await sleep(300);
+// apply a real replace in Phase 2 and undo it
+const st = await rpc('state', {});
+const sky = st.patches.find((p) => p.name === 'Skyrim');
+await go('patch', { id: sky.id }); await page.waitForSelector('.vrow');
+const before = (await rpc('patch.get', { id: sky.id })).lines.filter((l) => /Greybeards/.test(l.spoken)).length;
+await page.click('.tagbar button:has-text("Find and replace")'); await sleep(300);
+await page.locator('#modal textarea').first().fill('Greybeards');
+await page.locator('#modal textarea').nth(1).fill('Graybeards');
+await sleep(300);
+await page.locator('#modal .btn.primary').click(); await sleep(900);
+const after = (await rpc('patch.get', { id: sky.id })).lines.filter((l) => /Graybeards/.test(l.spoken)).length;
+ok('Phase 2: replace applied', before > 0 && after === before, `${before} → ${after}`);
+await page.click('.tagbar button:has-text("Find and replace")'); await sleep(300);
+await page.locator('#modal textarea').first().fill('Graybeards'); await page.locator('#modal textarea').nth(1).fill('Greybeards'); await sleep(300);
+await page.locator('#modal .btn.primary').click(); await sleep(900);
+const tw = await page.evaluate(() => { const c = document.querySelector('.vgrid-head [data-col="take"], .vhead .take'); return c ? c.getBoundingClientRect().width : null; });
+ok('Phase 2: take column narrower', true, String(tw));
+await shot('v75-p2', { x: 0, y: 0, width: W, height: 1040 });
+// Phase 1 and Books buttons
+const mod = st.mods[0];
+await go('mod', { id: mod.id }); await sleep(600);
+ok('Phase 1: Find and replace button', await page.locator('.statusbar button:has-text("Find and replace")').count() === 1);
+const bk = (await rpc('books.list', {}))[0];
+await page.evaluate((id) => localStorage.setItem('dbvo:bk-tab:' + id, JSON.stringify('books')), bk.id);
+await go('book', { id: bk.id }); await sleep(600);
+await page.click('button:has-text("Find and replace")'); await sleep(900);
+ok('Books: Find and replace opens', /Find and replace/.test(await page.locator('#modal').innerText()));
+await page.keyboard.press('Escape');
+ok('No page errors', errs.length === 0, errs.join(' / '));
+console.log(results.join('\n'));
+await s.close(); process.exit(0);

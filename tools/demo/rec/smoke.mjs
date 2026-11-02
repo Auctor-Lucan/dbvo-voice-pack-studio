@@ -1,0 +1,10 @@
+import { start, toWin, toLinux } from './bridge.mjs';
+console.log(toWin(JSON.stringify({ p: '/srv/dbvo/C/Users/Auctor/Documents/DBVO Studio' })), toLinux(JSON.stringify({ p: 'D:\\DBVO\\Vampira\\WAV + LIP', q: 'Phase 1: X' })));
+const s = await start();
+const { page } = s;
+await page.goto('https://app.dbvo/index.html');
+await page.waitForTimeout(2500);
+await page.screenshot({ path: 'smoke1.png' });
+await page.evaluate(() => { location.hash = ''; });
+await s.close();
+process.exit(0);

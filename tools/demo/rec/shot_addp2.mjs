@@ -1,0 +1,21 @@
+import { boot, sleep } from './shots_common.mjs';
+const s = await boot(); const { page } = s;
+await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const st = await rpc('state', {});
+// friendlier names for the demo's extra patches of the Skyrim mod
+const ctx = st.patches.filter((p) => p.name === 'Context test');
+const names = ['Skyrim (whispered takes)', 'Skyrim (old voice)'];
+for (let i = 0; i < ctx.length && i < 2; i++) await rpc('patch.saveMeta', { id: ctx[i].id, name: names[i] }).catch((e) => console.log('rename', e.message));
+await page.evaluate(() => import('/app.js').then((m) => m.go('fomods'))); await sleep(800);
+await page.locator('button:has-text("New FOMOD")').first().click(); await sleep(500);
+await page.locator('#modal input[type=text]').first().fill('DBVO Sample Voice');
+await page.click('#modal button:has-text("Create")'); await sleep(1200);
+await page.click('button:has-text("Add DBVO Patches")'); await sleep(700);
+await page.locator('#modal label.row', { hasText: /^Skyrim\s*Misc/ }).first().locator('input').check().catch(async () => { await page.locator('#modal label.row').filter({ hasText: 'Skyrim' }).first().locator('input').check(); });
+await page.click('#modal .btn.primary'); await sleep(1500);
+await page.click('button:has-text("Add DBVO Patches")'); await sleep(700);
+await page.click('#modal button:has-text("Tick new ones")'); await sleep(300);
+await page.locator('#modal .modal-card').screenshot({ path: 'addp_guide.png' });
+console.log(await page.locator('#modal label.row').allTextContents());
+await s.close(); process.exit(0);

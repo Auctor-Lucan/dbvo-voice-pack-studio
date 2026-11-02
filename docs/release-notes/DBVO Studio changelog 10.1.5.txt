@@ -1,0 +1,4 @@
+Version 10.1.5
+- BSA archives: file and folder names are now stored in the Windows-1252 code page, the one Skyrim SE looks them up in. Before, names with ’ ‘ “ ” … – — † ‡ • ™ € œ š ž Ÿ and a few others were written as "?" inside the archive, so the game never found those voice files (mostly Legacy names from topic-file imports, and lines with † ™ • or œ). Accented letters such as é, ú and ö were never affected, and neither are DBVO 2.0 names.
+- A name that Windows-1252 cannot hold at all (for example Cyrillic) now stops the BSA build with the file named, instead of being written as "?".
+- Packs built earlier: only BSAs with such names are affected. Building the FOMOD again repacks them; the voice lines do not need generating again.

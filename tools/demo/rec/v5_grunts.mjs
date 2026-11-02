@@ -1,0 +1,144 @@
+// Video 5: the Player Grunts Tool: PCHT and SPVS, effects, imports, recording and export.
+import { start } from './bridge.mjs';
+import { overlay, makeDriver, startCapture, sleep } from './driver.mjs';
+
+const OUT = process.env.OUT || 'frames_v5';
+const s = await start();
+const { page } = s;
+await page.goto('https://app.dbvo/index.html');
+await page.waitForSelector('.home-checks');
+await page.evaluate(() => import('/lib.js').then((l) => l.rpc('grunts.paths', { pchtFolder: 'D:\\MO2\\mods\\PC Head Tracking and Voice Type SE', spvsFolder: 'D:\\MO2\\mods\\Smart Player Voice System' })));
+await overlay(page);
+const d = makeDriver(page);
+await d.fade(true);
+const cap = process.env.NOCAP ? { pause() {}, resume() {}, async stop() { return 0; } } : await startCapture(page, OUT);
+let k = 0;
+const shot = () => (process.env.SHOTS ? page.screenshot({ path: `v5_${k++}.png` }) : null);
+let capAt = 0, capHold = 0;
+const say = async (kick, text) => { const w = capAt + capHold - Date.now(); if (w > 0) await sleep(w); await d.caption(kick, text); capAt = Date.now(); capHold = Math.max(3200, text.length * 62); };
+const settle = async () => { const w = capAt + capHold - Date.now(); if (w > 0) await sleep(w); };
+const until = (fn, t = 180000) => page.waitForFunction(fn, null, { timeout: t, polling: 100 });
+const jobDone = () => until(() => document.querySelector('#job')?.classList.contains('hidden'));
+const tile = (name) => page.locator(`.gr-tile:has(.gr-label:text-is("${name}"))`).first();
+const exportBtn = '.view-head .export-btn';
+const menuItem = async (text) => { await d.click(`.menu >> text=${text}`, { pause: 400 }); };
+
+await sleep(400);
+await d.fade(false);
+await say('Player Grunts Tool', 'The Player Grunts Tool makes player voice packs for PC Head Tracking, with or without Multi Voice Packs, and for Smart Player Voice System.');
+await d.click('#tools-btn', { pause: 700 });
+await d.click('.menu >> text=Player Grunts Tool', { pause: 1100 });
+await say('Player Grunts Tool', 'Events are read from the installed mods, so when PCHT or SPVS adds new ones, they show up here too.');
+await d.hover('.badge:has-text("found"), text=found', 1400).catch(() => sleep(1400));
+await d.hover('text=SPVS 1.26', 1400).catch(() => sleep(1400));
+
+// ---------------------------------------------------------------- PCHT project
+await d.click('.view-head button:has-text("New project")', { pause: 800 });
+await d.clickType('#modal input[type=text]', 'Sample Grunts', { delay: 50 });
+await say('PC Head Tracking', 'A PCHT pack can be female, male or both. A DBVO voice pack can convert your recordings and voice the spoken lines.');
+const vp = page.locator('#modal select').last();
+await d.select(vp, await vp.locator('option:has-text("Sample Voice")').getAttribute('value'));
+await sleep(500);
+await shot();
+await d.click('#modal button:has-text("Create")', { pause: 1400 });
+await say('Events', 'Every event gets a block, sorted by category: attacks, hits, breathing, dying, magic and shouts.');
+await sleep(1600);
+await d.scrollWheel('.gr-tile >> nth=12', 900, 10);
+await sleep(700);
+await d.scrollWheel('.gr-tile >> nth=12', -900, 10);
+await say('Import', 'No need to start from scratch: import an existing pack, and its files are matched to events by folder.');
+await d.click('button:has-text("Import ▾")', { pause: 600 });
+s.pick('D:\\Packs\\Sample Grunts');
+await menuItem('Import a voice pack folder');
+await page.waitForSelector('text=added to', { timeout: 20000 }).catch(() => {});
+await sleep(1400);
+await shot();
+await say('Lines', 'Pick a block to see its lines. Play them, reorder them, and check how loud each one is.');
+await d.click(tile('Power Attack'), { pause: 900 });
+await d.click(page.locator('.inspector .gr-line').first().locator('button').first(), { pause: 900 }).catch(() => {});
+await d.hover('.inspector .gr-lufs >> nth=0', 1500).catch(() => sleep(1500));
+
+// ---------------------------------------------------------------- effects
+await say('Effects', 'Each line can take a reverb, a room, a filter or a character effect. Click one to hear it first.');
+await d.click('.inspector button:has-text("⋯") >> nth=0', { pause: 600 });
+await menuItem('Effect…');
+await sleep(800);
+await d.click('#modal :text-is("Cave")', { pause: 1400 });
+await d.click('#modal :text-is("Telepathy")', { pause: 1400 });
+await d.click('#modal :text-is("Inner thoughts")', { pause: 1200 });
+await shot();
+await d.click('#modal button:has-text("Apply")', { pause: 900 });
+await say('Effects', 'The original is kept, so Normal brings it back. And every effect comes out exactly as loud as the line went in.');
+await d.hover('.inspector .gr-line >> nth=0', 1600).catch(() => sleep(1600));
+await say('Effects', 'Trim and fade lines, or make pitch and speed variants to fill out a pool.');
+await d.click('.inspector button:has-text("⋯") >> nth=1', { pause: 600 });
+await d.hover('.menu >> text=Trim and fade…', 900);
+await d.hover('.menu >> text=Make variants…', 1300);
+await page.keyboard.press('Escape');
+await sleep(400);
+
+// ---------------------------------------------------------------- record
+await say('Recording', 'Missing a sound? Record it. The event stays on screen while you grunt into the microphone.');
+await d.click(tile('Attack'), { pause: 800 });
+await d.click('.inspector button:has-text("Record")', { pause: 900 });
+await d.click('#modal .rec-btn', { pause: 300 });
+await sleep(2200);
+await d.click('#modal .rec-btn', { pause: 900 });
+await shot();
+await say('Recording', 'Keep your own voice, or convert it to the voice pack\'s voice.');
+await d.hover('#modal button:has-text("Convert to")', 1500);
+await d.click('#modal button:has-text("Keep my recording")', { pause: 900 });
+await d.click('#modal button:has-text("Close")', { pause: 600 }).catch(() => {});
+await sleep(600);
+
+// ---------------------------------------------------------------- export PCHT
+await say('Export', 'Check, then export: the sound folders, plus a small plugin wherever an event has more or fewer lines than PCHT\'s own.');
+await d.click(exportBtn, { pause: 600 });
+s.pick('D:\\Packs\\Out PCHT');
+await menuItem('/^Output folder/');
+await sleep(500);
+await d.click(exportBtn, { pause: 600 });
+await menuItem('Export the voice pack');
+await until(() => document.querySelector('#job')?.classList.contains('hidden') && document.querySelector('#modal:not(.hidden)'));
+await sleep(2400);
+await shot();
+await d.click('#modal .btn.primary', { pause: 600 });
+
+// ---------------------------------------------------------------- SPVS
+await say('Smart Player Voice System', 'The same voice for SPVS: just pick a free custom voice slot.');
+await d.click('button:has-text("← Player Grunts")', { pause: 900 });
+await d.click('.view-head button:has-text("New project")', { pause: 800 });
+await d.clickType('#modal input[type=text]', 'Sample Grunts SPVS', { delay: 45 });
+await d.click('#modal button:has-text("Smart Player Voice System")', { pause: 800 });
+await d.hover('#modal select >> nth=0', 1300);
+await d.click('#modal button:has-text("Create")', { pause: 1400 });
+await say('Smart Player Voice System', 'Copy the lines over from the PCHT project. SPVS\'s own event mapping does the matching.');
+await d.click('button:has-text("Import ▾")', { pause: 600 });
+await menuItem('Copy from another project');
+await sleep(800);
+await d.click('#modal button:has-text("Copy")', { pause: 1500 });
+await shot();
+await say('Smart Player Voice System', 'SPVS also has dozens of spoken comments, so subtitles, text to speech and Whisper are all built in.');
+await d.scrollWheel('.gr-tile >> nth=10', 1400, 12);
+await sleep(1400);
+await d.click(exportBtn, { pause: 600 });
+s.pick('D:\\Packs\\Out SPVS');
+await menuItem('/^Output folder/');
+await sleep(500);
+await d.click(exportBtn, { pause: 600 });
+await menuItem('Export the voice pack');
+await until(() => document.querySelector('#job')?.classList.contains('hidden') && document.querySelector('#modal:not(.hidden)'));
+await say('Export', 'An SPVS voice in its own slot, ready to install next to Smart Player Voice System.');
+await sleep(2600);
+await shot();
+await d.click('#modal .btn.primary', { pause: 600 });
+await say('Player Grunts Tool', 'One voice for PCHT and SPVS. Import it, record it, add effects, export. Then go and grunt at a dragon.');
+await sleep(2600);
+await settle();
+await d.uncaption();
+await d.fade(true);
+await sleep(300);
+const n = await cap.stop();
+console.log('frames', n);
+await s.close();
+process.exit(0);

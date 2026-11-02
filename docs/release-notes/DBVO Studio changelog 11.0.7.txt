@@ -1,0 +1,3 @@
+Version 11.0.7
+- FOMOD options linked to a DBVO Patch: Refresh linked and Build only add DBVO Fix plugins that exist in the patch's folder. A deleted or never-written one is no longer put back, and the build no longer warns about it as missing.
+- A linked file you remove with × stays removed: Refresh linked and Build leave it out. It is listed under the files, with ↺ to put it back.

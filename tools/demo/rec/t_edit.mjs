@@ -1,0 +1,45 @@
+import { start } from './bridge.mjs';
+import { sleep } from './shots_common.mjs';
+const OUT = process.env.OUTP;
+const s = await start({ width: 1600, height: 940, scale: 1 }); const { page } = s;
+const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+await page.goto('https://app.dbvo/index.html');
+await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const go = async (v, p) => { await page.evaluate(([v, p]) => import('/app.js').then((m) => m.go(v, p)), [v, p]); await sleep(1500); };
+await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.includes('order:')) localStorage.removeItem(k); });
+const st = await rpc('state', {}); const pid = st.patches[0].id;
+await go('patch', { id: pid }); await page.waitForSelector('.vrow');
+console.log('head', (await page.locator('.vgrid-head .cell').allInnerTexts()).map((x) => x.trim()).join('|'));
+await page.screenshot({ path: `${OUT}/e_grid.png` });
+// drag the QA column title to the left of Spoken
+const qa = page.locator('.vgrid-head .cell:has-text("QA")'); const sp = page.locator('.vgrid-head .cell').nth(2);
+const a = await qa.boundingBox(), b = await sp.boundingBox();
+await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2); await page.mouse.down();
+await page.mouse.move(a.x - 40, a.y + 10, { steps: 5 }); await page.mouse.move(b.x + 5, b.y + 10, { steps: 8 });
+await page.screenshot({ path: `${OUT}/e_drag.png` });
+await page.mouse.up(); await sleep(300);
+console.log('after drag', (await page.locator('.vgrid-head .cell').allInnerTexts()).map((x) => x.trim()).join('|'));
+const p0 = await rpc('patch.get', { id: pid }); const l0 = p0.lines.find((l) => l.selectedTakeId);
+const n0 = l0.takes.length;
+// open the editor from the wrench of that row
+const row = page.locator(`.vrow[data-key="${l0.lineId}"]`);
+await row.locator('button:has(svg)').filter({ has: page.locator('svg') }).nth(0).waitFor();
+await page.evaluate((k) => { const r = document.querySelector(`.vrow[data-key="${k}"]`); [...r.querySelectorAll('button')].find((b) => (b.title || '').startsWith('Edit take')).click(); }, l0.lineId);
+await page.waitForSelector('.te-canvas'); await sleep(1500);
+const c = await page.locator('.te-canvas').boundingBox();
+await page.mouse.move(c.x + c.width * 0.3, c.y + 100); await page.mouse.down(); await page.mouse.move(c.x + c.width * 0.5, c.y + 100, { steps: 6 }); await page.mouse.up(); await sleep(200);
+console.log('sel', await page.locator('.te-sel').innerText(), '|', await page.locator('.te-box').first().innerText());
+await page.screenshot({ path: `${OUT}/e_editor_sel.png` });
+await page.click('button:has-text("Delete selection")'); await sleep(300);
+console.log('hist', await page.locator('.te-hist').innerText());
+await page.screenshot({ path: `${OUT}/e_editor_cut.png` });
+await page.click('button:has-text("Save as new take")'); await sleep(2500);
+console.log('toast', await page.locator('.toast').allInnerTexts().catch(() => []));
+const p1 = await rpc('patch.get', { id: pid }); const l1 = p1.lines.find((l) => l.lineId === l0.lineId);
+console.log('takes', n0, '->', l1.takes.length, 'sel new', l1.selectedTakeId !== l0.selectedTakeId, 'dur', l0.takes.find((t) => t.id === l0.selectedTakeId).durationSeconds, '->', l1.takes.find((t) => t.id === l1.selectedTakeId).durationSeconds);
+// takes dialog button
+await page.evaluate((k) => { document.querySelector(`.vrow[data-key="${k}"] .take-lbl`).click(); }, l0.lineId); await sleep(500);
+await page.screenshot({ path: `${OUT}/e_takes.png` });
+console.log('errs', errs.join(' | '));
+process.exit(0);

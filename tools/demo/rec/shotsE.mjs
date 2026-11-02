@@ -1,0 +1,26 @@
+// 7.4 guide shots: Generate options with Edited, the books editor, the busy screen.
+import { boot, shooter, sleep } from './shots_common.mjs';
+const s = await boot(); const { page } = s; const S = shooter(page);
+await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const go = async (v, p) => { await page.evaluate(([v, p]) => import('/app.js').then((m) => m.go(v, p)), [v, p]); await sleep(1300); };
+const st = await rpc('state', {});
+const sky = st.patches.find((p) => p.name === 'Skyrim');
+const P = await rpc('patch.get', { id: sky.id });
+const ids = P.lines.filter((l) => l.takes.length && !l.omitted && !l.excluded).slice(0, 3).map((l) => l.lineId);
+await rpc('line2.bulkTags', { id: sky.id, lineIds: ids, tags: ['[sighs]'], mode: 'add', placement: '' });
+await go('patch', { id: sky.id }); await page.waitForSelector('.vrow');
+await page.click('.statusbar .gen-btn'); await sleep(400);
+await S.el('phase2-genpanel', '.pop-panel');
+await page.keyboard.press('Escape'); await sleep(300);
+await page.evaluate(() => import('/lib.js').then((l) => { l.withBusy(new Promise((r) => setTimeout(r, 2500)), 'Loading voice lines', 'Looking for WAV + LIP files in the folders and matching them to the lines…'); }));
+await sleep(1000);
+await S.full('busy-screen');
+await sleep(2000);
+await rpc('line2.bulkTags', { id: sky.id, lineIds: ids, tags: ['[sighs]'], mode: 'remove', placement: '' });
+const bk = (await rpc('books.list', {}))[0];
+await page.evaluate((id) => localStorage.setItem('dbvo:bk-tab:' + id, JSON.stringify('books')), bk.id);
+await go('book', { id: bk.id });
+await page.locator('.vrow:has-text("Roads of the Old North")').first().dblclick(); await sleep(1200);
+await S.full('vb-editor-done');
+await s.close(); process.exit(0);

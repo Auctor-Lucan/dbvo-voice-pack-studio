@@ -1,0 +1,23 @@
+import { start, LIB } from './bridge.mjs';
+import fs from 'fs';
+const s = await start({ width: 1400, height: 900, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const st = await rpc('state', {}); const P = st.patches[0];
+let pa = await rpc('patch.get', { id: P.id });
+console.log('wavlip', pa.wavLipFolder || pa.WavLipFolder);
+const r1 = await rpc('patch.exportWavLip', { id: P.id, audioOnly: true }); console.log('export1', r1.written, r1.skipped);
+const r2 = await rpc('patch.exportWavLip', { id: P.id, audioOnly: true }); console.log('export2 (nothing changed)', r2.written, r2.skipped);
+const l = pa.lines.find((x) => x.selectedTakeId && !x.excluded && !x.omitted);
+const before = (await rpc('patch.get', { id: P.id })).lines.find((x) => x.lineId === l.lineId); console.log('sel', before.selectedTakeId, 'line', l.lineId, l.excluded, l.omitted);
+const sv = await rpc('take.edit.save', { kind: 'patch', id: P.id, lineId: l.lineId, takeId: l.selectedTakeId, mode: 'over', ops: [{ op: 'delete', a: 0.3, b: 0.6, db: 0 }] });
+console.log('saved', !!sv.result, sv.problem);
+const r3 = await rpc('patch.exportWavLip', { id: P.id, audioOnly: true }); console.log('export3 (one take edited)', r3.written, r3.skipped);
+// mod rename shows up in the patch list
+const m = st.mods[0];
+await rpc('mod.saveMeta', { id: m.id, name: m.name + ' X' });
+const st2 = await rpc('state', {}); console.log('modNames', st2.patches[0].modNames.join(','), '| mods', st2.mods.map((x) => x.name).join(','));
+await rpc('mod.saveMeta', { id: m.id, name: m.name });
+const st3 = await rpc('state', {}); console.log('back', st3.patches[0].modNames.join(','));
+const u = await rpc('undo.list', {}); console.log('undo top', JSON.stringify(u).slice(0, 200));
+process.exit(0);

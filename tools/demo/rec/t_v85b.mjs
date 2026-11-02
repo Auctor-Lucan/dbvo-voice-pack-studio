@@ -1,0 +1,58 @@
+import { start } from './bridge.mjs';
+import { sleep } from './driver.mjs';
+const s = await start(); const { page } = s;
+const OUT = '/tmp/dbvo-work/v85';
+let k = 1; const shot = async (n, sel) => { const el = sel ? page.locator(sel).first() : page; await el.screenshot({ path: `${OUT}/${String(k++).padStart(2, '0')} ${n}.png` }).catch(async () => page.screenshot({ path: `${OUT}/${String(k - 1).padStart(2, '0')} ${n}.png` })); };
+const T = async (n, f) => { try { await f(); console.log('OK', n); } catch (e) { console.log('ERR', n, e.message.split('\n')[0]); await page.keyboard.press('Escape').catch(() => {}); } };
+const until = (fn, t = 120000) => page.waitForFunction(fn, null, { timeout: t, polling: 200 });
+const jobDone = () => until(() => document.querySelector('#job')?.classList.contains('hidden'));
+const ok = async () => { await page.click('#modal .btn.primary').catch(() => {}); await sleep(500); };
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const go = async (v, p) => { await page.evaluate(([v, p]) => import('/app.js').then((m) => m.go(v, p)), [v, p]); await sleep(1300); };
+const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-checks');
+
+await T('import', async () => {
+  await go('mods');
+  const G = 'D:\\SteamLibrary\\steamapps\\common\\Skyrim Special Edition\\Data\\';
+  const pl = ['Skyrim.esm', 'Dawnguard.esm', 'HearthFires.esm', 'Dragonborn.esm'];
+  s.dropNext(pl.map((p) => G + p));
+  await page.evaluate((names) => { const dt = new DataTransfer(); for (const n of names) dt.items.add(new File(['x'], n)); (document.querySelector('.view-body') || document.body).dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt })); }, pl);
+  await page.waitForSelector('table.batch');
+  for (const p of pl.slice(1)) { const i = page.locator(`table.batch tr:has-text("${p}") input[type=text]`); await i.fill('Skyrim'); await i.press('Tab'); await sleep(150); }
+  await page.click('button:has-text("Create mods and import")'); await page.waitForSelector('text=Mods added'); await ok();
+  await page.click('.pcard:has-text("Skyrim")'); await page.waitForSelector('.vrow');
+  await page.click('button:has-text("Continue to Phase 2")'); await sleep(800); await page.click('#modal button:has-text("Continue anyway")').catch(() => {});
+  await page.waitForSelector('button:has-text("Generate options")');
+  await page.click('button:has-text("Generate options")'); await page.click('.gen-pop .gen-item:has-text("Missing")'); await sleep(600); await ok(); await jobDone(); await sleep(800);
+});
+await T('phase2 toolbar', async () => { await shot('Phase 2 - Post-processing button', '.view'); });
+await T('pp menu', async () => { await page.click('button:has-text("Post-processing ▾")'); await sleep(400); await shot('Phase 2 - Post-processing menu'); });
+await T('soften dialog', async () => { await page.click('.menu >> text=Soften peaks…'); await sleep(500); await shot('Phase 2 - Soften peaks dialog', '#modal .modal-card'); await ok(); await sleep(1500); await shot('Phase 2 - after soften all shown', '.view'); });
+await T('inspector', async () => { await page.locator('.vrow').first().click(); await sleep(700); await shot('Phase 2 - line panel with Soften peaks', '.inspector, .insp'); });
+await T('qa', async () => { await page.click('button:has-text("Check takes")'); await sleep(600); await shot('Phase 2 - Check takes with Sharp peaks', '#modal .modal-card'); await page.click('#modal button:has-text("Cancel")'); await sleep(300); });
+await T('options', async () => { await page.click('button:has-text("Folders ▾")'); await page.click('.menu >> text=Folders & options…'); await sleep(900); await shot('Phase 2 - Folders & options', '#modal .modal-card'); await page.click('#modal button:has-text("Cancel")'); await sleep(300); });
+await T('voice pack', async () => { await go('settings', { tab: 'voices' }); await page.locator('text=Soften peaks').first().scrollIntoViewIfNeeded(); await sleep(400); await shot('Voice pack - Soften peaks', '.section:has(h2:text-is("Audio"))'); });
+await T('fomod', async () => {
+  await go('fomods'); await page.click('button:has-text("+ New FOMOD")'); await sleep(500); await page.locator('#modal input[type=text]').first().fill('Test'); await page.click('#modal button:has-text("Create")'); await page.waitForSelector('button:has-text("Add DBVO Patches")');
+  await page.click('button:has-text("Add DBVO Patches")'); await sleep(500); await ok(); await sleep(600);
+  await page.click('.ftree >> text=Skyrim'); await sleep(500);
+  const pr = await rpc('patch.create', { name: 'Skyrim 2', voicePackId: (await rpc('state.get', {}).catch(() => null))?.voicePacks?.[0]?.id || '', modIds: [] }).catch((e) => console.log('pc', e.message));
+  await page.click('button:has-text("Add DBVO Patches")'); await sleep(600); await shot('Phase 3 - Add DBVO Patches above or below', '#modal .modal-card'); await page.click('#modal button:has-text("Cancel")');
+});
+await T('revoice', async () => { const list = await rpc('revoice.list', {}); await go('revoice', { id: list.find((x) => x.name.startsWith('Hollow') || x.name.includes('Hollow')).id }); await page.click('button:has-text("Lines (")'); await sleep(600);
+  await page.selectOption('.tgroup:has-text("Speaker") select', { index: 1 }); await sleep(800); await shot('NPC Revoice - toolbar', '.view'); });
+await T('books', async () => { await go('books'); await page.click('button:has-text("+ New project")'); await sleep(500); const ins = page.locator('#modal input[type=text]'); await ins.nth(0).fill('B'); await page.click('#modal button:has-text("Create")'); await sleep(1500);
+  await page.click('button:has-text("Narrators & authors")'); await sleep(800); await page.click('summary:has-text("Voice settings")').catch(() => {}); await sleep(500); await shot('Voiced Books - Narrators & authors', '.view'); });
+await T('grunts', async () => { await rpc('grunts.paths', { pchtFolder: 'D:\\MO2\\mods\\PC Head Tracking and Voice Type SE', spvsFolder: 'D:\\MO2\\mods\\Smart Player Voice System' });
+  const c = await rpc('grunts.create', { name: 'G', target: 'pcht', multi: false, gender: 'female', slot: 'FemaleCustom01', voicePackId: '' });
+  await rpc('grunts.importPack', { id: c.id, path: 'D:\\Packs\\Sample Grunts' });
+  await go('grunt', { id: c.id });
+  await page.locator('.gr-tile:has(.gr-label:text-is("Power Attack"))').first().click(); await sleep(500);
+  await page.locator('.inspector button:has-text("⋯")').first().click(); await sleep(300); await shot('Player Grunts - line menu');
+  await page.click('.menu >> text=Post-processing…'); await sleep(900); await shot('Player Grunts - Post-processing dialog', '#modal .modal-card');
+  await page.click('#modal label:has-text("Soften peaks"), #modal .fx-soften .switch').catch(() => {}); await sleep(1200);
+  await page.click('#modal .btn.primary'); await sleep(1500); await shot('Player Grunts - after soften', '.inspector');
+  await page.click('button:text-is("Setup & export")'); await sleep(800); await page.locator('text=Soften peaks').first().scrollIntoViewIfNeeded(); await shot('Player Grunts - Audio settings', '.section:has(h2:text-is("Audio"))'); });
+console.log('PAGEERRORS', errs.join(' | '));
+await s.close(); process.exit(0);

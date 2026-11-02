@@ -1,0 +1,22 @@
+import { start } from './bridge.mjs';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const s = await start({ width: 1600, height: 900, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards'); await page.evaluate(() => localStorage.setItem('dbvo:seen:tags-context', 'true'));
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const st = await rpc('state', {}); const P = st.patches.find((x) => x.name === 'Skyrim');
+await page.evaluate((id) => import('/app.js').then((m) => m.go('patch', { id })), P.id); await sleep(2500);
+const boxes = page.locator('.vrow input[type=checkbox]');
+for (let i = 0; i < 4; i++) { await boxes.nth(i).click(); await sleep(150); }
+console.log('ticked', await page.locator('.vrow.sel').count());
+await page.getByRole('button', { name: 'AI Auto Tag' }).click(); await sleep(4000);
+const p = await rpc('patch.get', { id: P.id });
+console.log('suggestions', p.lines.filter((l) => l.tagSuggestion).length);
+console.log('toast', await page.locator('.toast').allTextContents());
+await page.screenshot({ path: process.env.OUTP + '/tag.png' });
+await page.getByRole('button', { name: /AI tags \(4\)/ }).click(); await sleep(300);
+await page.getByText('✓ Accept all 4').click(); await sleep(1200);
+const p3 = await rpc('patch.get', { id: P.id });
+console.log('after accept all: suggestions', p3.lines.filter((l) => l.tagSuggestion).length, 'tagged', p3.lines.filter((l) => /^\[calm\]|^\[/.test(l.spoken) && p.lines.find((o) => o.lineId === l.lineId).tagSuggestion === l.spoken).length);
+for (const l of p.lines.filter((l) => l.tagSuggestion)) await rpc('line2.update', { id: P.id, lineId: l.lineId, action: 'spoken', value: l.spoken });
+for (const l of p.lines.filter((l) => l.tagSuggestion)) await rpc('line2.update', { id: P.id, lineId: l.lineId, action: 'rejectTags' });
+process.exit(0);

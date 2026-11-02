@@ -1,0 +1,13 @@
+import { start } from './bridge.mjs';
+import { OUT, sleep } from './shots_common.mjs';
+const s = await start({ width: 1600, height: 940, scale: 1 }); const { page } = s;
+const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const go = async (v, p) => { await page.evaluate(([v, p]) => import('/app.js').then((m) => m.go(v, p)), [v, p]); await sleep(1500); };
+const rl = await rpc('revoice.list', {});
+await go('revoice', { id: rl[0].id }); await page.click('.view-head button:has-text("Lines")').catch(() => {}); await sleep(1200);
+await page.click('.out-btn'); await sleep(400);
+await page.screenshot({ path: `${OUT}/out-btn.png`, clip: { x: 700, y: 100, width: 900, height: 420 } });
+console.log('errs', errs.join('|'));
+await s.close(); process.exit(0);

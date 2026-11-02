@@ -1,0 +1,14 @@
+import { start } from './bridge.mjs';
+import { sleep } from './shots_common.mjs';
+const s = await start({ width: 1600, height: 700, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards');
+await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.includes('order:') || k.includes('cols:')) localStorage.removeItem(k); });
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const st = await rpc('state', {});
+await page.evaluate((id) => import('/app.js').then((m) => m.go('patch', { id })), st.patches[0].id); await page.waitForSelector('.vrow'); await sleep(800);
+await page.click('button:has-text("Hide panel")').catch(() => {}); await sleep(500);
+await page.screenshot({ path: process.env.OUTP + '/cols.png', clip: { x: 800, y: 290, width: 800, height: 250 } });
+await page.click('button:has-text("Columns")'); await sleep(200); const n1 = await page.locator('.menu').count();
+await page.click('button:has-text("Columns")'); await sleep(200); const n2 = await page.locator('.menu').count();
+console.log('menu', n1, n2, 'resizers', await page.locator('.vgrid-head .resizer').count());
+process.exit(0);

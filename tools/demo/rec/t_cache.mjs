@@ -1,0 +1,18 @@
+import { start } from './bridge.mjs';
+import { sleep } from './shots_common.mjs';
+const s = await start({ width: 1400, height: 900, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html');
+const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const t0 = Date.now(); const a = await rpc('state', {}); const t1 = Date.now(); const b = await rpc('state', {}); const t2 = Date.now();
+console.log('patches', a.patches.length, 'mods', a.mods.length, 'first', t1 - t0, 'ms second', t2 - t1, 'ms');
+console.log('same', JSON.stringify(a.patches) === JSON.stringify(b.patches) && JSON.stringify(a.mods) === JSON.stringify(b.mods));
+console.log(JSON.stringify(a.patches[0]).slice(0, 300));
+const p = a.patches[0]; const pa = await rpc('patch.get', { id: p.id });
+const l = pa.lines[0];
+await rpc('line2.update', { id: p.id, lineId: l.lineId, action: l.excluded ? 'include' : 'exclude' });
+const c = await rpc('state', {}); const pc = c.patches.find((x) => x.id === p.id);
+console.log('excluded before', p.excluded, 'after', pc.excluded);
+console.log('errs', errs.join(' | '));
+await s.close?.(); process.exit(0);

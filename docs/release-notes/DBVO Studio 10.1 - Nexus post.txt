@@ -1,0 +1,24 @@
+[size=6][b][color=#00ffff]DBVO Studio 10.1[/color][/b][/size]
+
+[size=5][b][color=#00ffff]New: Proofread lines[/color][/b][/size]
+Mod authors aren't always great at spelling. [b][color=#00ffff]Proofread…[/color][/b] in Phase 1 takes you through the lines one at a time:
+[list]
+[*]The spellchecker underlines typos; right-click a word for suggestions.[/*]
+[*]Optional [b][color=#00ffff]AI suggestions[/color][/b] from your AI provider (free ones run on your PC) catch what a spellchecker can't: doubled words, their/there, broken grammar. Each one shows what changes, and nothing changes until you accept it.[/*]
+[*]The AI is told to keep each character's voice. Changes that are only style are marked [i]check before accepting[/i], so a Khajiit keeps speaking like one.[/*]
+[*]Game markup such as <Alias=Player> and (Persuade) is locked, so it can't be broken by accident.[/*]
+[*]Every edit goes into the DBVO Fix plugin, and you can stop any time and pick up where you left off.[/*]
+[/list]
+
+[size=5][b][color=#00ffff]Fixes worth knowing about[/color][/b][/size]
+[list]
+[*]Right after typing in a list, a click on a button such as ★, ⚑ or ♪ sometimes needed a second click. One is enough now.[/*]
+[*]Clicking regenerate on several lines quickly could leave a ↻ spinning for good, stop one too early, or lose a take.[/*]
+[*]Changing folders, options or Books part settings while a project generated could drop takes you paid for. Those changes now wait for the generation to end.[/*]
+[*]DBReV packs (BETA TESTING): reference sets no longer leave lines out, since DBReV never plays another pack's file for the same words.[/*]
+[*]OpenAI-compatible: your OpenAI key is never sent to a server on your PC or network, and pasting the full endpoint address works.[/*]
+[*]Player Grunts' Whisper no longer asks for FaceFX and FonixData.[/*]
+[*]Plus lots of smaller fixes: see the changelog.[/*]
+[/list]
+
+The user guide (F1) and the PDF have a new section on Proofread lines, and a note on what the DBVO Fix plugin copies from a mod and why its load order matters. As always, DM me or find me on the DBVO Discord if something breaks.

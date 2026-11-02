@@ -1,0 +1,2 @@
+Version 11.0.5
+- DBVO voice pack JSON: when the installer already installs a voice pack JSON itself, as many imported FOMODs do (a DragonbornVoiceOver folder with voice_packs\…json in it, say), DBVO Studio no longer adds a second one, whatever "Add to the installer" says. The JSON panel shows the file it found, Validate no longer asks for a carrier option, and the build report says it added none.

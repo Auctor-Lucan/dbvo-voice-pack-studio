@@ -1,0 +1,168 @@
+// Video 1: first launch, the library, the tools in General & tools, and a voice pack.
+import { start } from './bridge.mjs';
+import { overlay, makeDriver, startCapture, sleep } from './driver.mjs';
+
+const OUT = process.env.OUT || 'frames_v1';
+const s = await start();
+const { page } = s;
+await page.goto('https://app.dbvo/index.html');
+await page.waitForSelector('.home-checks');
+await overlay(page);
+const d = makeDriver(page);
+await d.fade(true);
+const cap = process.env.NOCAP ? { pause() {}, resume() {}, async stop() { return 0; } } : await startCapture(page, OUT);
+const shot = (n) => (process.env.SHOTS ? page.screenshot({ path: `v1_${n}.png` }) : null);
+let capAt = 0, capHold = 0;
+const say = async (kick, text) => { const w = capAt + capHold - Date.now(); if (w > 0) await sleep(w); await d.caption(kick, text); capAt = Date.now(); capHold = Math.max(3200, text.length * 62); };
+const settle = async () => { const w = capAt + capHold - Date.now(); if (w > 0) await sleep(w); };
+const mid = async (sel) => { await page.locator(sel).first().evaluate((e) => e.scrollIntoView({ block: 'center', behavior: 'smooth' })); await sleep(700); };
+const row = (label) => `.srow:has(.lbl > span:text-is("${label}"))`;
+const rowHas = (label) => `.srow:has(.lbl:has-text("${label}"))`;
+
+// ---------------------------------------------------------------- first launch
+await sleep(400);
+await d.fade(false);
+await say('First launch', 'DBVO Studio opens on the landing page. The studio check below lists what still needs setting up.');
+await sleep(1200);
+for (const c of await page.locator('.home-chip').all()) await d.hover(c, 650);
+await shot('1');
+await say('First launch', 'All of it lives in one place, Global Settings. You set it up once and then forget about it.');
+await d.click('[data-section="settings"]', { pause: 900 });
+
+// ---------------------------------------------------------------- library
+await say('1 · The library', 'Choose the library first. Every project, take and backup lives here, and moving it later is a chore.');
+await d.hover('.section:has(h2:text-is("Library")) .help', 2600);
+await say('1 · The library', 'Put it on a short path, on the same drive as your audio. Takes are then hardlinked, not copied, so they cost no disk space.');
+await d.hover('.section:has(h2:text-is("Library")) .help li >> nth=1', 3200);
+s.pick('D:\\DBVO Studio Library');
+await d.click('button:has-text("Change…")', { pause: 700 });
+await page.waitForSelector('#modal button:has-text("Change and restart")');
+await sleep(1500);
+await shot('2');
+await d.click('#modal button:has-text("Change and restart")', { pause: 300 });
+await d.fade(true);
+cap.pause();
+await s.restartHost();
+await page.reload();
+await page.waitForSelector('.home-checks');
+await overlay(page);
+await page.evaluate(() => document.querySelector('[data-section="settings"]').click());
+await page.waitForSelector('text=Pick this first.');
+await sleep(500);
+cap.resume();
+await d.fade(false);
+await say('1 · The library', 'DBVO Studio restarts, and the library now sits on drive D, right next to the voice files.');
+await d.hover(`${row('Location')} .mono`, 2200);
+
+// ---------------------------------------------------------------- ElevenLabs
+await say('2 · ElevenLabs', 'Paste in your ElevenLabs key. It\'s encrypted, and only your Windows account can unlock it.');
+await mid('.section:has(h2:text-is("ElevenLabs"))');
+await d.clickType('.section:has(h2:text-is("ElevenLabs")) input[type=password]', 'sk_3f9a1c7e5b2d', { delay: 45 });
+await sleep(300);
+await d.click('.section:has(h2:text-is("ElevenLabs")) button:has-text("Save key")', { pause: 400 });
+await page.waitForSelector('.section:has(h2:text-is("ElevenLabs")) .dim:has-text("✓")', { timeout: 8000 }).catch(() => {});
+await say('2 · ElevenLabs', 'Test makes sure the key works, and tells you how many credits you have left to spend.');
+await d.hover('.section:has(h2:text-is("ElevenLabs")) .dim:has-text("characters")', 2200).catch(() => sleep(2200));
+await shot('3');
+
+// ---------------------------------------------------------------- tools
+const tools = '.section:has(h2:text-is("Tools"))';
+await d.scrollWheel('.view-body', 1500, 12);
+await sleep(300);
+await page.locator(`${tools} .section-head`).scrollIntoViewIfNeeded();
+await say('3 · Tools', 'Five tools turn a take into WAV, LIP and fuz files. ffmpeg and 7-Zip ship with DBVO Studio.');
+await d.hover(`${tools} .section-head .badge >> nth=2`, 1500);
+await d.hover(`${tools} .section-head .badge >> nth=4`, 1500);
+await say('3 · Tools', 'The other three you bring yourself, like every user does. The little info buttons tell you where to find them.');
+await d.click(`${rowHas('FonixData.cdf')} .need-info`, { pause: 300 });
+await page.waitForSelector('#modal .need-steps');
+await sleep(3600);
+await shot('4');
+await d.click('#modal button:has-text("OK"), #modal button:has-text("Close")', { pause: 500 }).catch(async () => { await page.keyboard.press('Escape'); await sleep(400); });
+await say('3 · Tools', 'FonixData and xWMAEncode come with the Creation Kit. Point DBVO Studio at your game\'s Data folder, and it finds both.');
+const plugins = '.section:has(h2:text-is("Plugins"))';
+await page.locator(`${plugins} ${rowHas('Base game plugins folder')}`).scrollIntoViewIfNeeded();
+await d.hover(`${plugins} ${rowHas('Base game plugins folder')} .lbl`, 1600);
+s.pick('D:\\SteamLibrary\\steamapps\\common\\Skyrim Special Edition\\Data');
+await d.click(`${plugins} ${rowHas('Base game plugins folder')} button:has-text("Browse")`, { pause: 500 });
+await page.waitForSelector(`${tools} .section-head .badge.b-valid:has-text("FonixData")`, { timeout: 8000 });
+await sleep(400);
+await page.locator(`${tools} .section-head`).scrollIntoViewIfNeeded();
+await sleep(300);
+await d.spot(`${tools} .section-head .row`, 1900);
+await say('3 · Tools', 'FaceFXWrapper is a free download. If DBVO Voice Pack Maker is installed, it\'s found on its own. If not, browse to it.');
+await mid(rowHas('FaceFXWrapper.exe'));
+s.pick('D:\\Modding\\Tools\\FaceFXWrapper\\FaceFXWrapper.exe');
+await d.click(`${rowHas('FaceFXWrapper.exe')} button:has-text("Browse")`, { pause: 600 });
+await page.waitForSelector(`${tools} .section-head .badge.b-valid:has-text("FaceFXWrapper")`, { timeout: 8000 });
+await page.locator(`${tools} .section-head`).scrollIntoViewIfNeeded();
+await sleep(300);
+await d.spot(`${tools} .section-head .row`, 2000);
+await shot('5');
+await say('3 · Tools', 'Skyrim.esm keeps its text in string files. DBVO Studio reads them straight from the game, so the base game needs nothing extra.');
+await d.hover(`${plugins} ${rowHas('Strings folder')} .lbl`, 2600);
+await say('More settings', 'Further down are the optional extras: AI auto-tagging, the WAV to LIP engine and local voice engines. Everything saves as you go.');
+await d.scrollWheel('.view-body', 900, 10);
+await sleep(1600);
+await d.hover('.section:has(h2:text-is("WAV to LIP (Other Tools)")) .section-head', 1500).catch(() => sleep(1500));
+
+// ---------------------------------------------------------------- voice pack
+await say('4 · Voice pack', 'Next, a voice pack, one per voice. It gets a name, a colour, and the ID that DBVO uses for its folder.');
+await d.click('.subnav button.nav-item:has-text("Voice packs")', { pause: 800 });
+await page.waitForSelector(`${row('Name')} input`);
+await d.clickType(`${row('Name')} input`, 'Sample Voice', { delay: 55 });
+await sleep(300);
+await d.click('.swatches > * >> nth=4', { pause: 500 });
+await d.clickType(`${row('DBVO voice pack ID')} input`, 'SampleVoice', { delay: 55 });
+await d.clickType(`${row('Author')} input`, 'Your Name', { delay: 50 });
+await sleep(400);
+await shot('6');
+await say('4 · File naming', 'Legacy file names are readable. DBVO 2.0 names are hashes of the line, made exactly the way Voice Pack Maker 2.7.0 makes them.');
+await d.hover(`${row('File naming')} .seg button >> nth=0`, 1800);
+await d.click(`${row('File naming')} .seg button >> nth=1`, { pause: 1400 });
+await say('4 · File naming', 'Both work all the way from Phase 1 to the finished FOMOD. Pick whichever your voice pack uses.');
+await d.hover(`${row('File naming')} .lbl small`, 2200);
+await say('4 · Engine', 'The voice comes from ElevenLabs, or from VoxCPM or OmniVoice on your own PC. You pick the actual voice later, in Phase 2.');
+await d.hover(`${row('Engine')} .seg button >> nth=0`, 1400);
+await d.hover(`${row('Engine')} .seg button >> nth=2`, 1600);
+
+const defs = '.section:has(h2:text-is("Defaults for new DBVO Patches"))';
+await page.locator(`${defs} .section-head`).scrollIntoViewIfNeeded();
+await sleep(300);
+await say('4 · Folders', 'This is where every new patch puts its WAV and LIP files, its fix plugins and its FOMOD files. The mod placeholder becomes each mod\'s name.');
+await d.clickType(`${defs} ${row('WAV + LIP folder')} input`, 'D:\\DBVO\\Sample Voice\\WAV + LIP\\{mod}', { delay: 30 });
+await page.keyboard.press('Tab');
+await d.clickType(`${defs} ${row('DBVO Fix folder')} input`, 'D:\\DBVO\\Sample Voice\\DBVO Fix\\{mod}', { delay: 30 });
+await page.keyboard.press('Tab');
+s.pick('D:\\DBVO\\Sample Voice\\FOMOD');
+await d.click(`${defs} ${row('Final folder')} button:has-text("Browse")`, { pause: 400 });
+await d.clickType(`${defs} ${row('.fuz sub-folder')} input`, '{mod}\\Sound\\DBVO\\{packId}', { delay: 40, clear: true }).catch(() => {});
+s.pick('D:\\DBVO\\Releases');
+await d.click(`${defs} ${row('Release folder')} button:has-text("Browse")`, { pause: 400 });
+await say('4 · Folders', 'The preview shows exactly where the files for a mod called Example Mod will land. No guessing.');
+await page.locator(`${defs} .box.mono`).scrollIntoViewIfNeeded();
+await sleep(200);
+await d.spot(`${defs} .box.mono`, 3200);
+await shot('7');
+await say('4 · Per voice', 'The tags toolbar, how this voice pronounces names, and the audio finish, from tail trim to loudness, are all set per voice pack too.');
+await d.scrollWheel('.view-body', 1100, 12);
+await sleep(2600);
+await d.hover('.section:has(h2:text-is("Audio")) .section-head', 1800).catch(() => sleep(1800));
+
+// ---------------------------------------------------------------- ready
+await say('Ready', 'Back on the landing page, the studio check is green from top to bottom.');
+await d.click('#brand', { pause: 900 });
+await page.waitForSelector('.home-checks');
+await sleep(600);
+for (const c of (await page.locator('.home-chip').all()).slice(0, 4)) await d.hover(c, 700);
+await shot('8');
+await say('Ready', 'That\'s the setup done. Next stop: Phase 1, and your first mod.');
+await d.hover('.crumb[data-section="mods"]', 2200);
+await settle();
+await d.uncaption();
+await d.fade(true);
+await sleep(300);
+const n = await cap.stop();
+console.log('frames', n);
+await s.close();
+process.exit(0);

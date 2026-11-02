@@ -1,0 +1,44 @@
+[size=6][b][color=#00ffff]DBVO Studio 10.0[/color][/b][/size]
+
+The big ones in this release are [b][color=#00ffff]DBReV packs[/color][/b] and [b][color=#00ffff]five more voice engines[/color][/b]. Both are marked [b](BETA TESTING)[/b] in the app: I haven't been able to try them in game or with real accounts myself, so please tell me what works and what doesn't.
+
+[size=5][b][color=#00ffff]DBReV packs (BETA TESTING)[/color][/b][/size]
+[list]
+[*]A voice pack's [b][color=#00ffff]Pack format[/color][/b] can now be DBReV, for Dragonborn ReVoiced, next to DBVO 1 (Legacy names) and DBVO 2.0.[/*]
+[*]Files are named by plugin and FormID instead of the line text, so a line whose text you changed in Phase 1 still plays.[/*]
+[*]Your other ★ kept takes become variations, which DBReV picks from at random.[/*]
+[*]Phase 3 installs the pack file DBReV needs, and Pack as BSA works as before.[/*]
+[*]Switch a voice pack's format any time; the next export writes the new names. Nothing has to be generated again.[/*]
+[*]Supported with the consent of Raynor.[/*]
+[/list]
+
+[size=5][b][color=#00ffff]More voice engines (BETA TESTING)[/color][/b][/size]
+[list]
+[*][b][color=#00ffff]Fish Audio, Inworld, Cartesia, MiniMax and OpenAI-compatible[/color][/b], next to ElevenLabs, OmniVoice and VoxCPM. OpenAI-compatible also covers free servers on your own PC, such as Chatterbox or Kokoro.[/*]
+[*]They work everywhere: Phase 2, NPC Revoice, Voiced Books and Player Grunts. Keys go under Global Settings > Voice engines, with an ⓘ for where to get each one.[/*]
+[*]Each engine gets your [tags] the way it understands them, and the tag bar tells you how.
+[list]
+[*]Fish Audio and Inworld perform them, much like ElevenLabs v3/v4.[/*]
+[*]Cartesia and MiniMax turn a leading tag into an emotion: [Extremely Baleful] becomes contempt.[/*]
+[*]OpenAI-compatible engines get them as delivery instructions.[/*]
+[/list][/*]
+[*]Use voices you have the right to use. A voice made with ElevenLabs can't be rebuilt on another engine (ElevenLabs' terms).[/*]
+[/list]
+
+[size=5][b][color=#00ffff]OmniVoice[/color][/b][/size]
+[list]
+[*]Works with the server [b][color=#00ffff]DBReV Voice Pack Maker[/color][/b] starts (port 8001), with its Language and Denoise settings.[/*]
+[*]Performs [laughter] and [sigh] instead of dropping every tag.[/*]
+[*]Check in Global Settings now says why a server shows offline: nothing answering, the wrong port, or a web page instead of the server.[/*]
+[/list]
+
+[size=5][b][color=#00ffff]Fixes worth knowing about[/color][/b][/size]
+[list]
+[*]Ctrl+Z could only undo the page refreshing itself, never your own edits.[/*]
+[*]Check takes flagged a short first word followed by a pause as a burst at the start of the take, which happened a lot with leading tags as context.[/*]
+[*]Leaving the page while Edit take had unsaved edits (mouse Back button, F1, Ctrl+K) threw them away without asking.[/*]
+[*]The question about files from earlier exports now only covers .fuz files. Old WAV and LIP files stay in the WAV + LIP folder as your archive of past takes.[/*]
+[*]Plus lots of smaller fixes.[/*]
+[/list]
+
+The user guide (F1) and the PDF have new sections on voice engines, tags per engine and pack formats. As always, DM me or find me on the DBVO Discord if something breaks.

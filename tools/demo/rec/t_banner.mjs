@@ -1,0 +1,11 @@
+import { start } from './bridge.mjs';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const s = await start({ width: 1600, height: 950, scale: 1 }); const { page } = s;
+page.on('pageerror', (e) => console.log('PAGEERR', e.message));
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards');
+const st = await page.evaluate(() => import('/lib.js').then((l) => l.rpc('state', {})));
+await page.evaluate((id) => import('/app.js').then((m) => m.go('fomod', { id })), st.fomods[0].id); await sleep(1500);
+await page.locator('.ftree .fnode').first().click(); await sleep(500);
+await page.click('button:has-text("Build ▾")'); await sleep(300);
+await page.screenshot({ path: 'banner.png' });
+await s.close(); process.exit(0);

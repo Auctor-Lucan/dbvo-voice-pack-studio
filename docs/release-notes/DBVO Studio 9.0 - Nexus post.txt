@@ -1,0 +1,63 @@
+[size=6][b][color=#00ffff]DBVO Studio 9.0[/color][/b][/size]
+
+The big ones in this release are [b][color=#00ffff]Edit take[/color][/b], a small waveform editor for fixing a take without paying for a new one, and [b][color=#00ffff]Leading tags as context[/color][/b], which stops your [tags] from eating credits. A lot has been added since 8.4, so this covers 8.5 to 9.0.
+
+[size=5][b][color=#00ffff]Edit take[/color][/b][/size]
+[list]
+[*]Open any take with the [b][color=#00ffff]wrench[/color][/b] next to the Take column (or from the takes window) to cut out a doubled word, trim, silence, fade or change the gain. Made for those short lines where ElevenLabs gives you the same word twice.[/*]
+[*]If you have [b][color=#00ffff]Whisper[/color][/b] set up, the words are marked under the waveform. Click one to select it, Shift+click to select a run of words.[/*]
+[*]Cuts snap to the quietest point nearby and get a short crossfade, so they don't click. Undo and redo as much as you like.[/*]
+[*]Saving makes a [b][color=#00ffff]new .lip[/color][/b] from the line's text, so the lip sync follows the shorter audio, and puts the take's post-processing back on.
+[list]
+[*]Save as a new take (the original stays) or over the old one.[/*]
+[*]Works in Phase 2, the Voice Changer, NPC Revoice and Voiced Books.[/*]
+[/list][/*]
+[/list]
+
+[size=5][b][color=#00ffff]Leading tags as context[/color][/b][/size]
+[list]
+[*]The [tags] at the start of a line can now be sent to ElevenLabs as context instead of as part of the line. Context isn't counted against your credits, so a line is billed for its words only.[/*]
+[*]For my own patches, leading tags turned out to be about 30% of every character I paid for. That's a lot of credits for [British Baleful].[/*]
+[*]Fringe benefit: [b][color=#00ffff]short lines stop doubling their words[/color][/b]. Two tags in front of "No, sorry." used to give me rambling or repeated words; as context they don't.[/*]
+[*]The catch: tags come through a little weaker that way. Phrase them stronger to make up for it.
+[list]
+[*][b]Extremely[/b] worked best in my tests: [British Extremely Baleful] instead of [British Baleful].[/*]
+[*]"Very" barely did anything, and "Deeply" or "Intensely" add a meaning of their own.[/*]
+[*]Two leading tags weaken each other a little; three or more are untested.[/*]
+[/list][/*]
+[*]On by default for new patches (Global Settings > General & tools), and each patch can change it under Output. Your existing patches are left as they were.[/*]
+[*]The takes window now shows what ElevenLabs actually billed for each take, and Studio warns you if it ever starts billing the context.[/*]
+[/list]
+
+[size=5][b][color=#00ffff]Post-processing[/color][/b][/size]
+[list]
+[*][b][color=#00ffff]Noise-reduced pauses[/color][/b]: removes low rumble and turns down noise in the pauses, leaving the voice alone.[/*]
+[*][b][color=#00ffff]Soften peaks[/color][/b]: tames sharp peaks in a take without touching the rest. Check takes also flags sharp peaks now.[/*]
+[*]Both work as a voice pack setting for new takes, or per take from the new Post-processing menus in Phase 2, NPC Revoice, Voiced Books and Player Grunts.
+[list]
+[*]The original take is always kept, so you can take it off again.[/*]
+[*]A new PP column in the grid shows what's on each take. Click an icon to remove it.[/*]
+[/list][/*]
+[/list]
+
+[size=5][b][color=#00ffff]Elsewhere[/color][/b][/size]
+[list]
+[*][b][color=#00ffff]Credits[/color][/b]: Check before spending credits shows the characters actually sent (pronunciation rules applied) and the credits at the model's current rate. Stop generating keeps the lines whose audio had already come back, since you paid for them.[/*]
+[*][b][color=#00ffff]Grid[/color][/b]: drag any column to a new spot by its title, resize the icon columns, and new "All non-omitted" and "Imported .fuz" filters.[/*]
+[*][b][color=#00ffff]Lists[/color][/b]: finished patches, mods and projects shrink to small chips, with an All / Work left / Complete filter. Startup is faster when you have a lot of patches.[/*]
+[*][b][color=#00ffff]Voice packs[/color][/b] can have a standard voice per engine, and you're warned before generating with a different one.[/*]
+[*][b][color=#00ffff]Mod updates[/color][/b]: when a line's text changes, your tags and edits now carry over, even on lines without a take. Words you changed yourself are kept and marked "changed" so you can check them.[/*]
+[*][b][color=#00ffff]Exports[/color][/b]: a take is written again whenever its audio has changed since the last export, and you're told when two patches write the very same files. With Pack as BSA, file names a BSA can't store are installed as loose files instead of going silent.[/*]
+[*]The bulk tag window shows your voice pack's tags, imported WAVs get the voice pack's tail trim, and the NPC Revoice setup page is a lot more compact.[/*]
+[/list]
+
+[size=5][b][color=#00ffff]Fixes worth knowing about[/color][/b][/size]
+[list]
+[*]Undo could put an old copy of a patch back over newer work, so takes generated in between vanished from the patch. It now only goes back as far as it safely can.[/*]
+[*]Takes adopted from the WAV + LIP folder or imported from a .fuz were skipped by later exports unless Overwrite was on.[/*]
+[*]Changing the output folder of an NPC Revoice, Voiced Books or Player Grunts project could make the next export delete or overwrite files in the new folder.[/*]
+[*]A missing FonixData.cdf was only noticed after the audio had been paid for. It's now checked before anything is generated.[/*]
+[*]Plus lots of smaller fixes, mostly in dialogs and keyboard shortcuts.[/*]
+[/list]
+
+The user guide (F1) and the PDF are updated with everything above. As always, DM me or find me on the DBVO Discord if something breaks.

@@ -1,0 +1,24 @@
+import { start } from './bridge.mjs';
+import { OUT, sleep } from './shots_common.mjs';
+const s = await start({ width: 1600, height: 940, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html');
+const errs = []; page.on('pageerror', (e) => errs.push(e.message)); page.on('console', (m) => { if (m.type() === 'error' || /REGEN|GEN|MARK/.test(m.text())) errs.push(m.text()); });
+await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const go = async (v, p) => { await page.evaluate(([v, p]) => import('/app.js').then((m) => m.go(v, p)), [v, p]); await sleep(1500); };
+const st = await rpc('state', {});
+const rl = await rpc('revoice.list', {}); const pt = rl[0];
+await go('revoice', { id: pt.id }); await page.click('.view-head button:has-text("Lines")').catch(()=>{}); await sleep(1200);
+const row = page.locator('.vgrid .vrow:has(.icon-bar .act-btn:first-child:not([disabled]))').nth(1);
+const inp = row.locator('input[type=text]');
+const key = await row.getAttribute('data-key');
+const before = (await rpc('revoice.get', { id: pt.id })).lines.find((l) => l.id === key);
+await inp.click(); await page.keyboard.press('End'); await page.keyboard.type(' again');
+await row.locator('.icon-bar .act-btn').first().click();
+const spin = [];
+for (let i = 0; i < 40; i++) { spin.push((await page.locator(`.vgrid .vrow[data-key="${key}"] .act-btn.spinning`).count()) + '' + (await page.locator(`.vgrid .vrow[data-key="${key}"].flash-done`).count())); await sleep(100); }
+await sleep(1000);
+const after = (await rpc('revoice.get', { id: pt.id })).lines.find((l) => l.id === key);
+console.log('rowkey', key, 'spin', spin.join(' '), 'takes', before && before.takes.length, '->', after && after.takes.length, 'spoken', after && after.spoken);
+console.log('errs', errs.join(' | '));
+await s.close(); process.exit(0);

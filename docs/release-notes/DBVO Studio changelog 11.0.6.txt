@@ -1,0 +1,2 @@
+Version 11.0.6
+- FOMOD BSA option: file names with ’ “ ” … – — and the other Windows-1252 characters now go into the BSA. Since 10.1.5 the archive could store them, but the build still left them as loose files next to it. Only names Windows-1252 cannot hold (Cyrillic, Greek and the like) stay loose.

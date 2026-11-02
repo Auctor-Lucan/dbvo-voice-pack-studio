@@ -1,0 +1,27 @@
+import { start } from '../bridge.mjs';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const s = await start({ width: 1400, height: 900, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const st = await rpc('state', {});
+const M = st.mods.find((m) => m.name === 'Skyrim');
+const mod = await rpc('mod.get', { id: M.id });
+const pl = mod.plugins[0];
+const vis = pl.lines.filter((l) => l.status !== 'Removed' && l.kind === 'Valid').slice(0, 3);
+await rpc('line1.update', { modId: mod.id, plugin: pl.fileName, key: vis[0].key, action: 'setFinal', value: 'Hello there friend.' });
+await page.evaluate((id) => import('/app.js').then((m) => m.go('mod', { id })), M.id); await sleep(1500);
+await page.getByText('Proofread…').click(); await sleep(500);
+await page.getByRole('button', { name: 'Start →' }).click(); await sleep(300);
+// save the nbsp line untouched
+await page.keyboard.press('Control+Enter'); await sleep(500);
+const m2 = await rpc('mod.get', { id: M.id });
+const l0 = m2.plugins[0].lines.find((l) => l.key === vis[0].key);
+console.log('after untouched save:', JSON.stringify(l0.final), 'has nbsp:', l0.final.includes(' '));
+await page.keyboard.press('Escape'); await sleep(400);
+const chip = async () => page.evaluate(() => { const c = document.querySelector('.busy-chip'); return c ? (c.classList.contains('hidden') ? 'hidden' : c.textContent) : 'none'; });
+console.log('dialog open?', await page.locator('.pr-step').count(), 'chip after close', await chip());
+await sleep(3000);
+console.log('chip 3s after close', await chip());
+await rpc('line1.update', { modId: mod.id, plugin: pl.fileName, key: vis[0].key, action: 'revert' });
+await rpc('line1.update', { modId: mod.id, plugin: pl.fileName, key: vis[0].key, action: 'unproofread' });
+process.exit(0);

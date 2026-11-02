@@ -1,0 +1,10 @@
+import { start } from './bridge.mjs';
+const s = await start({ width: 1200, height: 800, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)).catch((e) => 'ERR ' + e.message), [m, p]);
+const list = await rpc('grunts.list', {});
+const pr = list.find((x) => x.name === 'Reverb test');
+const d = await rpc('grunts.get', { id: pr.id });
+const l = d.events.flatMap((e) => e.lines)[0];
+console.log('RESULT', JSON.stringify(await rpc('grunts.transcribe', { id: pr.id, lineId: l.id })));
+await s.close(); process.exit(0);

@@ -1,0 +1,4 @@
+Version 11.0.4
+- The unpacked installer now sits right next to its archive, with the same name: <release folder>\<name version>, beside <name version>.zip. No extra folder level, so the paths stay as short as they can for the long names of Legacy .fuz files, and it's the folder you'd zip by hand.
+- That folder is replaced at each build only when it's an installer DBVO Studio built. A folder of that name holding anything else, or your own FOMOD files, stops the build with a message instead.
+- Old _staging and Unpacked installers folders can be deleted; builds never copy them into the installer.

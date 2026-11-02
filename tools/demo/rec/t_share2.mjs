@@ -1,0 +1,14 @@
+import { start } from './bridge.mjs';
+import { sleep } from './shots_common.mjs';
+const s = await start({ width: 1400, height: 900, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards'); await page.evaluate(() => localStorage.setItem('dbvo:seen:tags-context', 'true'));
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const st = await rpc('state', {}); const P = st.patches.find((x) => x.name === 'Skyrim');
+const np = await rpc('patch.create', { name: 'Skyrim copy', voicePackId: P.voicePackId, modIds: P.modIds, kind: 'tts', sourceFolders: [] });
+console.log(JSON.stringify(await rpc('patch.sharedFiles', { id: P.id })));
+await page.evaluate((id) => import('/app.js').then((m) => m.go('patch', { id })), P.id); await sleep(3000);
+console.log('banner', await page.locator('.banner:has-text("Same files")').count());
+await page.click('.banner:has-text("Same files") .banner-x'); await sleep(300);
+console.log('after x', await page.locator('.banner:has-text("Same files")').count());
+for (const x of (await rpc('state', {})).patches.filter((x) => x.name === 'Skyrim copy')) await rpc('patch.delete', { id: x.id });
+process.exit(0);

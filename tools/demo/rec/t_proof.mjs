@@ -1,0 +1,50 @@
+import { start } from './bridge.mjs';
+import { spawn } from 'child_process';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const O = process.env.OUTP;
+const s = await start({ width: 1400, height: 900, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const st = await rpc('state', {});
+const mods = await rpc('mods.list', {}).catch(() => null);
+console.log('mods', JSON.stringify((mods || st.mods || []).map((m) => m.name || m.id)).slice(0, 300));
+const M = (mods || st.mods).find((m) => m.name === 'Skyrim');
+const mod = await rpc('mod.get', { id: M.id });
+const pl = mod.plugins[0];
+const typos = ['They say attractive people seem more trustworty, after all.', 'Will killing some bandits will make you feel better?', 'Dont worry <Alias=Player>, I\'ll handle it myself.', 'Khajiit does not like this place.', 'Dibella is the often called the Lady of Love.'];
+const vis = pl.lines.filter((l) => l.status !== 'Removed' && l.kind === 'Valid').slice(0, typos.length);
+for (let i = 0; i < vis.length; i++) await rpc('line1.update', { modId: mod.id, plugin: pl.fileName, key: vis[i].key, action: 'setFinal', value: typos[i] });
+await page.evaluate((id) => import('/app.js').then((m) => m.go('mod', { id })), M.id); await sleep(1500);
+await page.getByText('Proofread…').click(); await sleep(500);
+await page.screenshot({ path: `${O}/pr1_setup.png` });
+await page.getByRole('button', { name: 'Start →' }).click(); await sleep(300);
+await page.screenshot({ path: `${O}/pr2_wait.png` });
+await sleep(1200);
+await page.screenshot({ path: `${O}/pr3_sugg.png` });
+console.log('line1 text:', await page.locator('.pr-edit').textContent());
+// accept with Alt+A, then Ctrl+Enter
+await page.keyboard.press('Alt+a'); await sleep(200);
+await page.screenshot({ path: `${O}/pr4_accepted.png` });
+await page.keyboard.press('Control+Enter'); await sleep(600);
+console.log('after save line:', await page.locator('.pr-edit').textContent(), '|', await page.locator('.pr-step .modal-head .dim').textContent());
+await page.screenshot({ path: `${O}/pr5_next.png` });
+// type in the editor, check tags can't be deleted
+for (let i = 0; i < 3; i++) { await page.keyboard.press('Control+Enter'); await sleep(500); const t = await page.locator('.pr-edit').textContent(); console.log('step', i, t); if (t.includes('Alias')) break; }
+await page.screenshot({ path: `${O}/pr6_tag.png` });
+await page.locator('.pr-edit').click(); await page.keyboard.press('End');
+for (let i = 0; i < 40; i++) await page.keyboard.press('Backspace');
+console.log('after 40 backspaces:', await page.locator('.pr-edit').textContent());
+await page.screenshot({ path: `${O}/pr7_backspace.png` });
+await page.keyboard.press('Control+a'); await page.keyboard.type('Replaced all');
+console.log('after select-all type:', await page.locator('.pr-edit').textContent());
+await page.keyboard.press('Alt+ArrowLeft'); await sleep(300);
+console.log('back:', await page.locator('.pr-step .modal-head .dim').textContent());
+await page.keyboard.press('Escape'); await sleep(600);
+await page.screenshot({ path: `${O}/pr8_summary.png` });
+const m2 = await rpc('mod.get', { id: M.id });
+const p2 = m2.plugins[0];
+console.log('proofread flags:', p2.lines.filter((l) => l.proofread).map((l) => l.key + '=' + l.final).join(' | '));
+// restore
+for (const l of vis) await rpc('line1.update', { modId: mod.id, plugin: pl.fileName, key: l.key, action: 'revert' });
+for (const l of p2.lines.filter((l) => l.proofread)) await rpc('line1.update', { modId: mod.id, plugin: pl.fileName, key: l.key, action: 'unproofread' });
+process.exit(0);

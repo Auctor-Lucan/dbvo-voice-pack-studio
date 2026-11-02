@@ -9,3 +9,13 @@ TestResults/
 *.tmp
 # Never commit third-party mod plugins or game files used for local testing
 testdata/private/
+# Demo harness (tools/demo) and PDF build (tools/pdf): generated copies and outputs
+tools/demo/src/
+tools/demo/tests/
+tools/demo/rec/*.png
+tools/demo/rec/*.log
+tools/demo/shots/
+tools/demo/svc/__pycache__/
+tools/pdf/img/
+tools/pdf/*.pdf
+tools/pdf/guide-print.html

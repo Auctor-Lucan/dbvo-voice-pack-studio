@@ -1,0 +1,31 @@
+import { start } from './bridge.mjs';
+import { sleep } from './driver.mjs';
+const s = await start(); const { page } = s;
+const until = (fn, t = 120000) => page.waitForFunction(fn, null, { timeout: t, polling: 200 });
+const ok = async () => { await page.click('#modal .btn.primary').catch(() => {}); await sleep(500); };
+const go = async (v, p) => { await page.evaluate(([v, p]) => import('/app.js').then((m) => m.go(v, p)), [v, p]); await sleep(1300); };
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-checks');
+// 1. set it in the UI, as a user would
+await go('settings', { tab: 'voices' });
+const row = page.locator('.srow:has(.lbl > span:text-is("Soften peaks"))');
+await row.locator('button:text-is("Standard")').click();
+await sleep(1500);
+await go('home');
+await go('settings', { tab: 'voices' });
+console.log('after reload, Standard is on:', await page.locator('.srow:has(.lbl > span:text-is("Soften peaks")) button.on').innerText());
+// 2. generate takes with that voice pack
+await go('mods');
+const G = 'D:\\SteamLibrary\\steamapps\\common\\Skyrim Special Edition\\Data\\';
+const pl = ['Skyrim.esm'];
+s.dropNext(pl.map((p) => G + p));
+await page.evaluate((names) => { const dt = new DataTransfer(); for (const n of names) dt.items.add(new File(['x'], n)); (document.querySelector('.view-body') || document.body).dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt })); }, pl);
+await page.waitForSelector('table.batch');
+await page.click('button:has-text("Create mods and import")'); await page.waitForSelector('text=Mods added'); await ok();
+await page.click('.pcard:has-text("Skyrim")'); await page.waitForSelector('.vrow');
+await page.click('button:has-text("Continue to Phase 2")'); await sleep(800); await page.click('#modal button:has-text("Continue anyway")').catch(() => {});
+await page.waitForSelector('button:has-text("Generate options")');
+await page.click('button:has-text("Generate options")'); await page.click('.gen-pop .gen-item:has-text("Missing")'); await sleep(600); await ok();
+await until(() => document.querySelector('#job')?.classList.contains('hidden')); await sleep(800);
+console.log('S icons on rows:', await page.locator('.fx-s').count(), 'rows:', await page.locator('.vrow').count());
+await s.close(); process.exit(0);

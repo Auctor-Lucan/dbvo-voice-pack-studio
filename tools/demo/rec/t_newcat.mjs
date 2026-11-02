@@ -1,0 +1,18 @@
+import { start } from './bridge.mjs';
+import { sleep } from './shots_common.mjs';
+const s = await start({ width: 1400, height: 900, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html');
+await page.waitForSelector('.home-cards');
+const go = async (v, p) => { await page.evaluate(([v, p]) => import('/app.js').then((m) => m.go(v, p)), [v, p]); await sleep(1200); };
+await go('mods', {});
+await page.click('button:has-text("+ New mod")'); await sleep(400);
+await page.fill('#modal input >> nth=0', 'DaC0da by Vicn');
+await page.selectOption('#modal select', '__new'); await sleep(400);
+console.log('prompt', await page.locator('#modal h2').innerText());
+await page.fill('#modal input', 'DLCs'); await page.click('#modal button:has-text("OK")'); await sleep(600);
+console.log('back', await page.locator('#modal h2').innerText(), 'name', await page.inputValue('#modal input >> nth=0'), 'cat', await page.inputValue('#modal select'));
+await page.click('#modal button:has-text("Create")'); await sleep(1500);
+const st = await page.evaluate(() => import('/lib.js').then((l) => l.rpc('state', {})));
+console.log('cats', st.settings.categories.join(','), 'mod', JSON.stringify(st.mods.find((m) => m.name.startsWith('DaC0da'))?.category));
+await page.screenshot({ path: process.env.OUTP + '/newcat.png' });
+process.exit(0);

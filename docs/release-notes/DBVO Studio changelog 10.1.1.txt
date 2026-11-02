@@ -1,0 +1,2 @@
+Version 10.1.1
+- AI auto-tagging and Proofread lines: newer Claude models (such as claude-haiku-5-5) refused every request with "`temperature` is deprecated for this model". DBVO Studio now asks again without that setting and remembers it for that model.

@@ -1,0 +1,28 @@
+import fs from 'node:fs';
+import { boot, shooter, sleep } from './shots_common.mjs';
+fs.mkdirSync('/srv/dbvo/D/Pictures', { recursive: true }); fs.copyFileSync('../assets/Dusk mountains.jpg', '/srv/dbvo/D/Pictures/Dusk mountains.jpg');
+const s = await boot(); const { page } = s; const S = shooter(page);
+const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+await page.waitForSelector('.home-quote');
+await page.click('[data-section="settings"]'); await sleep(600);
+await page.click('.nav-item:has-text("General & tools")'); await sleep(400);
+s.pick('D:\\Pictures\\Dusk mountains.jpg'); await sleep(200);
+await page.click('button:has-text("Choose image…")'); await sleep(1500);
+console.log('html class:', await page.evaluate(() => document.documentElement.className));
+await S.el('bg-appearance', '.section:has(h2:text-is("Appearance"))');
+await S.full('bg-settings');
+await page.click('#brand'); await page.waitForSelector('.home-quote'); await sleep(1500); await S.full('bg-home');
+await page.click('[data-section="mods"]'); await sleep(1200); await S.full('bg-mods');
+await page.click('[data-section="patches"]'); await sleep(1200); await S.full('bg-patches');
+await page.click('.prow >> nth=0').catch(() => {}); await sleep(1500); await S.full('bg-patch');
+await page.click('[data-section="fomods"]'); await sleep(1200); await S.full('bg-fomods');
+await page.click('#tools-btn'); await sleep(400); await page.click('text=Replace NPC voice files in any mod'); await sleep(1200); await S.full('bg-revoices');
+await page.click('#tools-btn'); await sleep(400); await page.click('text=Whisper listens to WAV files'); await sleep(1200); await S.full('bg-wavlip');
+await page.click('[data-section="help"]'); await sleep(1500); await S.full('bg-help');
+// plain look again
+await page.click('[data-section="settings"]'); await sleep(600); await page.click('.nav-item:has-text("General & tools")'); await sleep(400);
+await page.click('.section:has(h2:text-is("Appearance")) button:has-text("Reset")'); await sleep(1000);
+await page.click('#tools-btn'); await sleep(400); await page.click('text=Whisper listens to WAV files'); await sleep(1200); await S.full('plain-wavlip');
+await page.click('#brand'); await sleep(1200); await S.full('plain-home');
+console.log('html class after reset:', await page.evaluate(() => document.documentElement.className), 'errors:', errs);
+process.exit(0);

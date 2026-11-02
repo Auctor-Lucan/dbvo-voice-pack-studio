@@ -1,0 +1,25 @@
+import { start } from './bridge.mjs';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const s = await start({ width: 1400, height: 900, scale: 1 }); const { page } = s;
+await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards');
+const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
+const st = await rpc('state', {}); const M = st.mods.find((m) => m.name === 'Skyrim');
+const pl = (await rpc('mod.get', { id: M.id })).plugins[0];
+const vis = pl.lines.filter((l) => l.status !== 'Removed' && l.kind === 'Valid');
+// typos on lines 1 and 6; lines 2-5 are fine
+await rpc('line1.update', { modId: M.id, plugin: pl.fileName, key: vis[0].key, action: 'setFinal', value: 'Dont go there.' });
+await rpc('line1.update', { modId: M.id, plugin: pl.fileName, key: vis[5].key, action: 'setFinal', value: 'They say attractive people seem more trustworty.' });
+await page.evaluate((id) => import('/app.js').then((m) => m.go('mod', { id })), M.id); await sleep(1500);
+await page.getByText('Proofread…').click(); await sleep(500);
+await page.getByRole('button', { name: 'Start →' }).click(); await sleep(1800);
+console.log('first:', await page.locator('.pr-edit').textContent());
+await page.keyboard.press('Alt+a'); await sleep(100); await page.keyboard.press('Control+Enter'); await sleep(1500);
+console.log('after save:', await page.locator('.pr-edit').textContent(), '|', await page.locator('.pr-step .modal-head .dim').textContent());
+await page.locator('.pr-edit').click(); await page.keyboard.press('End'); await page.keyboard.type('; [laughs]'); await sleep(600);
+console.log('rule warning:', (await page.locator('.pr-step .banner.bad').textContent().catch(() => 'none')).slice(0, 120));
+await page.keyboard.press('Escape'); await sleep(800);
+const p2 = (await rpc('mod.get', { id: M.id })).plugins[0];
+for (const l of [vis[0], vis[5]]) await rpc('line1.update', { modId: M.id, plugin: pl.fileName, key: l.key, action: 'revert' });
+for (const l of p2.lines.filter((l) => l.proofread)) await rpc('line1.update', { modId: M.id, plugin: pl.fileName, key: l.key, action: 'unproofread' });
+await rpc('line1.update', { modId: M.id, plugin: pl.fileName, key: vis[5].key, action: 'revert' });
+process.exit(0);

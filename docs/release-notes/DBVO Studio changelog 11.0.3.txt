@@ -1,0 +1,3 @@
+Version 11.0.3
+- FOMOD editor: a note at the top of Installer & info.xml says plainly that your edits are saved in DBVO Studio, not in your FOMOD folder, and that Build ▾ writes the installer with your changes. Zipping your own FOMOD folder by hand would ship the old ModuleConfig.xml. The "Saved ✓" tooltip says the same.
+- "Stage only" is now "Build without packing", and the build's folder is called Unpacked installers (<release folder>\Unpacked installers\<name version>) instead of _staging. To zip it yourself with 7-Zip, select everything inside that folder so fomod is at the archive's root; the "FOMOD built" window says so. An old _staging folder can be deleted; builds never copy it into the installer.

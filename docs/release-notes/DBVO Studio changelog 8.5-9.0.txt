@@ -1,0 +1,29 @@
+Version 9.0.0
+- New: Edit take. Open any take in a small waveform editor to cut out a doubled word, trim, silence, fade or change the gain. If Whisper is set up, the words are marked under the waveform, so you can click one to select it. Saving makes a new .lip from the line's text and puts the take's post-processing back on. Works in Phase 2, the Voice Changer, NPC Revoice and Voiced Books.
+- New: Leading tags as context. The [tags] at the start of a line can be sent to ElevenLabs as context instead of as part of the line. Context isn't counted against your credits, and short lines stop doubling their words. Tags come through a little weaker that way, so phrase them stronger, e.g. [British Extremely Baleful] instead of [British Baleful]. On by default for new patches (Global Settings > General & tools), each patch can change it under Output. Existing patches are left as they were.
+- New: Noise-reduced pauses. Removes low rumble and turns down noise in the pauses, leaving the voice alone. A voice pack setting for new takes, and in Post-processing for takes you already have. The original take is kept, so it can be taken off again.
+- New: Soften peaks. Tames sharp peaks in a take without touching the rest. In Phase 2, NPC Revoice, Voiced Books and Player Grunts, as a voice pack setting or per take from the new Post-processing menus. Check takes also flags sharp peaks.
+- Credits: Check before spending credits shows the characters actually sent (with your pronunciation rules applied) and the credits at the model's current rate, and the takes window shows what ElevenLabs actually billed for each take.
+- Credits: a missing FonixData.cdf is now caught before anything is generated. Before, it was only noticed after each line's audio had been paid for.
+- Credits: Stop generating keeps the lines whose audio had already come back, since it was paid for. Lines that hadn't started keep their earlier take and status.
+- Credits: double-clicking Generate in the Voiced Books editor could start the generation twice. Fixed.
+- Voice packs can have a standard voice per engine, and you're warned before generating with a different one. A voice pack that patches or FOMODs still use can no longer be deleted; Studio says which ones use it, and makes a backup before deleting.
+- Lines: a mod update or a Phase 1 edit that changes a line's text keeps your work on it, even before it has a take. Your tags go on the new text, Exclude and flags stay, and words you changed yourself are kept and marked "changed" so you can check them.
+- Lines: imported WAVs get the voice pack's tail trim and fade, unless they already end in silence. The .fuz import banner can be hidden per patch, and Import has an option for the .fuz files in a patch's final folder.
+- Lines: Check takes called clips shorter than 0.4 s too quiet. Fixed.
+- Grid: post-processing icons have their own PP column, Edit take has a wrench column, every column can be dragged to a new spot by its title, and the icon columns can be resized.
+- Grid: new "All non-omitted" and "Imported .fuz" filters (imported takes also get a fuz mark), and Takes > Delete all takes of omitted lines.
+- Grid: the bulk tag window shows your voice pack's tags to click and a side panel with the lines it will change, and the search box lights up while a search is active.
+- Lists: finished patches, mods and projects shrink to small chips, empty categories take one line, and there's an All / Work left / Complete filter. Startup is faster when you have many patches.
+- Lists: dragging things inside the app (Phase 2 categories, Phase 3 options) shows what you're dragging and where it will land.
+- Lists: picking "+ New category..." while creating a mod made the New mod window vanish without creating the mod. Fixed.
+- Exports: a take is written again when its audio has changed since the last export (post-processing added or removed, or an edit saved over it). Before, those takes were skipped unless Overwrite was on, so some exported files could be out of date. The first export after updating rewrites takes with post-processing once.
+- Exports: lines whose take was adopted from the WAV + LIP folder or imported from a .fuz were skipped by later exports, even after you made a new take, unless Overwrite was on. Fixed.
+- Exports: when two patches export files with the same names to the same place, the patch page says so (with a × to hide it), and one patch never removes the other's files as leftovers.
+- Exports: exported WAV + LIP files are dated when they're exported, so they sort to the top in Explorer. Folders & options lists the patch's mods in a dropdown.
+- FOMOD: Add DBVO Patches can place them above or below the option you picked. With Pack as BSA, files whose names have letters a BSA can't store (Cyrillic, Greek, ł and so on) are installed as loose files next to the archive instead of going silent in game.
+- Other Tools: after changing the output folder of an NPC Revoice, Voiced Books or Player Grunts project, the next export could delete or overwrite files with the same names in the new folder. Fixed.
+- Other Tools: a book that failed to join during a Voiced Books export lost its earlier audio. Fixed. NPC Revoice also has a more compact Setup page.
+- Undo: Undo could put an old copy of a patch back over work done after that step, so takes generated in between vanished from the patch (their files and credits were still spent). Undo now only goes back as far as it safely can, and deleting or merging takes is no longer an undo step.
+- User guide and PDF brought up to date.
+- Lots of smaller bug fixes, mostly in dialogs and keyboard shortcuts.
