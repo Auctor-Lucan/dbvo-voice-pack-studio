@@ -275,7 +275,7 @@ second line</description>
         Assert.True(File.Exists(Path.Combine(res.Staging, "Vamp - Inigo", "Sound", "DBVO", "vampira", "Hello.fuz")));
         using var zip = System.IO.Compression.ZipFile.OpenRead(res.Archive!);
         Assert.Contains(zip.Entries, e => e.FullName == "fomod/ModuleConfig.xml");
-        Assert.DoesNotContain(zip.Entries, e => e.FullName.Contains("_staging"));
+        Assert.DoesNotContain(zip.Entries, e => e.FullName.Contains(FomodService.UnpackedFolder));
         // building again over an existing archive and staging works
         var again = await svc.BuildAsync(p, NamingMode.Legacy, true);
         Assert.True(File.Exists(again.Archive));

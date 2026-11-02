@@ -212,7 +212,8 @@ on('jobDone', async (d) => {
     if (!d.ok) { toast(d.message || 'FOMOD build failed.', true); return; }
     const r = d.report;
     const v = await modal('FOMOD built', [
-      h('div.kv', h('div', 'Files staged'), h('div', r.files), r.bsas ? [h('div', 'BSA archives packed'), h('div', r.bsas)] : null, h('div', 'Staging folder'), h('div', pathText(r.staging)), h('div', 'Archive'), h('div', r.archive && pathText(r.archive) || '— (staged only)')),
+      h('div.kv', h('div', 'Files in the installer'), h('div', r.files), r.bsas ? [h('div', 'BSA archives packed'), h('div', r.bsas)] : null, h('div', 'Unpacked installer'), h('div', pathText(r.staging)), h('div', 'Archive'), h('div', r.archive && pathText(r.archive) || '— (not packed)')),
+      r.archive ? null : h('div.faint', 'To zip it yourself: open the unpacked installer folder, select everything inside it (fomod and the rest, not the folder itself) and add that to an archive with 7-Zip.'),
       r.warnings && r.warnings.length ? h('div.banner.warn', { style: { margin: 0 } }, h('ul', r.warnings.slice(0, 20).map((x) => h('li', x)))) : null,
     ], [{ label: 'Open folder', value: 'open' }, { label: 'OK', primary: true, value: true }]);
     if (v === 'open') rpc('open.path', { path: r.archive || r.staging });

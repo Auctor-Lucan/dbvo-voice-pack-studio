@@ -576,6 +576,9 @@ public sealed class FomodService
 
     // ------------------------------------------------------------------ build and package
 
+    /// <summary>The folder in the release folder that holds each finished, unpacked installer (what gets zipped).</summary>
+    public const string UnpackedFolder = "Unpacked installers";
+
     /// <summary>
     /// Stage the installer (fomod\ files, every option's files hardlinked, images, the DBVO JSON) and pack it.
     /// Sources outside the FOMOD root are copied in under _external\&lt;option&gt;\.
@@ -586,9 +589,9 @@ public sealed class FomodService
         if (!Path.IsPathRooted(p.ReleaseFolder)) throw new InvalidOperationException("The release folder must be a full path, such as D:\\DBVO\\Releases.");
         var res = new BuildResult();
         var archiveBase = SafeName($"{(string.IsNullOrWhiteSpace(p.Info.Name) ? p.Name : p.Info.Name)}{(string.IsNullOrWhiteSpace(p.Info.Version) ? "" : " " + p.Info.Version)}");
-        var staging = Path.Combine(p.ReleaseFolder, "_staging", archiveBase);
+        var staging = Path.Combine(p.ReleaseFolder, UnpackedFolder, archiveBase);
         void Step(string what) => progress?.Report(new GenerationProgress(0, 0, 0, null, what));
-        if (Directory.Exists(staging)) { Step("Removing the previous staging folder"); await Task.Run(() => Directory.Delete(staging, true), ct); }
+        if (Directory.Exists(staging)) { Step("Removing the previous unpacked installer"); await Task.Run(() => Directory.Delete(staging, true), ct); }
         Directory.CreateDirectory(Path.Combine(staging, "fomod"));
         res.Staging = staging;
 
@@ -708,12 +711,14 @@ public sealed class FomodService
         // (a release folder inside the FOMOD root would otherwise be copied into itself).
         // Only the build's own output is skipped: the _staging folder and archives being written (the release
         // folder may well be the FOMOD root itself).
-        var stagingRoot = Path.GetFullPath(Path.Combine(p.ReleaseFolder, "_staging")).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var stagingRoot = Path.GetFullPath(Path.Combine(p.ReleaseFolder, UnpackedFolder)).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        // The folder builds before 11.0.3 used, never copied in either.
+        var oldStagingRoot = Path.GetFullPath(Path.Combine(p.ReleaseFolder, "_staging")).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var ownArchives = new[] { ".zip", ".7z" }.Select(x => Path.GetFullPath(Path.Combine(p.ReleaseFolder, archiveBase + x))).ToHashSet(StringComparer.OrdinalIgnoreCase);
         bool InRelease(string f)
         {
             var full = Path.GetFullPath(f);
-            return full.StartsWith(stagingRoot, StringComparison.OrdinalIgnoreCase) || full.EndsWith(".part", StringComparison.OrdinalIgnoreCase) || ownArchives.Contains(full);
+            return full.StartsWith(stagingRoot, StringComparison.OrdinalIgnoreCase) || full.StartsWith(oldStagingRoot, StringComparison.OrdinalIgnoreCase) || full.EndsWith(".part", StringComparison.OrdinalIgnoreCase) || ownArchives.Contains(full);
         }
         Step("Listing the files to install");
         var pairs = new List<(string from, string to)>();
@@ -740,7 +745,7 @@ public sealed class FomodService
                 res.Files++;
             }
             if (++done % 25 == 0 || done == pairs.Count)
-                progress?.Report(new GenerationProgress(done, pairs.Count, 0, Path.GetFileName(from), "Staging files"));
+                progress?.Report(new GenerationProgress(done, pairs.Count, 0, Path.GetFileName(from), "Putting the installer together"));
         }
         for (int b = 0; b < bsaJobs.Count; b++)
         {

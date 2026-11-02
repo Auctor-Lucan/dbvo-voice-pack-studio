@@ -106,7 +106,7 @@ export async function fomodView(id) {
   const voice = app.state.voicePacks.find((v) => v.id === proj.voicePackId);
   let selKey = store.get('fomodSel:' + id, 'project');
   const collapsed = store.get('fomodCollapsed:' + id, {});
-  const savedEl = h('span.saved.ok', 'Saved ✓');
+  const savedEl = h('span.saved.ok', { title: 'Saved in DBVO Studio. Your FOMOD folder (and its ModuleConfig.xml) is not changed: Build ▾ writes the finished installer, with the new XML, to the release folder (Unpacked installers).' }, 'Saved ✓');
 
   const view = h('div.view.work');
   const head = h('div.view-head');
@@ -199,10 +199,10 @@ export async function fomodView(id) {
   };
 
   function renderHead() {
-    const build = h('button.btn.primary', { title: 'Stage the installer and pack the archive' }, 'Build ▾');
+    const build = h('button.btn.primary', { title: 'Write the finished installer, packed or as a folder' }, 'Build ▾');
     build.addEventListener('click', () => popupMenu(build, [
-      { label: `Build and pack .${proj.archiveFormat}`, sub: `Stages everything, then writes the archive to ${proj.releaseFolder || '(set the release folder)'}`, onclick: () => runBuild(true) },
-      { label: 'Stage only', sub: 'Builds the installer folder without packing, to check it or test it in MO2 / Vortex', onclick: () => runBuild(false) },
+      { label: `Build and pack .${proj.archiveFormat}`, sub: `Puts the installer together, then writes the archive to ${proj.releaseFolder || '(set the release folder)'}`, onclick: () => runBuild(true) },
+      { label: 'Build without packing', sub: `Writes the finished installer as a folder (new XML included) to ${proj.releaseFolder ? proj.releaseFolder + '\\Unpacked installers' : '(set the release folder)'}: test it in MO2 / Vortex, or zip it yourself with 7-Zip`, onclick: () => runBuild(false) },
     ]));
     clear(head).append(
       h('button.btn.ghost.sm', { title: 'Back to the list of FOMOD projects', onclick: () => go('fomods') }, '← FOMODs'),
@@ -397,11 +397,15 @@ export async function fomodView(id) {
       return h('div.path-input', el, h('button.btn.sm', { onclick: async () => { const f = await rpc('pick.folder', { title }); if (f) { el.value = f; proj[key] = f; changed(); refreshSummary(); } } }, 'Browse'));
     };
     const main = h('div.fomod-main',
+      h('div.banner.info', { style: { margin: '0 0 12px' } }, h('div',
+        h('b', 'Your edits are saved in DBVO Studio, not in your FOMOD folder. '),
+        'The ModuleConfig.xml there stays as it was. To get the installer with your changes, use ', h('b', 'Build ▾'), ': it writes the finished installer as a folder to ',
+        h('span.mono', (proj.releaseFolder || '<release folder>') + '\\Unpacked installers\\'), ', and Build and pack also zips it for you. Zipping your FOMOD folder by hand would ship the old installer.')),
       sec('Installer', null, h('div.scards',
         card('Project name', 'Only shown in this app.', txt(proj, 'name', { after: renderHead })),
         card('Title in the installer', 'moduleName in ModuleConfig.xml: the big title MO2 and Vortex show above every page.', txt(proj, 'moduleName')),
         card('FOMOD root folder', 'The folder that holds your patch folders and images. Relative file sources start here.', pathIn('rootFolder', 'FOMOD root folder')),
-        card('Release folder', 'The packed archive is written here, named from the mod name and version.', pathIn('releaseFolder', 'Release folder')),
+        card('Release folder', 'The archive is written here, named from the mod name and version; the unpacked installer goes in its Unpacked installers folder.', pathIn('releaseFolder', 'Release folder')),
         h('div.scards3.wide',
           card('Archive', '.zip needs nothing; .7z uses 7-Zip (Global Settings) and is usually smaller.', segmented([['zip', '.zip'], ['7z', '.7z']], proj.archiveFormat, (x) => { proj.archiveFormat = x; changed(); renderEditor(); renderHead(); })),
           card('Voice files', 'Loose files: thousands of .fuz files, as before. BSA: each option installs one archive plus the plugin that loads it (its DBVO Fix plugin, or a small empty light plugin), which installs faster and keeps the Data folder tidy. The option must be active in the load order for the game to read the BSA.',
