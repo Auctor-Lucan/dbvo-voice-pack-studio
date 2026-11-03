@@ -1,0 +1,4 @@
+Version 11.0.10
+- FOMOD: a folder with no files in it is left out of the installer. An archive can't hold an empty folder, so an installer that listed one made MO2 and Vortex report it missing and stop (as with the four CC options). It's named in the build report.
+- Validate warns about each empty folder, and the Build summary counts them, so you see it before releasing.
+- Options linked to a DBVO Patch no longer get a Sound folder that exists but is empty (a mod with only a DBVO Fix plugin). A folder not built yet is still listed, and Validate says to build the .fuz files.
