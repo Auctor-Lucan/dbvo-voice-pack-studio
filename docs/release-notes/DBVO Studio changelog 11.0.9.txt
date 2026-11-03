@@ -1,0 +1,6 @@
+Version 11.0.9
+- Overwrite now overwrites. With Overwrite on (Phase 2, Folders & options), every WAV + LIP and .fuz file already in the destination is replaced at each export, including files the patch wrote itself. Before, a file the patch had written was skipped whenever its line kept the same take, even with Overwrite on, so a file changed or replaced by something else stayed as it was. With Overwrite off, only missing files and files of lines with a new take are written.
+- NPC Revoice: "Export .fuz files to the output folder" replaces every file already there, as it says; "keep files already there" still only adds what's missing (and lines with a new take).
+- DBVO Fix plugins: with Overwrite on, the plugins already in the final folder are listed with their dates and replaced after you confirm (Replace / Keep existing / Cancel), in case some Phase 1 edits are wrong or older than those files. With it off, they're kept.
+- New DBVO Patches start with the Overwrite switches you changed last, instead of all off.
+- The .fuz and WAV + LIP reports say why files were skipped.
