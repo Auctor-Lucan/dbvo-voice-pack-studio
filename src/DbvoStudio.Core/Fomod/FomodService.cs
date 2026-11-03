@@ -70,6 +70,8 @@ public sealed class FomodSummary
     public int VoiceFiles { get; set; }
     public int Archives { get; set; }
     public int Missing { get; set; }
+    /// <summary>Folder sources with no files in them (left out of the installer).</summary>
+    public int Empty { get; set; }
     public long Bytes { get; set; }
 }
 
@@ -131,7 +133,7 @@ public sealed class FomodService
             if (f.Kind == "folder")
             {
                 if (!Directory.Exists(path)) { s.Missing++; continue; }
-                try { foreach (var x in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)) Count(x); }
+                try { int n = 0; foreach (var x in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)) { Count(x); n++; } if (n == 0) s.Empty++; }
                 catch (IOException) { s.Missing++; } catch (UnauthorizedAccessException) { s.Missing++; }
             }
             else if (File.Exists(path)) Count(path);
@@ -214,10 +216,12 @@ public sealed class FomodService
     public List<FomodFile> FilesFor(FomodProject p, DbvoPatch patch, VoicePack voice, Mod mod)
     {
         var folder = ModContentFolder(patch, voice, mod);
-        var files = new List<FomodFile>
-        {
-            new() { Kind = "folder", Source = MakeRelative(p, Path.Combine(folder, "Sound")), Destination = "Sound", Linked = true },
-        };
+        var files = new List<FomodFile>();
+        // The Sound folder, unless it's there but empty (a mod with only a DBVO Fix plugin): an installer can't list an
+        // empty folder. Not built yet (no folder) it is listed, and Validate says to build the .fuz files.
+        var sound = Path.Combine(folder, "Sound");
+        if (!Directory.Exists(sound) || HasFiles(sound))
+            files.Add(new FomodFile { Kind = "folder", Source = MakeRelative(p, sound), Destination = "Sound", Linked = true });
         // Only DBVO Fix plugins that were written: one you deleted (or never wrote) isn't added back.
         foreach (var plugin in mod.Plugins.Where(x => x.NeedsFixPlugin && File.Exists(Path.Combine(folder, x.FixFileName))))
             files.Add(new FomodFile { Kind = "file", Source = MakeRelative(p, Path.Combine(folder, plugin.FixFileName)), Destination = plugin.FixFileName, Linked = true });
@@ -429,6 +433,8 @@ public sealed class FomodService
                         var abs = Resolve(p, f.Source);
                         bool exists = f.Kind == "folder" ? Directory.Exists(abs) : File.Exists(abs);
                         if (!exists) Add(o.PatchId != null ? "warning" : "error", where, $"Missing {f.Kind}: {f.Source}" + (o.PatchId != null ? " (build the .fuz files in Phase 2 first; until then it is left out of the installer)" : ""), o.Id);
+                        else if (f.Kind == "folder" && !string.IsNullOrWhiteSpace(f.Source) && !HasFiles(abs))
+                            Add("warning", where, $"The folder {f.Source} has no files: it is left out of the installer (MO2 and Vortex would report it missing and stop). Remove it from the option, or put its files in.", o.Id);
                         if (string.IsNullOrWhiteSpace(f.Destination) && f.Kind == "file") Add("warning", where, $"No destination for {f.Source}.", o.Id);
                     }
                 }
@@ -448,6 +454,7 @@ public sealed class FomodService
             if (string.IsNullOrWhiteSpace(f.Source)) Add("warning", "Required files", f.Kind == "folder" ? "A folder with no source installs the whole FOMOD root folder. Check that this is meant." : "A file with no source.");
             var abs = Resolve(p, f.Source);
             if (!(f.Kind == "folder" ? Directory.Exists(abs) : File.Exists(abs))) Add("error", "Required files", $"Missing {f.Kind}: {f.Source}");
+            else if (f.Kind == "folder" && !string.IsNullOrWhiteSpace(f.Source) && !HasFiles(abs)) Add("warning", "Required files", $"The folder {f.Source} has no files: it is left out of the installer.");
         }
         if (!string.IsNullOrWhiteSpace(p.ConditionalFileInstallsXml))
         {
@@ -458,7 +465,7 @@ public sealed class FomodService
                     var src = (string?)e.Attribute("source");
                     if (string.IsNullOrWhiteSpace(src)) continue;
                     var abs = Resolve(p, src);
-                    if (!(e.Name.LocalName == "folder" ? Directory.Exists(abs) : File.Exists(abs))) Add("warning", "Conditional file installs", $"Missing {e.Name.LocalName}: {src} (left out of the installer)");
+                    if (!(e.Name.LocalName == "folder" ? HasFiles(abs) : File.Exists(abs))) Add("warning", "Conditional file installs", $"{(e.Name.LocalName == "folder" && Directory.Exists(abs) ? "Folder with no files" : "Missing " + e.Name.LocalName)}: {src} (left out of the installer)");
                 }
             }
             catch (System.Xml.XmlException ex) { Add("error", "Conditional file installs", "The XML can't be read: " + ex.Message); }
@@ -473,6 +480,13 @@ public sealed class FomodService
     }
 
     // ------------------------------------------------------------------ simulated install
+
+    /// <summary>
+    /// True when a folder has at least one file somewhere inside. An archive has no entry for a folder without files,
+    /// so an installer listing one would report it missing and stop.
+    /// </summary>
+    public static bool HasFiles(string folder) =>
+        Directory.Exists(folder) && Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Any();
 
     /// <summary>The order the installer shows a list in: as listed (Explicit), or sorted by name (Ascending / Descending).</summary>
     public static IEnumerable<T> InstallerOrder<T>(IEnumerable<T> list, string? order, Func<T, string> name) => order switch
@@ -713,8 +727,10 @@ public sealed class FomodService
             {
                 if (string.IsNullOrWhiteSpace(f.Source)) return false;
                 var abs = Resolve(p, f.Source);
-                if (f.Kind == "folder" ? Directory.Exists(abs) : File.Exists(abs)) return false;
-                res.Warnings.Add($"{owner}: {f.Kind} not found, left out of the installer: {f.Source}");
+                if (f.Kind == "folder" ? HasFiles(abs) : File.Exists(abs)) return false;
+                res.Warnings.Add(f.Kind == "folder" && Directory.Exists(abs)
+                    ? $"{owner}: folder with no files, left out of the installer: {f.Source}"
+                    : $"{owner}: {f.Kind} not found, left out of the installer: {f.Source}");
                 return true;
             });
         foreach (var o in withJson.AllOptions().Where(o => !string.IsNullOrWhiteSpace(o.Image) && !File.Exists(Resolve(p, o.Image))))
@@ -808,7 +824,7 @@ public sealed class FomodService
                 if (string.IsNullOrWhiteSpace(src)) continue;
                 bool folder = e.Name.LocalName == "folder";
                 var abs = Resolve(p, src);
-                if (!(folder ? Directory.Exists(abs) : File.Exists(abs))) { res.Warnings.Add($"Conditional install: {(folder ? "folder" : "file")} not found, left out: {src}"); e.Remove(); continue; }
+                if (!(folder ? HasFiles(abs) : File.Exists(abs))) { res.Warnings.Add($"Conditional install: {(folder ? (Directory.Exists(abs) ? "folder with no files" : "folder") : "file")} {(folder && Directory.Exists(abs) ? "" : "not found, ")}left out: {src}"); e.Remove(); continue; }
                 e.SetAttributeValue("source", Map(src, "Conditional", folder));
             }
             withJson.ConditionalFileInstallsXml = cfi.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);

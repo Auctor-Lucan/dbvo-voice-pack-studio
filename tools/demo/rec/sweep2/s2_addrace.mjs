@@ -11,7 +11,7 @@ await page.evaluate(() => {
   const del = window.__deliver;
   window.__deliver = (str) => { const d = JSON.parse(str); if (slowIds.has(d.id)) { setTimeout(() => del(str), 2500); } else del(str); };
 });
-const st = await rpc('state'); const vp = st.voicePacks[0];
+const st = await rpc('state', {}); const vp = st.voicePacks[0];
 const c = await rpc('fomod.create', { voicePackId: vp.id, name: 'race', rootFolder: 'D:\\fomodroot' });
 const id = c.project.id;
 await page.evaluate((id) => import('/app.js').then((m) => m.go('fomod', { id })), id); await sleep(1200);

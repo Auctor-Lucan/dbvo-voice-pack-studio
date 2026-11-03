@@ -83,4 +83,35 @@ public class FomodSweepTests
         var r = new FomodService(new Library(Tmp()), new AppSettings()).Simulate(p, new string[0], new Dictionary<string, bool> { [b.Id] = true });
         Assert.True(r.Steps[0].Groups[0].Options.Single(x => x.Name == "B").Selected);
     }
+
+    [Fact] public async Task EmptyFolder_IsLeftOut_AndEveryXmlSourceIsInTheInstaller()
+    {
+        var root = Tmp(); var rel = Tmp();
+        Directory.CreateDirectory(Path.Combine(root, "CC", "Sound", "DBVO", "Vampira")); // empty, as the CC options had
+        File.WriteAllText(Path.Combine(root, "CC", "DBVO Fix - CC.esp"), "esp");
+        Directory.CreateDirectory(Path.Combine(root, "M", "Sound", "DBVO", "Vampira")); File.WriteAllText(Path.Combine(root, "M", "Sound", "DBVO", "Vampira", "a.fuz"), "a");
+        var p = new FomodProject { RootFolder = root, ReleaseFolder = rel, Info = new FomodInfo { Name = "E", Version = "1" } };
+        p.Json.Enabled = false;
+        p.Steps.Add(new FomodStep { Name = "s", Groups = { new FomodGroup { Name = "g", Options = {
+            new FomodOption { Name = "CC", Mode = "Optional", PatchId = "x", ModId = "y", Files = {
+                new FomodFile { Kind = "folder", Source = "CC\\Sound", Destination = "Sound", Linked = true },
+                new FomodFile { Kind = "file", Source = "CC\\DBVO Fix - CC.esp", Destination = "DBVO Fix - CC.esp", Linked = true } } },
+            new FomodOption { Name = "M", Mode = "Optional", Files = { new FomodFile { Kind = "folder", Source = "M\\Sound", Destination = "Sound" } } } } } } });
+        var svc = new FomodService(new Library(Tmp()), new AppSettings());
+        Assert.Contains(svc.Validate(p), i => i.Level == "warning" && i.Message.Contains("has no files"));
+        Assert.Equal(1, svc.Summarize(p).Empty);
+        var res = await svc.BuildAsync(p, NamingMode.Legacy, false);
+        Assert.Contains(res.Warnings, w => w.Contains("no files"));
+        // What the installer lists must be in the installer: every <folder> with files, every <file> present.
+        var mc = File.ReadAllText(Path.Combine(res.Staging, "fomod", "ModuleConfig.xml"), Encoding.Unicode);
+        var x = XDocument.Parse(mc.Substring(mc.IndexOf("<config")));
+        foreach (var e in x.Descendants().Where(d => d.Name.LocalName is "file" or "folder"))
+        {
+            var src = Path.Combine(res.Staging, e.Attribute("source")!.Value.Replace('\\', Path.DirectorySeparatorChar));
+            if (e.Name.LocalName == "file") Assert.True(File.Exists(src), "missing file " + src);
+            else Assert.True(Directory.Exists(src) && Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories).Any(), "empty or missing folder " + src);
+        }
+        Assert.DoesNotContain("CC\\Sound", mc);
+        Assert.Contains("DBVO Fix - CC.esp", mc);
+    }
 }

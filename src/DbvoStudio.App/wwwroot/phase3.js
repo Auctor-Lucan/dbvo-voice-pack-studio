@@ -479,6 +479,7 @@ export async function fomodView(id) {
         sm.archives ? row('BSA archives', String(sm.archives)) : null,
         row('Files in all', sm.files.toLocaleString()),
         row('Estimated size', sm.bytes ? '≈ ' + fmtBytes(sm.bytes) : '—', 'The files before packing. Voice files are already compressed, so the archive is about the same size.'),
+        sm.empty ? [h('div', { style: { color: 'var(--warn)' } }, 'Empty folders'), h('div.mono', { style: { color: 'var(--warn)' }, title: 'Folder sources with no files: left out of the installer (an archive can\'t hold an empty folder, and MO2 / Vortex would stop at it). Validate lists them.' }, String(sm.empty))] : null,
         sm.missing ? [h('div', { style: { color: 'var(--bad)' } }, 'Missing sources'), h('div.mono', { style: { color: 'var(--bad)' }, title: 'File or folder sources that are not on disk. Validate lists them.' }, String(sm.missing))] : null)
         : h('div.faint', 'Counting…'),
       h('div.sum-sep'),

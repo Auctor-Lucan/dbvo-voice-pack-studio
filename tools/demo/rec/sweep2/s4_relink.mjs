@@ -2,7 +2,7 @@ import { start } from '../bridge.mjs';
 const s = await start({ width: 1600, height: 950, scale: 1 }); const { page } = s;
 await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards');
 const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
-const st = await rpc('state'); const vp = st.voicePacks[0];
+const st = await rpc('state', {}); const vp = st.voicePacks[0];
 let proj = (await rpc('fomod.create', { voicePackId: vp.id, name: 'relink', rootFolder: 'D:\\fomodroot' })).project;
 proj = (await rpc('fomod.addPatches', { project: proj, patchIds: [st.patches.find((p) => p.voicePackId === vp.id).id], sort: '' })).project.project;
 const o = proj.steps.flatMap((s) => s.groups.flatMap((g) => g.options)).find((o) => o.patchId);

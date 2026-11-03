@@ -4,7 +4,7 @@ const s = await start({ width: 1600, height: 950, scale: 1 }); const { page } = 
 await page.goto('https://app.dbvo/index.html'); await page.waitForSelector('.home-cards');
 const rpc = (m, p) => page.evaluate(([m, p]) => import('/lib.js').then((l) => l.rpc(m, p)), [m, p]);
 await page.evaluate(() => { window.__jd = []; document.addEventListener('job-done', (e) => window.__jd.push(e.detail)); });
-const st = await rpc('state');
+const st = await rpc('state', {});
 const vp = st.voicePacks[0];
 const c = await rpc('fomod.create', { voicePackId: vp.id, name: 'merge ' + Date.now(), rootFolder: 'D:\\fomodroot' });
 let proj = c.project; console.log('root', proj.rootFolder, 'rel', proj.releaseFolder);

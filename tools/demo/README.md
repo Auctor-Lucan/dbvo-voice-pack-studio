@@ -19,6 +19,10 @@ OUT=/tmp/dbvo-work/f2 node v2_phases.mjs     # the Skyrim mod (same)
 node seed.mjs                                # a generated Skyrim DBVO Patch
 ```
 
+Run every script from `rec/` (`cd rec && node sweep2/s1_buildmerge.mjs`): the demo host keeps its library in
+`<current folder>/DBVO Studio`, since the container has no Documents folder. Some sweep scripts also expect a
+`D:\fomodroot` folder (`mkdir -p /srv/dbvo/D/fomodroot`).
+
 After changing the app: `sh sync.sh` again (the web UI is served straight from the repo's wwwroot; set WWW= to use
 another folder). Run a test: `cd rec && node t_click.mjs` (prints PASS/FAIL lines and a total).
 
