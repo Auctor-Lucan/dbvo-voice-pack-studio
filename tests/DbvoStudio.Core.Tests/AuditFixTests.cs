@@ -281,4 +281,38 @@ public class ExportTrackingTests : IDisposable
         Assert.True(File.Exists(aWav));
         Assert.True(File.Exists(foreignWav));
     }
+
+    [Fact]
+    public void Overwrite_on_replaces_every_file_even_ones_this_patch_wrote_with_the_same_take()
+    {
+        var lib = new Library(Path.Combine(_dir, "lib"));
+        var svc = new Phase2Service(lib, lib.LoadSettings());
+        var voice = new VoicePack { Name = "V", PackId = "v" };
+        var wl = Path.Combine(_dir, "wl");
+        var patch = new DbvoPatch { WavLipFolder = wl };
+        var l = new Phase2Line { LineId = NewId.Short(), Key = "Follow me.", FinalLine = "Follow me.", Spoken = "Follow me.", Status = Phase2Status.Generated };
+        patch.Lines.Add(l);
+        var t = new Take { Slot = 1, SpokenText = l.Spoken };
+        t.WavPath = Path.Combine("takes", l.LineId, "01", "a.wav"); t.LipPath = Path.Combine("takes", l.LineId, "01", "a.lip");
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(lib.PatchFolder(patch.Id), t.WavPath))!);
+        File.WriteAllBytes(Path.Combine(lib.PatchFolder(patch.Id), t.WavPath), new byte[] { 1 });
+        File.WriteAllBytes(Path.Combine(lib.PatchFolder(patch.Id), t.LipPath), new byte[] { 1 });
+        l.Takes.Add(t); l.SelectedTakeId = t.Id;
+        var foreignWav = Path.Combine(wl, LineNaming.Stem("Wait here.", NamingMode.Legacy) + ".wav");
+
+        svc.ExportWavLip(patch, voice);
+        var aWav = Path.Combine(wl, LineNaming.Stem("Follow me.", NamingMode.Legacy) + ".wav");
+        // Something else replaced the file after the export (another patch, a file copied by hand).
+        File.Delete(aWav); File.WriteAllBytes(aWav, new byte[] { 7 });
+
+        patch.OverwriteWavLip = false;
+        Assert.Equal(0, svc.ExportWavLip(patch, voice).Written); // off: same take, left alone
+        Assert.Equal(7, File.ReadAllBytes(aWav)[0]);
+
+        patch.OverwriteWavLip = true;
+        var rep = svc.ExportWavLip(patch, voice);
+        Assert.True(rep.Written >= 1);
+        Assert.Equal(0, rep.Skipped);
+        Assert.Equal(1, File.ReadAllBytes(aWav)[0]); // on: replaced with the selected take
+    }
 }

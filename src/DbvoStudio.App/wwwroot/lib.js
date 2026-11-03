@@ -934,16 +934,20 @@ export function pathList(paths, { maxHeight = '180px', more = 0, suffix = null }
 }
 
 /**
- * Ask before replacing DBVO Fix plugins that are already in a folder. Resolves to null (cancel),
- * false (keep the existing ones) or true (overwrite). With no conflicts it resolves to true at once.
+ * Before DBVO Fix plugins already in a destination are replaced: the list (with their dates when given, as
+ * { path, modified }), and Replace / Keep existing / Cancel. true = replace, false = keep, null = cancelled.
  */
-export async function askFixOverwrite(paths) {
-  if (!paths || !paths.length) return true;
-  const v = await modal('Overwrite DBVO Fix plugins?', [
-    h('div', `${paths.length} DBVO Fix plugin(s) with the same name are already in the destination:`),
-    pathList(paths),
-    h('div.faint', 'Keep existing writes everything else and leaves these files as they are.'),
-  ], [{ label: 'Cancel', value: null }, { label: 'Keep existing', value: 'keep' }, { label: 'Overwrite', primary: true, value: 'overwrite' }]);
+export async function askFixOverwrite(items) {
+  if (!items || !items.length) return true;
+  const rows = items.map((x) => (typeof x === 'string' ? { path: x } : x));
+  const list = h('div.box.mono', { style: { maxHeight: '220px', overflow: 'auto', fontSize: '12px' } },
+    rows.map((r) => h('div', { style: { display: 'flex', gap: '12px' } }, h('span.grow', r.path), r.modified ? h('span.faint', { style: { whiteSpace: 'nowrap' } }, new Date(r.modified).toLocaleString()) : null)));
+  const v = await modal('Replace DBVO Fix plugins?', [
+    h('div', `${rows.length} DBVO Fix plugin(s) are already in the destination and would be replaced:`),
+    list,
+    h('div', 'The new ones are written from the lines as they are in Phase 1 now. If some of those edits may be wrong or older than these files, keep these and check the lines first.'),
+    h('div.faint', 'Keep existing writes everything else and leaves these plugins as they are.'),
+  ], [{ label: 'Cancel', value: null }, { label: 'Keep existing', value: 'keep' }, { label: 'Replace', primary: true, value: 'overwrite' }]);
   return v == null ? null : v === 'overwrite';
 }
 

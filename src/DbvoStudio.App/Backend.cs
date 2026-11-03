@@ -447,10 +447,14 @@ public sealed partial class Backend
                     if (p.TryGetProperty("sourceFolders", out _)) patch.SourceFolders = Strings(p, "sourceFolders");
                     if (p.TryGetProperty("kind", out _)) patch.Kind = S(p, "kind") == "vc" ? "vc" : "tts";
                     if (p.TryGetProperty("ttsForMissing", out var tm) && tm.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.TtsForMissing = tm.GetBoolean();
-                    if (p.TryGetProperty("overwriteWavLip", out var ow) && ow.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteWavLip = ow.GetBoolean();
+                    bool owChanged = false;
+                    if (p.TryGetProperty("overwriteWavLip", out var ow) && ow.ValueKind is JsonValueKind.True or JsonValueKind.False) { if (patch.OverwriteWavLip != ow.GetBoolean()) { _settings.NewPatchOverwriteWavLip = ow.GetBoolean(); owChanged = true; } patch.OverwriteWavLip = ow.GetBoolean(); }
                     if (p.TryGetProperty("tagsAsContext", out var tc) && tc.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.TagsAsContext = tc.GetBoolean();
-                    if (p.TryGetProperty("overwriteFuz", out var of) && of.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteFuz = of.GetBoolean();
-                    if (p.TryGetProperty("overwriteFix", out var ox) && ox.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.OverwriteFix = ox.GetBoolean();
+                    if (p.TryGetProperty("overwriteFuz", out var of) && of.ValueKind is JsonValueKind.True or JsonValueKind.False) { if (patch.OverwriteFuz != of.GetBoolean()) { _settings.NewPatchOverwriteFuz = of.GetBoolean(); owChanged = true; } patch.OverwriteFuz = of.GetBoolean(); }
+                    if (p.TryGetProperty("overwriteFix", out var ox) && ox.ValueKind is JsonValueKind.True or JsonValueKind.False) { if (patch.OverwriteFix != ox.GetBoolean()) { _settings.NewPatchOverwriteFix = ox.GetBoolean(); owChanged = true; } patch.OverwriteFix = ox.GetBoolean(); }
+                    // An Overwrite switch you change here is what the next new patch starts with (saving a patch's
+                    // options without changing them leaves that alone).
+                    if (owChanged) _lib.Save(_settings);
                     if (p.TryGetProperty("exportApprovedOnly", out var ea) && ea.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.ExportApprovedOnly = ea.GetBoolean();
                     _lib.Save(patch);
                     var svc2 = new Phase2Service(_lib, Runtime());
@@ -1407,13 +1411,14 @@ public sealed partial class Backend
     /// <summary>Write each mod's DBVO Fix plugin (when needed) to the WAV+LIP folder and the mod's final folder.</summary>
     private object WritePatchFixPlugins(JsonElement p) => WriteFixAndTopics(LoadPatch(S(p, "id")), B(p, "keepFix"));
 
-    /// <summary>DBVO Fix plugins already in the patch's final folder(s), when the patch asks before replacing them.</summary>
-    private List<string> FixConflicts(DbvoPatch patch)
+    /// <summary>DBVO Fix plugins already in the patch's final folder(s) that an export would replace (Overwrite on), with their dates.</summary>
+    private List<object> FixConflicts(DbvoPatch patch)
     {
-        if (patch.OverwriteFix || string.IsNullOrWhiteSpace(patch.FinalRoot)) return new();
+        if (!patch.OverwriteFix || string.IsNullOrWhiteSpace(patch.FinalRoot)) return new();
         var voice = LoadVoice(patch.VoicePackId);
         return _lib.LoadMods().Where(m => patch.ModIds.Contains(m.Id))
-            .SelectMany(m => Phase1Service.ExistingFixPlugins(m, Core.Fomod.FomodService.ModContentFolder(patch, voice, m))).Distinct().ToList();
+            .SelectMany(m => Phase1Service.ExistingFixPlugins(m, Core.Fomod.FomodService.ModContentFolder(patch, voice, m))).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(f => (object)new { path = f, modified = File.GetLastWriteTimeUtc(f) }).ToList();
     }
 
     /// <summary>
@@ -1439,7 +1444,8 @@ public sealed partial class Backend
                 {
                     var final = Core.Fomod.FomodService.ModContentFolder(patch, voice, mod);
                     if (!final.Equals(patch.FixFolder, StringComparison.OrdinalIgnoreCase))
-                        written.AddRange(svc1.WriteOutputs(mod, pl, new[] { final }, final, keepExistingFinalFix && !patch.OverwriteFix, removeStaleFix: true));
+                        // Overwrite off: plugins already there stay. On: replaced, unless you chose to keep them when asked.
+                        written.AddRange(svc1.WriteOutputs(mod, pl, new[] { final }, final, keepExistingFinalFix || !patch.OverwriteFix, removeStaleFix: true));
                 }
             }
         }
@@ -1462,6 +1468,10 @@ public sealed partial class Backend
             SourceFolders = sourceFolders ?? new List<string>(),
             // New ElevenLabs patches send leading [tags] as context (not counted against credits, no doubled words on short lines).
             TagsAsContext = _settings.LeadingTagsAsContext && kind != "vc" && voice.Engine == "elevenlabs",
+            // The Overwrite switches you last set on a patch.
+            OverwriteWavLip = _settings.NewPatchOverwriteWavLip,
+            OverwriteFuz = _settings.NewPatchOverwriteFuz,
+            OverwriteFix = _settings.NewPatchOverwriteFix,
         };
         string Expand(string t) => string.IsNullOrWhiteSpace(t) ? "" : Phase2Service.ExpandTemplate(t, modName, voice, patch);
         patch.WavLipFolder = Expand(voice.Destinations.WavLipFolder);

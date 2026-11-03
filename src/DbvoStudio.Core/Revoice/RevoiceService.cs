@@ -640,8 +640,9 @@ public sealed class RevoiceService
                 var target = Path.Combine(p.OutputFolder, line.RelativePath);
                 var key = line.RelativePath.ToLowerInvariant();
                 bool skip;
-                // A file this tool wrote is rebuilt when the line has another take; other files follow "overwrite".
-                lock (rep) skip = File.Exists(target) && (p.ExportedTakes.TryGetValue(key, out var had) ? line.SelectedTake != null && had == Projects.Phase2Service.ExportStamp(line.SelectedTake) : !overwrite);
+                // Overwrite: every file is written. Otherwise a file this tool wrote is rebuilt when its line has another
+                // take, and any other file already there is left alone.
+                lock (rep) skip = !overwrite && File.Exists(target) && (!p.ExportedTakes.TryGetValue(key, out var had) || (line.SelectedTake != null && had == Projects.Phase2Service.ExportStamp(line.SelectedTake)));
                 if (skip) { lock (rep) rep.Skipped++; return; }
                 using var work = new WorkFolder(workRoot);
                 var t = line.SelectedTake!;

@@ -204,7 +204,7 @@ on('jobDone', async (d) => {
     const body = [h('div.kv', h('div', 'Written'), h('div', r.written),
       r.reused ? [h('div', 'Imported .fuz kept as they were'), h('div', r.reused)] : null,
       r.cached ? [h('div', 'From the .fuz cache (unchanged since an earlier build)'), h('div', r.cached)] : null,
-      h('div', 'Skipped (already there)'), h('div', r.skipped), h('div', 'Failed'), h('div', r.failed))];
+      h('div', 'Skipped (Overwrite .fuz off: unchanged, or not this patch\'s)'), h('div', r.skipped), h('div', 'Failed'), h('div', r.failed))];
     if (r.errors && r.errors.length) body.push(h('div.box.mono', { style: { maxHeight: '160px', overflow: 'auto' } }, r.errors.slice(0, 50).join('\n')));
     if (d.files && d.files.length) body.push(h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), pathList(d.files, { maxHeight: '160px' })));
     if (d.reminders && d.reminders.length) body.push(h('div.banner.warn', { style: { margin: 0 } }, h('div', h('b', 'Before you release: '), h('ul', d.reminders.map((x) => h('li', x))))));

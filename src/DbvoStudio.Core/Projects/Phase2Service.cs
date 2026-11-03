@@ -1107,9 +1107,13 @@ public sealed partial class Phase2Service
     public static string ExportStamp(Take t) =>
         t.Effect.Length == 0 && t.Soften.Length == 0 && !t.NoiseReduced && t.Rev == 0 ? t.Id : $"{t.Id}:{t.Effect}:{t.Soften}:{(t.NoiseReduced ? 1 : 0)}:{t.Rev}";
 
+    /// <summary>
+    /// Overwrite on: every file is written, whatever is there. Off: a missing file is written, a file this patch wrote is
+    /// rebuilt when its line has another take, and any other file already there is left alone.
+    /// </summary>
     private static bool ShouldWrite(DbvoPatch patch, string target, Take take, bool overwrite)
     {
-        if (!File.Exists(target)) return true;
+        if (overwrite || !File.Exists(target)) return true;
         if (patch.Exported.TryGetValue(ExportKey(target), out var tid)) return tid != ExportStamp(take);
         return overwrite;
     }

@@ -1310,8 +1310,10 @@ export async function patchView(id) {
 
   const filesModal = (title, summary, files) => modal(title, [summary, files && files.length ? h('div', h('div.field-label', 'DBVO Fix plugins and topic files written'), pathList(files)) : null]);
 
-  // DBVO Fix plugins in the final folder: ask first when the patch says so (Folders & options → Overwrite).
+  // DBVO Fix plugins already in the final folder: with Overwrite (Folders & options) on they are replaced after you
+  // confirm the list; with it off they are kept.
   async function fixChoice() {
+    if (patch.overwriteFix === false) return { keepFix: true };
     const ow = await askFixOverwrite(await rpc('patch.fixConflicts', { id }).catch(() => []));
     return ow == null ? null : { keepFix: !ow };
   }
@@ -1340,7 +1342,7 @@ export async function patchView(id) {
       // the WAV + LIP folder keeps earlier files (an archive of past takes); only .fuz exports ask about them
       const r = await rpc('patch.exportWavLip', { id, audioOnly, ...fc });
       await filesModal(audioOnly ? 'WAV + LIP exported (DBVO Fix plugins and topic file left as they were)' : 'WAV + LIP exported', h('div.kv',
-        h('div', 'Written'), h('div', r.written), r.removed ? [h('div', 'Removed (no longer exported)'), h('div', r.removed)] : null, h('div', 'Skipped (up to date, or not ours and Overwrite is off)'), h('div', r.skipped), h('div', 'Failed'), h('div', r.failed),
+        h('div', 'Written'), h('div', r.written), r.removed ? [h('div', 'Removed (no longer exported)'), h('div', r.removed)] : null, h('div', patch.overwriteWavLip ? 'Skipped' : 'Skipped (Overwrite off: unchanged or not this patch\'s)'), h('div', r.skipped), h('div', 'Failed'), h('div', r.failed),
         r.errors && r.errors.length ? [h('div', 'Errors'), h('div.mono', r.errors.slice(0, 10).join('\n'))] : null), r.files);
     } catch (e) { fail(e); }
   }
@@ -1570,9 +1572,9 @@ export async function patchView(id) {
         row('Final folder', 'The FOMOD root (or a page of it). The final DBVO Fix plugin and its topic file go here too.', fr.el),
         row('.fuz sub-folder', 'Inside the final folder, e.g. Sound\\DBVO\\{packId}. {packId} = the voice pack ID (' + (voice.packId || 'not set') + ')', tpl),
         row('Result', null, preview),
-        row('Overwrite', 'Files this patch exported are always updated when their line has a new take. Off: other files already there (e.g. from another tool) are left alone; for DBVO Fix you are asked',
+        row('Overwrite', 'On: every file already in the destination is replaced on each export (DBVO Fix plugins after you confirm the list). Off: only missing files and files of lines with a new take are written; anything else already there is left alone. New patches start with the switches you set last.',
           h('div.row', { style: { gap: '18px' } }, switchEl(owWav, (v) => { owWav = v; }, 'WAV + LIP'), switchEl(owFuz, (v) => { owFuz = v; }, '.fuz'),
-            switchEl(owFix, (v) => { owFix = v; }, 'DBVO Fix', { title: 'DBVO Fix plugins in the final folder. Off: you are asked before one with the same name is replaced. The working copy in the DBVO Fix folder is always replaced.' }))),
+            switchEl(owFix, (v) => { owFix = v; }, 'DBVO Fix', { title: 'DBVO Fix plugins in the final folder. On: replaced after you confirm the list of the ones already there. Off: plugins already there are kept. The working copy in the DBVO Fix folder is always replaced.' }))),
         row('Export', 'Off (the usual): every line with a take is exported; approving is optional. On: only lines approved in Review (▶ Review, then A). Files of lines not approved that earlier exports wrote are listed before anything is deleted.',
           switchEl(apprOnly, (v) => { apprOnly = v; }, 'Only lines approved in Review', { title: 'Export and build .fuz for approved lines only. Approving never changes anything else.' })),
         row('Mod', 'The Phase 1 mod this patch voices. Rarely, one patch voices several mods: add them below. Lines of a mod you remove leave the patch, but their takes are kept and come back if you add it again.',

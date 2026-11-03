@@ -37,6 +37,10 @@ public sealed class AppSettings
     public bool PlayerNameLinesVoiced { get; set; }
     /// <summary>New ElevenLabs patches send leading [tags] as context (each patch can change it in Output ▾).</summary>
     public bool LeadingTagsAsContext { get; set; } = true;
+    /// <summary>The Overwrite switches a new DBVO Patch starts with: the ones you last set on a patch (Folders &amp; options).</summary>
+    public bool NewPatchOverwriteWavLip { get; set; }
+    public bool NewPatchOverwriteFuz { get; set; }
+    public bool NewPatchOverwriteFix { get; set; } = true;
     public string? LastVoicePackId { get; set; }
     public Dictionary<string, string> Ui { get; set; } = new();
     /// <summary>The global DBVO pronunciation dictionary, used by every voice pack. Voice pack entries win for the same word.</summary>
@@ -604,7 +608,10 @@ public sealed class DbvoPatch
     /// <summary>Experiment: send each line's leading [tags] as context (previous_text, not billed) instead of as text.</summary>
     public bool TagsAsContext { get; set; }
     public bool OverwriteFuz { get; set; }
-    /// <summary>Replace DBVO Fix plugins already in the final folder without asking (the working copy is always replaced).</summary>
+    /// <summary>
+    /// On: DBVO Fix plugins already in the final folder are replaced, after you confirm the list. Off: they are kept.
+    /// (The working copy in the DBVO Fix folder is always replaced.)
+    /// </summary>
     public bool OverwriteFix { get; set; } = true;
     /// <summary>"tts" = text-to-speech; "vc" = the Voice Changer toggle is on (speech-to-speech from another voice pack's WAV / .fuz files).</summary>
     public string Kind { get; set; } = "tts";
