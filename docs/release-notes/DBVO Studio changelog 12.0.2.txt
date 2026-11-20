@@ -1,0 +1,2 @@
+Version 12.0.2
+- Variants: each take now has a bin to delete it and its files, after you confirm. Takes you listened to and don't want can leave Needs a look this way. The take in use in its patch can't be deleted there: pick another take for the line in Phase 2 first.

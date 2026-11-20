@@ -161,7 +161,11 @@ export async function variantsView(voiceId) {
         h('span.meta', { style: { flex: 1 } }, meta, d.patchNames.length > 1 && t.patchId ? h('span.faint', ' · ' + t.patch) : null),
         t.pending ? h('span.badge.b-toolong', { title: 'Made with Creative stability: listen, then star it if it keeps the voice' }, 'listen') : null,
         t.qaFlags && t.qaFlags.length ? h('span.badge.b-broken', { title: 'Check takes flagged it: ' + t.qaFlags.join(', ') }, '⚠') : null,
-        star));
+        star,
+        h('button.act-btn', { title: t.inUse && t.patchId ? 'The take in use can't be deleted here: pick another take for this line in its patch (Phase 2) first' : 'Delete this take and its files', disabled: !!(t.inUse && t.patchId), onclick: async () => {
+          if (!(await confirmBox('Delete take?', `Delete take #${t.slot} of "${d.text}"${t.patch ? ' in ' + t.patch : ''} and its files? This can't be undone.`, 'Delete', true))) return;
+          try { await rpc('variants.deleteTake', { voiceId, patchId: t.patchId || '', lineId: t.lineId, takeId: t.takeId }); await reload(); } catch (e) { fail(e); }
+        } }, '🗑')));
     }
     const playAll = h('button.btn.sm', { title: 'Play every ★ take, one after another', disabled: !kept.length, onclick: () => {
       let i = 0; const next = () => { if (i >= kept.length) { audio.onended = null; return; } audio.src = kept[i++].url + '?t=' + Date.now(); audio.play().catch(() => {}); }; audio.onended = next; next();

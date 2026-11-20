@@ -130,6 +130,7 @@ public sealed partial class Backend
             case "variants.line": return await Locked(() => VariantLineDto(S(p, "voiceId"), S(p, "key")));
             case "variants.saveSettings": return await Locked(() => SaveVariantSettings(p));
             case "variants.keep": return await Locked(() => KeepVariant(p));
+            case "variants.deleteTake": return await Locked(() => DeleteVariantTake(p));
             case "variants.checkLine": return await Locked(() => CheckTypedLine(S(p, "voiceId"), S(p, "text")));
             case "variants.search": return await Locked(() => SearchLines(S(p, "voiceId"), S(p, "q")));
             case "variants.addLine": return await Locked(() => AddVariantLine(p));
@@ -291,6 +292,40 @@ public sealed partial class Backend
         take.Kept = B(p, "kept");
         take.VariantPending = false;
         if (patchId.Length > 0) _lib.Save(LoadPatch(patchId)); else SaveVariantsCfg(cfg);
+        return true;
+    }
+
+    /// <summary>
+    /// Delete one take and its files, as the bin on a take in Phase 2 does. The take in use can't go (pick another in its
+    /// patch first), and nothing is deleted while variants are being made for this voice pack.
+    /// </summary>
+    private object DeleteVariantTake(JsonElement p)
+    {
+        var voiceId = S(p, "voiceId");
+        if (_jobCts != null && _generating == "variants:" + voiceId) throw new InvalidOperationException("Variants are being made right now. Wait for that to finish first.");
+        var patchId = S(p, "patchId");
+        var voice = LoadVoice(voiceId);
+        var cfg = LoadVariantsCfg(voiceId);
+        var patch = patchId.Length > 0 ? LoadPatch(patchId) : null;
+        if (patch != null) NotWhileGenerating(patch.Id);
+        var lines = patch != null ? patch.Lines : cfg.AddedLines;
+        var line = lines.FirstOrDefault(l => l.LineId == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
+        var take = line.Takes.FirstOrDefault(t => t.Id == S(p, "takeId")) ?? throw new InvalidOperationException("Take not found.");
+        if (patch != null && line.SelectedTakeId == take.Id)
+            throw new InvalidOperationException($"Take #{take.Slot} is the one in use in {patch.Name}. Pick another take for this line there first (Phase 2), then delete it.");
+        NoUndoHere();
+        line.Takes.Remove(take);
+        var root = Path.GetFullPath(new VariantsPackBuilder(_lib).RootOf(voice, patch)).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var dir = Path.GetDirectoryName(Path.GetFullPath(Path.Combine(root, take.WavPath)));
+        // only the take's own folder, never the patch or Variants folder itself
+        try { if (dir != null && (dir + Path.DirectorySeparatorChar).StartsWith(root, StringComparison.OrdinalIgnoreCase) && dir.Length + 1 > root.Length && Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
+        if (patch != null)
+        {
+            if (line.Takes.Count == 0) { line.Status = line.IsOmitted ? Phase2Status.Omitted : Phase2Status.Pending; line.NoAdopt = true; }
+            else line.RefreshStale();
+            _lib.Save(patch);
+        }
+        else SaveVariantsCfg(cfg);
         return true;
     }
 
