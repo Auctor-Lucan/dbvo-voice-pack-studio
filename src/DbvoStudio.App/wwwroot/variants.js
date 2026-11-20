@@ -55,7 +55,7 @@ export async function variantsView(voiceId) {
   const ctxAvail = !!st.contextAvailable;
   // The full spoken text of a list row: its leading tags, then the words (mid-line tags included).
   const fullOf = (l) => ((l.lead ? l.lead + ' ' : '') + (l.words || '')).trim();
-  const view = h('div.view');
+  const view = h('div.view.var-page');
 
   const packBtn = h('button.btn', { title: 'Build the Variants Pack (one BSA with every line\'s variants) and add it to your FOMOD' }, 'Variants Pack ▾');
   view.append(h('div.view-head',
@@ -108,7 +108,7 @@ export async function variantsView(voiceId) {
   const reach = (l) => {
     const out = [];
     if (l.pending) out.push(h('span.badge.b-toolong', { title: `${l.pending} take(s) made with Creative stability not played yet: play them in the panel on the right and star the good ones` }, `${l.pending} to listen to`));
-    if (l.kept >= 2) out.push(...(legacy ? [h('span.badge.b-valid', { title: 'Once you build the Variants Pack, Dragonborn Voice Over 2 plays one of these at random (numbered files in the line\'s folder)' }, 'DBVO 2'), h('span.badge.b-valid', { title: 'Once you build the Variants Pack, Dragonborn ReVoiced plays one of these at random (name(1), name(2)… next to the line\'s file)' }, 'DBReV')]
+    if (l.kept >= 2) out.push(...(legacy ? [h('span.badge.b-valid', { title: 'Once you build the Variants Pack, Dragonborn Voice Over 2 plays one of these at random (numbered files in the line\'s folder)' }, 'DBVO 2'), h('span.badge.b-valid', { title: 'DBReV L: Dragonborn ReVoiced playing this DBVO 1 (Legacy) pack. Once you build the Variants Pack, it plays one of these at random (name(1), name(2)… next to the line\'s file)' }, 'DBReV L')]
       : [h('span.badge.b-valid', { title: 'Exported with its patch as numbered files in the line\'s folder: DBVO 2 plays one at random' }, 'DBVO 2')]));
     if (l.added) out.push(legacy ? h('span.badge.b-fixed', { title: 'No patch exports this line: the Variants Pack writes its file too' }, 'Added here')
       : h('span.badge.b-broken', { title: 'Added by hand: with DBVO 2.0 names it can\'t ship. Remove it in the panel on the right.' }, 'Added here'));
@@ -153,9 +153,13 @@ export async function variantsView(voiceId) {
   const audio = new Audio();
   let lineData = null;
   let ticket = 0;
+  let drawnKey = null;
   async function renderInspector() {
     const mine = ++ticket;
-    clear(insp);
+    // The same line drawn again (after play, ★ or delete): it stays where you scrolled, and stays on screen while it reloads.
+    const same = focusKey != null && focusKey === drawnKey;
+    const scrollTop = same ? insp.scrollTop : 0;
+    if (!same) { clear(insp); drawnKey = null; }
     if (!focusKey) { insp.append(h('div.help', h('p', h('b', 'Pick a line'), ' to hear its takes and star (★) the ones that should play in game.'), h('p', 'Tick lines and press Generate variants to make new takes with the Variant settings below.'))); return; }
     const key = focusKey;
     let got;
@@ -173,7 +177,7 @@ export async function variantsView(voiceId) {
         h('div', 'Said in'), h('div.kv-v', { title: d.modNames.join('\n') }, d.added ? 'Added here' : d.modNames.join(', ') || '–'),
         h('div', 'File name'), h('div.kv-v.mono', d.stem + '.fuz'),
         kept.length < 2 ? [h('div', 'Variants'), h('div.kv-v.faint', legacy ? 'none yet: two or more ★ go into the Variants Pack' : 'none yet: two or more ★ are exported with the patch')]
-          : legacy ? [h('div', 'DBVO 2'), h('div.kv-v.mono', `${d.stem}\\1.fuz … ${kept.length}.fuz`), h('div', 'DBReV'), h('div.kv-v.mono', `${d.stem}(1).fuz … (${Math.min(kept.length, 19)})`)]
+          : legacy ? [h('div', 'DBVO 2'), h('div.kv-v.mono', `${d.stem}\\1.fuz … ${kept.length}.fuz`), h('div', 'DBReV L'), h('div.kv-v.mono', `${d.stem}(1).fuz … (${Math.min(kept.length, 19)})`)]
           : [h('div', 'DBVO 2'), h('div.kv-v.mono', `${d.stem}\\0.fuz … ${kept.length - 1}.fuz`), h('div', 'Patch'), h('div.kv-v', d.homePatch || 'none: added by hand, it can\'t ship')]),
       h('h3', legacy ? `Takes · ${kept.length} ★` : `Takes · ${kept.length} ★ in ${d.homePatch || 'no patch'}`));
     for (const t of d.takes) {
@@ -216,8 +220,10 @@ export async function variantsView(voiceId) {
         try { await rpc('variants.removeLine', { voiceId, key: d.key }); focusKey = null; await reload(); } catch (e) { fail(e); }
       } }, 'Remove this line') : null,
       h('div.help', h('p', h('b', '★ = variant.'), legacy
-        ? ' A line with two or more ★ takes goes into the Variants Pack when you build it. In game, DBVO 2 and DBReV then pick one at random each time you say the line. One ★ alone adds nothing.'
+        ? ' A line with two or more ★ takes goes into the Variants Pack when you build it. In game, DBVO 2 and DBReV L (Dragonborn ReVoiced playing this Legacy pack) then pick one at random each time you say the line. One ★ alone adds nothing.'
         : ' The patch with this line exports its ★ takes: two or more play at random (DBVO 2), one ★ is used as the line\'s file in place of the take in use.')));
+    drawnKey = key;
+    insp.scrollTop = scrollTop;
   }
 
   // ---- Variant settings
@@ -247,7 +253,7 @@ export async function variantsView(voiceId) {
   } }, 'Delete preset');
   presetSel.addEventListener('change', () => {
     const p = st.presets.find((x) => x.name === presetSel.value);
-    if (p) { rows = p.rows.map((r) => ({ ...r })); st.preset = p.name; renderRows(); renderStatus(); renderPreview(); save(); }
+    if (p) { rows = p.rows.map((r) => ({ ...r })); st.preset = p.name; renderRows(); renderStatus(); renderPreview(); save(); renderSummary(); }
   });
 
   const renderCtx = () => {
@@ -291,13 +297,13 @@ export async function variantsView(voiceId) {
     });
     renderPreview();
   }
-  const markCustom = () => { st.preset = 'Custom'; renderPresets(); save(); renderStatus(); };
+  const markCustom = () => { st.preset = 'Custom'; renderPresets(); save(); renderStatus(); renderSummary(); };
   function renderPreview() {
     const l = (focusKey && data.lines.find((x) => x.key === focusKey)) || data.lines.find((x) => grid.selected.has(x.key)) || null;
     const spoken = lineData && lineData.key === focusKey ? lineData.spoken : l ? fullOf(l) : 'Falkreath';
     rgrid.querySelectorAll('[data-row]').forEach((el) => { const r = rows[Number(el.dataset.row)]; if (r) { el.textContent = variantText(spoken, prefix.value, r.word); el.title = el.textContent; } });
   }
-  prefix.addEventListener('input', () => { renderPreview(); renderStatus(); save(); });
+  prefix.addEventListener('input', () => { renderPreview(); renderStatus(); save(); renderSummary(); });
 
   const addRow = h('button.btn.sm', { title: 'Another variant per line (ten at most)', onclick: () => { if (rows.length >= 10) return; rows.push({ ...rows[rows.length - 1], fixedSeed: false, seed: null }); markCustom(); renderRows(); renderStatus(); } }, '+ Variant');
   const savePreset = h('button.btn.sm.ghost', { title: 'Keep these rows under a name of your own', onclick: async () => {
@@ -311,14 +317,30 @@ export async function variantsView(voiceId) {
     }
     try { await rpc('variants.saveSettings', { voiceId, rows, savePreset: name, replace }); const r = await rpc('variants.get', { voiceId }); data = r.data; Object.assign(st, data.settings); renderPresets(); toast(`Saved as "${name}".`); } catch (e) { fail(e); }
   } }, 'Save as preset…');
-  const recipe = h('div.var-recipe',
-    h('div.row', { style: { gap: '12px', flexWrap: 'wrap' } }, h('b', 'Variant settings'),
-      h('span.faint', { style: { fontSize: '12px' } }, 'Only used for variants made here. Your lines and other takes stay as they are.'),
-      h('div.spacer'), h('span.dim', 'Preset'), presetSel, delPreset, savePreset),
+  // Folded: one line saying what the rows are, so the line list keeps the room. Remembered per voice pack.
+  let folded = !!store.get('variants-folded:' + voiceId, false);
+  const foldBtn = h('button.btn.sm.ghost', { title: 'Fold the Variant settings to one line, or open them' });
+  const summary = h('span.dim.ellipsis', { style: { fontSize: '12.5px', minWidth: 0 } });
+  const renderSummary = () => {
+    const p = normalizePrefix(prefix.value);
+    summary.textContent = `${rows.length} variant${rows.length === 1 ? '' : 's'} per line: ${rows.map((r) => (eleven ? stabName(r.stability) : '') + (r.word ? (eleven ? ' ' : '') + r.word : '')).map((x) => x.trim() || 'as is').join(' · ')}${p ? ' · prefix ' + p : ''}`;
+  };
+  const body = h('div.var-recipe-body',
     h('div.row', { style: { gap: '10px', marginTop: '8px', flexWrap: 'wrap' } }, h('span.field-label', { style: { margin: 0, width: '110px' } }, 'Prefix [tags]'), prefix, ctxBox),
     eleven ? null : h('div.banner.warn', { style: { margin: '6px 0 0' } }, `This voice pack uses ${voice.engine}: Stability, Speed and Seed only apply to ElevenLabs, so variants here differ mostly by chance. The prefix and variation word only make a difference where the engine reads [tags].`),
     rgrid,
     h('div.row', { style: { gap: '10px', marginTop: '6px' } }, addRow, eleven ? [h('span.badge.b-toolong', 'Creative'), h('span.faint', { style: { fontSize: '12px' } }, "takes are marked listen until you play them, and get no ★ unless you give one (they can drift out of the voice's accent)")] : null));
+  const recipe = h('div.var-recipe',
+    h('div.row', { style: { gap: '12px', flexWrap: 'nowrap', minWidth: 0 } }, foldBtn, h('b', { style: { whiteSpace: 'nowrap' } }, 'Variant settings'), summary,
+      h('div.spacer'), h('span.dim', 'Preset'), presetSel, delPreset, savePreset),
+    body);
+  const renderFold = () => {
+    foldBtn.textContent = folded ? '▸' : '▾';
+    body.style.display = folded ? 'none' : '';
+    renderSummary();
+  };
+  foldBtn.addEventListener('click', () => { folded = !folded; store.set('variants-folded:' + voiceId, folded); renderFold(); });
+  renderFold();
   view.append(recipe);
 
   // ---- status bar
@@ -367,7 +389,7 @@ export async function variantsView(voiceId) {
         clear(info);
         if (!text.trim()) return;
         info.append(h('div.var-kv', h('div', 'File name'), h('div.mono', c.stem + '.fuz'),
-          ...c.files.slice(1).map((f, i) => [h('div', i === 0 ? 'DBVO 2 variants' : 'DBReV variants'), h('div.mono', f)]),
+          ...c.files.slice(1).map((f, i) => [h('div', i === 0 ? 'DBVO 2 variants' : 'DBReV L variants'), h('div.mono', f)]),
           h('div', 'Line check'), h('div', c.ok ? h('span.badge.b-valid', 'Valid') : h('span.badge.b-broken', 'Not voiceable'), h('span.faint', ' same rules as Phase 1'))));
         if (c.problems.length) info.append(h('div.help.bad', h('ul', c.problems.map((p) => h('li', p)))));
         if (c.existing.length) info.append(h('div.help.warn', h('p', h('b', 'Already voiced: '), `this line is in ${c.existing.join(', ')}. Its variants go there, so every patch with it shares them.`)));
@@ -394,7 +416,7 @@ export async function variantsView(voiceId) {
   packBtn.addEventListener('click', () => popupMenu(packBtn, [
     { label: 'Build the Variants Pack', sub: `${data.lines.filter(hasVariants).length} line(s) → ${st.packName}.bsa + .esp in ${st.outputFolder || '(no folder set)'}${st.lastExport ? ` · last built ${new Date(st.lastExport).toLocaleString()}; build again after changing ★` : ' · not built yet'}`, disabled: !!app.job, onclick: async () => {
       if (!st.outputFolder) { toast('Set the folder first: Variants Pack ▾ → Name and folder.', true); return; }
-      if (!(await confirmBox('Build the Variants Pack?', `Every line with two or more ★ takes goes into ${st.packName}.bsa in ${st.outputFolder}, as DBVO 2 numbered files and DBReV name(1) files. An earlier Variants Pack with that name is replaced.`, 'Build'))) return;
+      if (!(await confirmBox('Build the Variants Pack?', `Every line with two or more ★ takes goes into ${st.packName}.bsa in ${st.outputFolder}, as DBVO 2 numbered files and DBReV L name(1) files. An earlier Variants Pack with that name is replaced.`, 'Build'))) return;
       try { await saveNow(); await rpc('variants.export', { voiceId }); } catch (e) { fail(e); }
     } },
     { label: 'Add to a FOMOD project…', sub: 'A pre-ticked option with the BSA and its plugin, which users can untick', onclick: addToFomod },

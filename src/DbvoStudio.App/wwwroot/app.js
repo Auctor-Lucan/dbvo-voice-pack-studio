@@ -230,7 +230,7 @@ on('jobDone', async (d) => {
     const r = d.report;
     const v = await modal('Variants Pack built', [
       h('div.kv', h('div', 'Lines with variants'), h('div', r.lines.toLocaleString()), h('div', 'Variant takes'), h('div', r.takes.toLocaleString()),
-        h('div', 'Files in the BSA (DBVO 2 and DBReV names)'), h('div', r.files.toLocaleString()), h('div', 'Size'), h('div', (r.bytes / 1048576).toFixed(1) + ' MB'),
+        h('div', 'Files in the BSA (DBVO 2 and DBReV L names)'), h('div', r.files.toLocaleString()), h('div', 'Size'), h('div', (r.bytes / 1048576).toFixed(1) + ' MB'),
         h('div', 'BSA'), h('div', pathText(r.bsa)), h('div', 'Plugin that loads it'), h('div', pathText(r.plugin)), h('div', 'List of the lines'), h('div', pathText(r.listFile))),
       r.skipped && r.skipped.length ? h('div.banner.warn', { style: { margin: 0 } }, h('div', h('b', `${r.skipped.length} line(s) left out: `), h('ul', r.skipped.slice(0, 20).map((x) => h('li', x))))) : null,
       h('div.faint', 'Keep the BSA as it is. Unpacking it, or repacking the mod with Cathedral Assets Optimizer, breaks the variants: Windows folder names can\'t end in a period, and BSA folder names can.'),

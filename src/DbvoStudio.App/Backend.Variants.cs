@@ -747,7 +747,7 @@ public sealed partial class Backend
         opt.Mode = DetectMode.Recommended;
         opt.Plugins.Clear();
         if (string.IsNullOrWhiteSpace(opt.Description))
-            opt.Description = "Lines that play a different take each time you say them (Dragonborn Voice Over 2 and Dragonborn ReVoiced). "
+            opt.Description = "Lines that play a different take each time you say them (Dragonborn Voice Over 2, and Dragonborn ReVoiced with this DBVO 1 Legacy pack). "
                 + "Keep this BSA as it is: unpacking it, or repacking the mod with Cathedral Assets Optimizer, breaks the variants.";
         // the pack's own two files only (under its current or earlier name); anything else in the option stays
         var mineDest = new[] { name + ".bsa", name + ".esp" }.Concat(oldBase != null ? new[] { oldBase + ".bsa", oldBase + ".esp" } : Array.Empty<string>()).ToHashSet(StringComparer.OrdinalIgnoreCase);

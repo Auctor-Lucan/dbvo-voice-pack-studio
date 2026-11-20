@@ -1138,7 +1138,10 @@ html.app-busy, html.app-busy * { cursor: progress !important; }
 .var-kpis .kpi b { display: block; font-size: 18px; font-weight: 650; }
 .var-kpis .kpi span { color: var(--dim); font-size: 12px; }
 .var-kpis .kpi.warn b { color: var(--warn); }
-.var-recipe { border-top: 1px solid var(--line); background: var(--panel); padding: 10px 18px; flex-shrink: 0; max-height: 40vh; overflow: auto; }
+.var-recipe { border-top: 1px solid var(--line); background: var(--panel); padding: 8px 18px; flex-shrink: 0; }
+/* The rows scroll inside a capped panel: the line list above always keeps its room (at least 260px). */
+.var-recipe-body { max-height: 28vh; overflow: auto; }
+.var-page .split { min-height: 260px; }
 .var-rows { display: grid; grid-template-columns: 24px 120px 84px minmax(160px, 1fr) 130px minmax(200px, 1.3fr) 28px; gap: 6px 10px; align-items: center; margin-top: 8px; }
 .var-rows .rh { font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .7px; font-weight: 600; }
 .var-sugg { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; margin-top: 4px; }
