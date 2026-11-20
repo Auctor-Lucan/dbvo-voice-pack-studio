@@ -503,7 +503,7 @@ public sealed partial class Backend
     {
         var voiceId = S(p, "voiceId");
         var keys = Strings(p, "keys").ToHashSet(StringComparer.Ordinal);
-        if (keys.Count == 0) throw new InvalidOperationException("Tick one or more lines first.");
+        if (keys.Count == 0) throw new InvalidOperationException("Click a line first.");
         int? oneRow = p.TryGetProperty("row", out var ri) && ri.ValueKind == JsonValueKind.Number ? ri.GetInt32() : null;
         // A row that isn't there is refused: falling back to every row would pay for several takes instead of one.
         if (oneRow is int want && (want < 0 || want >= LoadVariantsCfg(voiceId).Rows.Count))

@@ -120,9 +120,12 @@ export async function variantsView(voiceId) {
     storageKey: 'variants:' + voiceId,
     rowKey: (l) => l.key,
     rowClass: () => '',
-    onRowClick: (l) => { focusKey = l.key; renderInspector(); renderPreview(); },
+    onRowClick: (l, e) => {
+      // No ticks: the line you click is the one Generate works on. Ctrl+click or Shift+click picks several.
+      if (!(e && (e.ctrlKey || e.shiftKey || e.key === ' '))) { grid.selected = new Set([String(l.key)]); grid.paint(true); grid.el.dispatchEvent(new CustomEvent('selection')); }
+      focusKey = l.key; renderInspector(); renderPreview();
+    },
     columns: [
-      { id: 'sel', title: '', width: 32, resizable: false, render: (l) => grid.checkbox(l) },
       { id: 'text', title: 'Spoken text', flex: 1, width: 320, sort: (l) => l.text.toLowerCase(), render: (l) => h('span', { title: `In-game line: ${l.text}\nFile: ${l.stem}.fuz` }, l.words || l.text) },
       { id: 'mods', title: 'Said in', width: 100, sort: (l) => -l.mods, render: (l) => h('span.dim', { title: `${l.mods} mod(s), ${l.patches} patch(es) of this voice pack. With the same file name they all play the same variants.` }, l.added ? '–' : `${l.mods} mod${l.mods === 1 ? '' : 's'}`) },
       { id: 'kept', title: 'Variants', width: 110, sort: (l) => -l.kept, render: (l) => l.kept ? h('span.row', { style: { gap: '4px', color: 'var(--warn)' }, title: `${l.kept} take(s) starred (★) as variants · ${l.takes} take(s) in all` }, icon('star', { filled: true, size: 14 }), String(l.kept)) : h('span.dim', `${l.takes} take${l.takes === 1 ? '' : 's'}`) },
@@ -160,7 +163,7 @@ export async function variantsView(voiceId) {
     const same = focusKey != null && focusKey === drawnKey;
     const scrollTop = same ? insp.scrollTop : 0;
     if (!same) { clear(insp); drawnKey = null; }
-    if (!focusKey) { insp.append(h('div.help', h('p', h('b', 'Pick a line'), ' to hear its takes and star (★) the ones that should play in game.'), h('p', 'Tick lines and press Generate variants to make new takes with the Variant settings below.'))); return; }
+    if (!focusKey) { insp.append(h('div.help', h('p', h('b', 'Pick a line'), ' to hear its takes and star (★) the ones that should play in game.'), h('p', 'Click a line (Ctrl+click or Shift+click for several) and press Generate variants to make new takes with the Variant settings below.'))); return; }
     const key = focusKey;
     let got;
     try { got = await rpc('variants.line', { voiceId, key }); } catch (e) { if (mine === ticket) fail(e); return; }
@@ -348,27 +351,28 @@ export async function variantsView(voiceId) {
   view.append(status);
   const genBtn = h('button.btn.primary', { onclick: () => generate([...grid.selected]) }, 'Generate variants');
   function renderStatus() {
-    const ticked = data.lines.filter((l) => grid.selected.has(l.key));
+    const picked = data.lines.filter((l) => grid.selected.has(l.key));
     let chars = 0;
-    for (const l of ticked) for (const r of rows) chars += billed(variantText(fullOf(l), prefix.value, r.word), ctx && ctxAvail);
-    const est = eleven ? (rate ? `≈ ${chars.toLocaleString()} characters · ≈ ${Math.ceil(chars * rate).toLocaleString()} credits` : `≈ ${chars.toLocaleString()} characters`) : `${(ticked.length * rows.length).toLocaleString()} takes`;
-    genBtn.disabled = !ticked.length || !!app.job;
-    genBtn.title = !ticked.length ? 'Tick one or more lines first' : app.job ? 'Another task is running' : `Make ${rows.length} variant take(s) for each ticked line`;
-    clear(status).append(h('span.stat', h('b', ticked.length.toLocaleString()), ` line${ticked.length === 1 ? '' : 's'} ticked`),
+    for (const l of picked) for (const r of rows) chars += billed(variantText(fullOf(l), prefix.value, r.word), ctx && ctxAvail);
+    const est = eleven ? (rate ? `≈ ${chars.toLocaleString()} characters · ≈ ${Math.ceil(chars * rate).toLocaleString()} credits` : `≈ ${chars.toLocaleString()} characters`) : `${(picked.length * rows.length).toLocaleString()} takes`;
+    genBtn.disabled = !picked.length || !!app.job;
+    genBtn.title = !picked.length ? 'Click a line first' : app.job ? 'Another task is running' : `Make ${rows.length} variant take(s) for ${picked.length === 1 ? 'the selected line' : 'each of the ' + picked.length + ' selected lines'}`;
+    clear(status).append(h('span.stat', { title: picked.map((l) => l.text).join('\n') }, picked.length === 1 ? ['Selected: ', h('b', picked[0].text)] : [h('b', picked.length.toLocaleString()), ` line${picked.length === 1 ? '' : 's'} selected`]),
       h('span.dim', `· ${rows.length} variant${rows.length === 1 ? '' : 's'} per line`),
-      ticked.length ? h('button.btn.sm.ghost', { onclick: () => grid.selectAll(false) }, 'Clear ticks') : null,
       h('div.spacer'), h('span.dim', est), genBtn);
   }
   grid.el.addEventListener('selection', () => { renderStatus(); renderPreview(); });
 
   async function generate(keys, row = null) {
-    if (!keys.length) { toast('Tick one or more lines first.', true); return; }
+    if (!keys.length) { toast('Click a line first.', true); return; }
     const n = keys.length * (row == null ? rows.length : 1);
     const use = row == null ? rows : [rows[row]];
     let chars = 0;
     for (const k of keys) { const l = data.lines.find((x) => x.key === k); if (l) for (const r of use) chars += billed(variantText(fullOf(l), prefix.value, r.word), ctx && ctxAvail); }
     const cost = eleven ? ` About ${chars.toLocaleString()} characters${rate ? ` (≈ ${Math.ceil(chars * rate).toLocaleString()} credits)` : ''}.` : '';
-    if (n > 3 && !(await confirmBox('Generate variants?', `${n.toLocaleString()} new take(s) for ${keys.length.toLocaleString()} line(s).${cost} Context is ${ctx && ctxAvail ? 'on' : 'off'}.`, 'Generate'))) return;
+    const names = keys.map((k) => (data.lines.find((x) => x.key === k) || {}).text || k);
+    const listed = names.slice(0, 8).map((t) => `"${t}"`).join(', ') + (names.length > 8 ? ` and ${names.length - 8} more` : '');
+    if (!(await confirmBox('Generate variants?', `${n.toLocaleString()} new take(s) for ${keys.length === 1 ? 'this line' : keys.length.toLocaleString() + ' lines'}: ${listed}.${cost} Context is ${ctx && ctxAvail ? 'on' : 'off'}.`, 'Generate'))) return;
     try { await saveNow(); await rpc('variants.generate', { voiceId, keys, row }); } catch (e) { fail(e); }
   }
 
@@ -406,6 +410,7 @@ export async function variantsView(voiceId) {
       await reload();
       // the current filter may hide it (Suggested leaves added lines out): show it under All lines
       if (!shown().some((l) => l.key === r.key)) { filter = 'all'; store.set('variants-filter:' + voiceId, filter); q.value = ''; renderCounts(); grid.setRows(shown()); }
+      grid.selected = new Set([String(r.key)]); grid.paint(true); grid.el.dispatchEvent(new CustomEvent('selection'));
       grid.focus(r.key, true); renderInspector();
       if (r.existed) toast('This voice pack already has that line: it is selected in the list.');
       if (v === 'gen') await generate([r.key]);
