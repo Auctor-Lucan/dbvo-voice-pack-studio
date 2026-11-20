@@ -1,0 +1,2 @@
+Version 12.0.1
+- Fixed: the Variants page showed old takes of lines that a reference (such as Skyrim Base Game) covers, or that you excluded, and marked them as in use. Those lines never go into your mod, so their takes are no longer listed, counted or added to the Variants Pack. Only takes from the patch that ships the line count. The takes themselves are kept in their patches.

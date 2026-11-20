@@ -71,6 +71,28 @@ public class VariantsPackTests : IDisposable
     }
 
     [Fact]
+    public void Takes_of_omitted_or_excluded_lines_never_count()
+    {
+        var v = new VoicePack { Id = "v1", Name = "DBVO Vampira", PackId = "Vampira", Naming = NamingMode.Legacy };
+        var baseGame = new DbvoPatch { Id = "b", Name = "0 Skyrim Base Game", VoicePackId = "v1", Lines = { Line("Who are you?", true) } };
+        var oldImport = Line("Who are you?", true, true, false); // old WAV + LIP takes, line covered by the Skyrim Base Game reference
+        oldImport.OmittedBy = "Skyrim Base Game";
+        var glen = new DbvoPatch { Id = "g", Name = "A Glenmoril", VoicePackId = "v1", Lines = { oldImport } };
+        var gone = Line("Only covered elsewhere.", true, true);
+        gone.OmittedBy = "Dawnguard";
+        var excl = Line("Excluded.", true, true);
+        excl.Excluded = true;
+        var other = new DbvoPatch { Id = "o", Name = "Other", VoicePackId = "v1", Lines = { gone, excl } };
+        var groups = VariantsService.Groups(v, new[] { baseGame, glen, other }, VariantsConfig.Default("v1"));
+        var who = Assert.Single(groups); // the two lines no patch exports are left out
+        Assert.Equal(2, who.Members.Count); // Glenmoril still counts as a mod that says it
+        Assert.Equal(1, who.KeptCount);
+        Assert.Equal(1, who.TakeCount);
+        Assert.Same(baseGame, who.Home.Patch); // even though Glenmoril's old line has more ★
+        Assert.All(who.Kept, k => Assert.Same(baseGame, k.Patch));
+    }
+
+    [Fact]
     public void Pack_name_and_folder_follow_the_voice_pack()
     {
         var cfg = VariantsConfig.Default("v1");

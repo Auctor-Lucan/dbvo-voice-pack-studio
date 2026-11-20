@@ -47,16 +47,19 @@ public sealed partial class Backend
     }
 
     /// <summary>One line of a patch, as much as the Variants list needs (patch files run to tens of MB each).</summary>
-    private sealed record VEntry(string PatchId, string PatchName, string LineId, string Key, string Text, string Stem, string Words, string[] ModIds, int Takes, int Kept, int Pending);
+    private sealed record VEntry(string PatchId, string PatchName, string LineId, string Key, string Text, string Stem, string Words, string[] ModIds, int Takes, int Kept, int Pending, bool Exported);
     /// <summary>Per patch file (date + size + naming): its voice pack and lines, so the list never reloads an unchanged patch.</summary>
     private readonly Dictionary<string, (DateTime Write, long Len, string Naming, string VoiceId, List<VEntry> Entries)> _vIndex = new();
 
     private static List<VEntry> EntriesOf(string patchId, string patchName, IEnumerable<Phase2Line> lines, VoicePack v) =>
-        lines.Where(l => !l.Excluded && !string.IsNullOrWhiteSpace(l.FinalLine)).Select(l =>
+        lines.Where(l => !string.IsNullOrWhiteSpace(l.FinalLine)).Select(l =>
         {
             var stem = l.FileStem ?? LineNaming.Stem(l.FinalLine, v.Naming);
+            // Omitted (a reference covers it) or excluded: the line is never exported, so its takes don't count (VariantGroup.Exported).
+            bool ex = !l.IsOmitted && !l.Excluded;
             return new VEntry(patchId, patchName, l.LineId, v.Naming == NamingMode.Legacy ? stem.ToUpperInvariant() : stem, l.FinalLine, stem,
-                SpokenText.StripTags(l.Spoken), l.Sources.Select(s => s.ModId).ToArray(), l.Takes.Count, l.Takes.Count(t => t.Kept), l.Takes.Count(t => t.VariantPending && !t.Kept));
+                SpokenText.StripTags(l.Spoken), l.Sources.Select(s => s.ModId).ToArray(),
+                ex ? l.Takes.Count : 0, ex ? l.Takes.Count(t => t.Kept) : 0, ex ? l.Takes.Count(t => t.VariantPending && !t.Kept) : 0, ex);
         }).ToList();
 
     /// <summary>
@@ -144,10 +147,10 @@ public sealed partial class Backend
         var voice = LoadVoice(voiceId);
         var cfg = LoadVariantsCfg(voiceId);
         var entries = VariantEntries(voice).Concat(EntriesOf("", "Added here", cfg.AddedLines, voice)).ToList();
-        var lines = entries.GroupBy(e => e.Key).Select(g =>
+        var lines = entries.GroupBy(e => e.Key).Where(g => g.Any(e => e.Exported)).Select(g =>
         {
-            // the line new variants go to: the one with the most ★ already, else the first patch by name (as VariantGroup.Home)
-            var home = g.OrderByDescending(e => e.Kept).ThenBy(e => e.PatchId.Length == 0 ? 1 : 0).ThenBy(e => e.PatchName, StringComparer.OrdinalIgnoreCase).First();
+            // the line new variants go to: the exported one with the most ★ already, else the first patch by name (as VariantGroup.Home)
+            var home = g.Where(e => e.Exported).OrderByDescending(e => e.Kept).ThenBy(e => e.PatchId.Length == 0 ? 1 : 0).ThenBy(e => e.PatchName, StringComparer.OrdinalIgnoreCase).First();
             return new
             {
                 key = g.Key,
@@ -156,7 +159,7 @@ public sealed partial class Backend
                 // the words as you voiced them (no tags): what a variant says after its prefix
                 words = home.Words,
                 mods = g.SelectMany(e => e.ModIds).Distinct().Count(),
-                patches = g.Where(e => e.PatchId.Length > 0).Select(e => e.PatchId).Distinct().Count(),
+                patches = g.Where(e => e.PatchId.Length > 0 && e.Exported).Select(e => e.PatchId).Distinct().Count(),
                 takes = g.Sum(e => e.Takes),
                 kept = g.Sum(e => e.Kept),
                 pending = g.Sum(e => e.Pending),
@@ -203,8 +206,8 @@ public sealed partial class Backend
             spoken = home.Line.Spoken,
             added = g.Added,
             modNames = g.Members.SelectMany(x => x.Line.Sources.Select(s => mods.TryGetValue(s.ModId, out var n) ? n : "")).Where(n => n.Length > 0).Distinct().OrderBy(n => n).ToList(),
-            patchNames = g.Members.Where(x => x.Patch != null).Select(x => x.Patch!.Name).Distinct().ToList(),
-            takes = g.Members.SelectMany(x => x.Line.Takes.Select(t => new
+            patchNames = g.Exported.Where(x => x.Patch != null).Select(x => x.Patch!.Name).Distinct().ToList(),
+            takes = g.Exported.SelectMany(x => x.Line.Takes.Select(t => new
             {
                 patchId = x.Patch?.Id,
                 patch = x.Patch?.Name ?? "Added here",
@@ -307,7 +310,7 @@ public sealed partial class Backend
             problems,
             stem,
             files = new[] { stem + ".fuz", stem + @"\1.fuz …", voice.Naming == NamingMode.Legacy ? stem + "(1).fuz …" : "" }.Where(x => x.Length > 0).ToArray(),
-            existing = g == null ? new List<string>() : g.Members.Select(x => x.Patch?.Name ?? "Added here").Distinct().ToList(),
+            existing = g == null ? new List<string>() : g.Exported.Select(x => x.Patch?.Name ?? "Added here").Distinct().ToList(),
             key = g?.Key,
         };
     }
@@ -486,7 +489,7 @@ public sealed partial class Backend
                     // A snapshot of the kept takes: generation can't run meanwhile (one job at a time), edits wait for the gate.
                     // Only lines with two or more ★ go in: load just the patches that have them.
                     var withVariants = VariantEntries(voice).Concat(EntriesOf("", "", cfg.AddedLines, voice))
-                        .GroupBy(e => e.Key).Where(g => g.Sum(e => e.Kept) >= 2).Select(g => g.Key).ToList();
+                        .GroupBy(e => e.Key).Where(g => g.Sum(e => e.Kept) >= 2).Select(g => g.Key).ToList(); // Kept counts exported lines only
                     groups = VariantsService.Groups(voice, PatchesWith(voice, withVariants), cfg);
                 }
                 finally { _gate.Release(); }

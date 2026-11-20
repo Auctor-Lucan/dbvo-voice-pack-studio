@@ -84,16 +84,25 @@ public sealed class VariantGroup
     /// <summary>Patch = null for a line added by hand.</summary>
     public List<(DbvoPatch? Patch, Phase2Line Line)> Members { get; } = new();
 
+    /// <summary>
+    /// The members whose line is exported: not omitted (a reference covers it, e.g. the Skyrim Base Game) and not excluded.
+    /// Only their takes count. An omitted line's takes (often old WAV + LIP files imported when its patch was made) never
+    /// reach the game, so they are neither shown, counted, starred, generated into nor packed. Omitted lines still count
+    /// under "said in": the game plays the same file for them.
+    /// </summary>
+    public IEnumerable<(DbvoPatch? Patch, Phase2Line Line)> Exported => Members.Where(m => !m.Line.IsOmitted && !m.Line.Excluded);
+    public bool HasExported => Exported.Any();
+
     public IEnumerable<(DbvoPatch? Patch, Phase2Line Line, Take Take)> Kept =>
-        Members.SelectMany(m => m.Line.Takes.Where(t => t.Kept).Select(t => (m.Patch, m.Line, t))).OrderBy(x => x.t.CreatedUtc);
-    public int KeptCount => Members.Sum(m => m.Line.Takes.Count(t => t.Kept));
-    public int TakeCount => Members.Sum(m => m.Line.Takes.Count);
-    public int PendingCount => Members.Sum(m => m.Line.Takes.Count(t => t.VariantPending && !t.Kept));
+        Exported.SelectMany(m => m.Line.Takes.Where(t => t.Kept).Select(t => (m.Patch, m.Line, t))).OrderBy(x => x.t.CreatedUtc);
+    public int KeptCount => Exported.Sum(m => m.Line.Takes.Count(t => t.Kept));
+    public int TakeCount => Exported.Sum(m => m.Line.Takes.Count);
+    public int PendingCount => Exported.Sum(m => m.Line.Takes.Count(t => t.VariantPending && !t.Kept));
     public bool Added => Members.All(m => m.Patch == null);
 
-    /// <summary>Where new variant takes go: the line that already has the most kept takes, else the first patch by name.</summary>
+    /// <summary>Where new variant takes go: the exported line that already has the most kept takes, else the first patch by name.</summary>
     public (DbvoPatch? Patch, Phase2Line Line) Home =>
-        Members.OrderByDescending(m => m.Line.Takes.Count(t => t.Kept)).ThenBy(m => m.Patch == null ? 1 : 0)
+        (HasExported ? Exported : Members).OrderByDescending(m => m.Line.Takes.Count(t => t.Kept)).ThenBy(m => m.Patch == null ? 1 : 0)
             .ThenBy(m => m.Patch?.Name ?? "", StringComparer.OrdinalIgnoreCase).First();
 }
 
@@ -112,7 +121,7 @@ public static class VariantsService
         var map = new Dictionary<string, VariantGroup>(StringComparer.Ordinal);
         void Add(DbvoPatch? p, Phase2Line l)
         {
-            if (l.Excluded || string.IsNullOrWhiteSpace(l.FinalLine)) return;
+            if (string.IsNullOrWhiteSpace(l.FinalLine)) return;
             var stem = l.FileStem ?? LineNaming.Stem(l.FinalLine, voice.Naming);
             var key = voice.Naming == NamingMode.Legacy ? stem.ToUpperInvariant() : stem;
             if (!map.TryGetValue(key, out var g)) map[key] = g = new VariantGroup { Key = key, Text = l.FinalLine, Stem = stem };
@@ -121,7 +130,8 @@ public static class VariantsService
         foreach (var p in patches.Where(p => p.VoicePackId == voice.Id).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
             foreach (var l in p.Lines) Add(p, l);
         foreach (var l in cfg.AddedLines) Add(null, l);
-        return map.Values.ToList();
+        // A line no patch here exports (every copy omitted or excluded) has no file of this voice pack to vary.
+        return map.Values.Where(g => g.HasExported).ToList();
     }
 
     private static readonly Regex Leading = new(@"^\s*((?:\[[^\]]*\]\s*)*)", RegexOptions.Compiled);
