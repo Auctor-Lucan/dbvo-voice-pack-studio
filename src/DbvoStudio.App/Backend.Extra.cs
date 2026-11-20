@@ -294,6 +294,7 @@ public sealed partial class Backend
                 {
                     NoUndoHere();
                     var patch = LoadPatch(S(p, "id"));
+                    NotWhilePackBuilds(patch);
                     List<string>? ids = p.TryGetProperty("lineIds", out var li) && li.ValueKind == JsonValueKind.Array ? Strings(p, "lineIds") : null;
                     int n = new Phase2Service(_lib, Runtime()).PurgeUnusedTakes(patch, ids);
                     return new { removed = n, patch = PatchDto(patch) };

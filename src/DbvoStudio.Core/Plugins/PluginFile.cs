@@ -120,10 +120,15 @@ public sealed class PluginFile
             uint size = BitConverter.ToUInt32(gh, 4);
             long total = sig == "GRUP" ? size : 24L + size;
             if (sig == "GRUP" && size < 24) throw new InvalidDataException($"Corrupt group at offset {start}.");
-            if (start + total > fs.Length) throw new InvalidDataException($"Corrupt {(sig == "GRUP" ? "group" : "record")} at offset {start}.");
             bool wanted = sig == "GRUP"
                 ? BitConverter.ToUInt32(gh, 12) != 0 || groups.Contains(Subrecord.Ascii(gh.AsSpan(8, 4)))
                 : signatures.Contains(sig);
+            if (start + total > fs.Length)
+            {
+                // A damaged tail in a part no task reads is passed over, as the whole-file reader did; in a wanted part it is an error.
+                if (!wanted) break;
+                throw new InvalidDataException($"Corrupt {(sig == "GRUP" ? "group" : "record")} at offset {start}.");
+            }
             if (!wanted)
             {
                 fs.Seek(start + total, SeekOrigin.Begin);

@@ -793,6 +793,7 @@ public sealed partial class Phase2Service
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 line.Status = line.Takes.Count > 0 ? Phase2Status.Generated : Phase2Status.Pending;
+                line.RefreshStale(); // a line whose take says older words stays Stale
                 throw;
             }
             catch (Exception ex)
@@ -840,6 +841,8 @@ public sealed partial class Phase2Service
                     {
                         // A failed variant leaves the line's own take as it was; the error is reported, not stuck on the line.
                         line.Status = Phase2Status.Generated;
+                        line.LastError = null;
+                        line.RefreshStale();
                     }
                     if (save != null) save(); else _lib.Save(patch);
                     if (onLineDone != null) await onLineDone(line);
@@ -895,7 +898,7 @@ public sealed partial class Phase2Service
         int n = 0;
         foreach (var line in patch.Lines.Where(l => only == null || only.Contains(l.LineId)))
         {
-            foreach (var t in line.Takes.Where(t => t.Id != line.SelectedTakeId && !t.Kept).ToList())
+            foreach (var t in line.Takes.Where(t => t.Id != line.SelectedTakeId && !t.Kept && !t.VariantPending).ToList()) // Creative variants not heard yet stay
             {
                 var dir = Path.GetDirectoryName(Path.Combine(_lib.PatchFolder(patch.Id), t.WavPath));
                 try { if (dir != null && Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }

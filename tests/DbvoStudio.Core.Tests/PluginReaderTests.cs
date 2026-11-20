@@ -97,4 +97,20 @@ public class PluginReaderTests : IDisposable
         Assert.Equal(new byte[] { 9, 9 }, File.ReadAllBytes(path));
         Assert.Single(Directory.GetFiles(_dir));
     }
+
+    [Fact]
+    public void A_damaged_tail_in_a_group_no_task_reads_is_passed_over()
+    {
+        // the dialogue first, then a WEAP group that claims more bytes than the file has
+        var b = new TestPluginBuilder();
+        b.AddTopic(0x01000800, "MyTopic", "Hello there.", (0x01000801, null));
+        var broken = Group(Encoding.ASCII.GetBytes("WEAP"), 0, Record("WEAP", 0x01000900, Edid("MySword")));
+        BitConverter.GetBytes((uint)(broken.Length + 500)).CopyTo(broken, 4);
+        var path = Path.Combine(_dir, "Tail.esp");
+        File.WriteAllBytes(path, b.Build().Concat(broken).ToArray());
+        var pf = PluginFile.Read(path);
+        Assert.Equal(new[] { "DIAL", "INFO" }, pf.Records.Select(r => r.Signature));
+        // in a part a task does read, it is still an error
+        Assert.Throws<InvalidDataException>(() => PluginFile.Read(path, new HashSet<string> { "WEAP" }));
+    }
 }

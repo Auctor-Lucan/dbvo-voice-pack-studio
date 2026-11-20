@@ -25,6 +25,17 @@ public static class BsaWriter
     /// <summary>True when Windows-1252 can hold the name exactly.</summary>
     public static bool CanStore(string name) => Names.GetString(Names.GetBytes(name)) == name;
 
+    /// <summary>A folder name is stored with a one-byte length (its bytes plus the closing zero).</summary>
+    public const int MaxFolderBytes = 254;
+
+    /// <summary>True when the folder part of an archive path fits a BSA.</summary>
+    public static bool FolderFits(string archivePath)
+    {
+        var p = archivePath.Replace('/', '\\').TrimStart('\\');
+        int i = p.LastIndexOf('\\');
+        return i < 0 || Names.GetByteCount(p[..i]) <= MaxFolderBytes;
+    }
+
     public static ulong Hash(string name, bool folder)
     {
         name = name.ToLowerInvariant().Replace('/', '\\');
@@ -58,10 +69,18 @@ public static class BsaWriter
         // A name Windows-1252 can't hold would be written as "?" and never found by the game: refuse it and say which.
         var bad = folders.SelectMany(f => (CanStore(f.Folder) ? Enumerable.Empty<string>() : new[] { f.Folder + "\\" })
             .Concat(f.Files.Where(x => !CanStore(x.Name)).Select(x => (f.Folder.Length > 0 ? f.Folder + "\\" : "") + x.Name))).ToList();
+        var tooLong = folders.FirstOrDefault(f => Names.GetByteCount(f.Folder) > MaxFolderBytes).Folder;
+        if (tooLong != null) throw new InvalidOperationException($"The folder name \"{tooLong}\" is too long for a BSA ({MaxFolderBytes} characters at most).");
         if (bad.Count > 0)
             throw new InvalidOperationException($"{bad.Count} file name(s) have characters a BSA can't store (Skyrim reads BSA names in the Windows-1252 code page), for example: "
                 + string.Join(", ", bad.Take(5).Select(b => "\"" + b + "\"")) + ". Keep these files loose, or change the line's text in Phase 1 so its file name uses plain characters.");
-        long dataBytes = folders.Sum(f => f.Files.Sum(x => x.Size));
+        // Entries with the same source file share one copy of its data (their records point at the same bytes).
+        var dataAt = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        var order = new List<(string Source, long Size)>();
+        foreach (var f in folders)
+            foreach (var x in f.Files)
+                if (!dataAt.ContainsKey(Path.GetFullPath(x.SourcePath))) { dataAt[Path.GetFullPath(x.SourcePath)] = -1; order.Add((Path.GetFullPath(x.SourcePath), x.Size)); }
+        long dataBytes = order.Sum(o => o.Size);
         if (dataBytes > MaxDataBytes) throw new InvalidOperationException($"{dataBytes / 1_000_000} MB is too much for one BSA (about 2,000 MB at most).");
         int fileCount = folders.Sum(f => f.Files.Count);
         int folderNames = folders.Sum(f => Names.GetByteCount(f.Folder) + 1);
@@ -72,6 +91,8 @@ public static class BsaWriter
 
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
         var tmp = path + ".part";
+        try
+        {
         using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
         using (var bw = new BinaryWriter(fs, Names))
         {
@@ -87,26 +108,32 @@ public static class BsaWriter
                 blockOff += 1 + Names.GetByteCount(f.Folder) + 1 + 16L * f.Files.Count;
             }
             long dataOff = dataStart;
+            foreach (var o in order) { dataAt[o.Source] = dataOff; dataOff += o.Size; }
             foreach (var f in folders)
             {
                 var fb = Names.GetBytes(f.Folder);
                 bw.Write((byte)(fb.Length + 1)); bw.Write(fb); bw.Write((byte)0);
                 foreach (var x in f.Files)
                 {
-                    bw.Write(Hash(x.Name, false)); bw.Write((uint)x.Size); bw.Write((uint)dataOff);
-                    dataOff += x.Size;
+                    bw.Write(Hash(x.Name, false)); bw.Write((uint)x.Size); bw.Write((uint)dataAt[Path.GetFullPath(x.SourcePath)]);
                 }
             }
             foreach (var f in folders) foreach (var x in f.Files) { bw.Write(Names.GetBytes(x.Name)); bw.Write((byte)0); }
-            foreach (var f in folders)
-                foreach (var x in f.Files)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    using var src = File.OpenRead(x.SourcePath);
-                    src.CopyTo(fs);
-                }
+            foreach (var o in order)
+            {
+                ct.ThrowIfCancellationRequested();
+                using var src = File.OpenRead(o.Source);
+                src.CopyTo(fs);
+            }
         }
         File.Move(tmp, path, true);
+        }
+        catch
+        {
+            // a cancelled or failed write leaves no half archive behind (the earlier one, if any, is untouched)
+            try { File.Delete(tmp); } catch { }
+            throw;
+        }
         return fileCount;
     }
 }

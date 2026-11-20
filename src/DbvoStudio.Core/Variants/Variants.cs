@@ -5,6 +5,7 @@ using DbvoStudio.Core.Audio;
 using DbvoStudio.Core.Naming;
 using DbvoStudio.Core.Plugins;
 using DbvoStudio.Core.Projects;
+using DbvoStudio.Core.Text;
 using DbvoStudio.Core.Tools;
 
 namespace DbvoStudio.Core.Variants;
@@ -52,6 +53,8 @@ public sealed class VariantsConfig
     /// <summary>Lines added by hand that no patch of this voice pack has.</summary>
     public List<Phase2Line> AddedLines { get; set; } = new();
     public DateTime? LastExportUtc { get; set; }
+    /// <summary>The BSA of the last build (its name may have changed since): Remove takes it away too.</summary>
+    public string? LastPackBsa { get; set; }
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
 
     public static VariantsConfig Default(string voicePackId) => new() { VoicePackId = voicePackId, Rows = BuiltInPresets()[1].Rows };
@@ -85,24 +88,44 @@ public sealed class VariantGroup
     public List<(DbvoPatch? Patch, Phase2Line Line)> Members { get; } = new();
 
     /// <summary>
-    /// The members whose line is exported: not omitted (a reference covers it, e.g. the Skyrim Base Game) and not excluded.
+    /// DBVO 2.0 names: each patch exports its own ★ takes, so only the home patch's ★ count (Legacy: the Variants Pack
+    /// gathers the ★ of every patch).
+    /// </summary>
+    public bool PerPatch { get; init; }
+
+    /// <summary>True when a patch line would be written by an export: as Phase2Service.ExportLines decides.</summary>
+    public static bool Ships(DbvoPatch? p, Phase2Line l) => !l.IsOmitted && !l.Excluded && (p == null || !p.ExportApprovedOnly || l.Approved);
+
+    /// <summary>
+    /// The members whose line is exported: not omitted (a reference covers it, e.g. the Skyrim Base Game), not excluded,
+    /// and approved when its patch exports approved lines only.
     /// Only their takes count. An omitted line's takes (often old WAV + LIP files imported when its patch was made) never
     /// reach the game, so they are neither shown, counted, starred, generated into nor packed. Omitted lines still count
     /// under "said in": the game plays the same file for them.
     /// </summary>
-    public IEnumerable<(DbvoPatch? Patch, Phase2Line Line)> Exported => Members.Where(m => !m.Line.IsOmitted && !m.Line.Excluded);
+    public IEnumerable<(DbvoPatch? Patch, Phase2Line Line)> Exported => Members.Where(m => Ships(m.Patch, m.Line));
     public bool HasExported => Exported.Any();
 
+    /// <summary>The members whose ★ count: every exported one, or with DBVO 2.0 names only the home one.</summary>
+    private IEnumerable<(DbvoPatch? Patch, Phase2Line Line)> Counted => PerPatch ? (HasExported ? new[] { Home } : Array.Empty<(DbvoPatch?, Phase2Line)>()) : Exported;
+
     public IEnumerable<(DbvoPatch? Patch, Phase2Line Line, Take Take)> Kept =>
-        Exported.SelectMany(m => m.Line.Takes.Where(t => t.Kept).Select(t => (m.Patch, m.Line, t))).OrderBy(x => x.t.CreatedUtc);
-    public int KeptCount => Exported.Sum(m => m.Line.Takes.Count(t => t.Kept));
+        Counted.SelectMany(m => m.Line.Takes.Where(t => t.Kept).Select(t => (m.Patch, m.Line, t))).OrderBy(x => x.t.CreatedUtc);
+    public int KeptCount => Counted.Sum(m => m.Line.Takes.Count(t => t.Kept));
     public int TakeCount => Exported.Sum(m => m.Line.Takes.Count);
     public int PendingCount => Exported.Sum(m => m.Line.Takes.Count(t => t.VariantPending && !t.Kept));
-    public bool Added => Members.All(m => m.Patch == null);
+    /// <summary>
+    /// No patch exports this line's own file, so the Variants Pack has to (a line added by hand). Not when a patch has the
+    /// line but a reference covers it: the reference's own file (e.g. the Skyrim Base Game patch) plays then.
+    /// </summary>
+    public bool Added => !Members.Any(m => m.Patch != null && (Ships(m.Patch, m.Line) || m.Line.IsOmitted));
+    /// <summary>A hand-added copy of this line exists (it can be removed from the Variants page).</summary>
+    public bool HasAddedCopy => Members.Any(m => m.Patch == null);
 
     /// <summary>Where new variant takes go: the exported line that already has the most kept takes, else the first patch by name.</summary>
     public (DbvoPatch? Patch, Phase2Line Line) Home =>
-        (HasExported ? Exported : Members).OrderByDescending(m => m.Line.Takes.Count(t => t.Kept)).ThenBy(m => m.Patch == null ? 1 : 0)
+        // With DBVO 2.0 names a hand-added copy ships nowhere, so a patch copy is always preferred.
+        (HasExported ? Exported : Members).OrderBy(m => PerPatch && m.Patch == null ? 1 : 0).ThenByDescending(m => m.Line.Takes.Count(t => t.Kept)).ThenBy(m => m.Patch == null ? 1 : 0)
             .ThenBy(m => m.Patch?.Name ?? "", StringComparer.OrdinalIgnoreCase).First();
 }
 
@@ -124,7 +147,7 @@ public static class VariantsService
             if (string.IsNullOrWhiteSpace(l.FinalLine)) return;
             var stem = l.FileStem ?? LineNaming.Stem(l.FinalLine, voice.Naming);
             var key = voice.Naming == NamingMode.Legacy ? stem.ToUpperInvariant() : stem;
-            if (!map.TryGetValue(key, out var g)) map[key] = g = new VariantGroup { Key = key, Text = l.FinalLine, Stem = stem };
+            if (!map.TryGetValue(key, out var g)) map[key] = g = new VariantGroup { Key = key, Text = l.FinalLine, Stem = stem, PerPatch = voice.Naming != NamingMode.Legacy };
             g.Members.Add((p, l));
         }
         foreach (var p in patches.Where(p => p.VoicePackId == voice.Id).OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
@@ -137,13 +160,29 @@ public static class VariantsService
     private static readonly Regex Leading = new(@"^\s*((?:\[[^\]]*\]\s*)*)", RegexOptions.Compiled);
     private static readonly Regex Tag = new(@"\[[^\]]*\]", RegexOptions.Compiled);
 
+    /// <summary>A spoken text's leading [tags] and the rest (mid-line tags such as [laughs] stay in the words).</summary>
+    public static (string Lead, string Words) SplitLeading(string? spoken)
+    {
+        var m = Leading.Match(spoken ?? "");
+        return (Regex.Replace(m.Groups[1].Value.Trim(), @"\s+", " "), (spoken ?? "")[m.Length..].Trim());
+    }
+
     /// <summary>"British Extremely Baleful" → "[British Extremely Baleful]"; tags as written stay.</summary>
     public static string NormalizePrefix(string prefix)
     {
-        var p = (prefix ?? "").Trim();
+        var p = Regex.Replace((prefix ?? "").Trim(), @"\s+", " ");
         if (p.Length == 0) return "";
-        if (!p.Contains('[')) return "[" + p.Trim('[', ']').Trim() + "]";
-        return Regex.Replace(p, @"\s+", " ");
+        // Only whole [tags]: kept as written, empty ones dropped. Anything else (loose words beside a tag, a bracket
+        // left open) would be spoken, so all of it becomes one tag.
+        var tags = Tag.Matches(p).Select(m => m.Value).ToList();
+        var rest = Tag.Replace(p, "").Trim();
+        if (tags.Count > 0 && rest.Length == 0)
+        {
+            var kept = tags.Where(t => t[1..^1].Trim().Length > 0).Select(t => "[" + t[1..^1].Trim() + "]").ToList();
+            return string.Join(" ", kept);
+        }
+        var inner = Regex.Replace(p.Replace('[', ' ').Replace(']', ' '), @"\s+", " ").Trim();
+        return inner.Length == 0 ? "" : "[" + inner + "]";
     }
 
     /// <summary>
@@ -261,16 +300,23 @@ public sealed class VariantsPackBuilder
     /// DBVO 1 pack). Folder names are stored exactly, trailing period included: the game finds them that way inside a BSA.
     /// </summary>
     public async Task<VariantsPackReport> BuildAsync(VoicePack voice, List<VariantGroup> groups, VariantsConfig cfg, ExternalTools tools,
-        IProgress<GenerationProgress>? progress = null, CancellationToken ct = default)
+        IProgress<GenerationProgress>? progress = null, CancellationToken ct = default, ISet<string>? patchFiles = null)
     {
+        // patchFiles: the file names (stem, upper case) your patches export themselves; the pack's names must not match them.
         if (voice.Naming != NamingMode.Legacy) throw new InvalidOperationException("The Variants Pack is for voice packs with DBVO 1 (Legacy) names. DBVO 2.0 patches already export their ★ variants with each patch.");
         var folder = cfg.OutputFolderFor(voice);
-        if (string.IsNullOrWhiteSpace(folder)) throw new InvalidOperationException("Set the folder for the Variants Pack first (Variant settings), or a release folder for this voice pack.");
+        if (string.IsNullOrWhiteSpace(folder)) throw new InvalidOperationException("Set the folder for the Variants Pack first (Variants Pack ▾ → Name and folder…), or a release folder for this voice pack.");
         var name = cfg.PackNameFor(voice);
         if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) throw new InvalidOperationException($"\"{name}\" can't be a file name. Change the Variants Pack name.");
         var rep = new VariantsPackReport();
         var todo = groups.Where(g => g.KeptCount >= 2).OrderBy(g => g.Stem, StringComparer.OrdinalIgnoreCase).ToList();
         if (todo.Count == 0) throw new InvalidOperationException("No line has two or more ★ takes yet, so there are no variants to pack.");
+        // A file right in the pack's folder whose name a patch exports itself ("Hello(1)" beside Hello's variant (1)):
+        // the loose patch file would win in game, so that line is left out.
+        var packDir = @"sound\dbvo\" + voice.PackId.ToLowerInvariant();
+        bool IsPatchFile(string archivePath) => patchFiles != null
+            && string.Equals(Path.GetDirectoryName(archivePath), packDir, StringComparison.OrdinalIgnoreCase)
+            && patchFiles.Contains(Path.GetFileNameWithoutExtension(archivePath).ToUpperInvariant());
         var stage = Path.Combine(Path.GetTempPath(), "dbvo-variants-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(stage);
         var workRoot = Path.Combine(Path.GetTempPath(), "dbvo");
@@ -278,6 +324,8 @@ public sealed class VariantsPackBuilder
         var cache = new FuzCache(_lib.FuzCacheFolder);
         var encoder = FuzCache.EncoderId(tools.XwmaEncodePath, 48000);
         var entries = new List<BsaWriter.Entry>();
+        // Every archive path once: a line whose own name looks like another line's variant ("Hello(1)") can't take its place.
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var list = new StringBuilder();
         int done = 0, n = 0;
         try
@@ -293,21 +341,48 @@ public sealed class VariantsPackBuilder
                     done++;
                     continue;
                 }
+                if (!BsaWriter.FolderFits(paths[0].Dbvo2))
+                {
+                    rep.Skipped.Add($"{g.Text}: the line is too long to be a folder name in a BSA.");
+                    done++;
+                    continue;
+                }
                 var kept = g.Kept.Take(paths.Count).ToList();
-                int i = 0;
+                // Every take of the line first: one that can't be read (its files are missing) leaves the line out, not the whole pack.
+                var files = new List<string>();
+                string? bad = null;
                 foreach (var (p, _, take) in kept)
                 {
-                    var fuz = await VariantsService.TakeFuzAsync(RootOf(voice, p), take, tools, cache, encoder, workRoot, ct);
-                    var file = Path.Combine(stage, (n++).ToString("D6") + ".fuz");
-                    await File.WriteAllBytesAsync(file, fuz, ct);
-                    rep.Bytes += fuz.Length;
-                    entries.Add(new BsaWriter.Entry(paths[i].Dbvo2, file));
-                    if (paths[i].Dbrev is { } d) entries.Add(new BsaWriter.Entry(d, file));
-                    // A line added by hand has no patch exporting its own file: the first variant is that file too (DBVO 1
-                    // plays it, and DBReV looks for it before name(1)…).
-                    if (i == 0 && g.Added) entries.Add(new BsaWriter.Entry(@"sound\dbvo\" + voice.PackId.ToLowerInvariant() + @"\" + g.Stem + ".fuz", file));
-                    i++;
+                    try
+                    {
+                        var fuz = await VariantsService.TakeFuzAsync(RootOf(voice, p), take, tools, cache, encoder, workRoot, ct);
+                        var file = Path.Combine(stage, (n++).ToString("D6") + ".fuz");
+                        await File.WriteAllBytesAsync(file, fuz, ct);
+                        files.Add(file);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { bad = $"{g.Text}: take #{take.Slot}{(p != null ? " in " + p.Name : "")} couldn't be read ({FriendlyError.From(ex)})."; break; }
                 }
+                if (bad != null) { rep.Skipped.Add(bad); done++; continue; }
+                var mine = new List<BsaWriter.Entry>();
+                for (int i = 0; i < files.Count; i++)
+                {
+                    mine.Add(new BsaWriter.Entry(paths[i].Dbvo2, files[i]));
+                    if (paths[i].Dbrev is { } d) mine.Add(new BsaWriter.Entry(d, files[i]));
+                }
+                // A line no patch exports (added by hand): the first variant is its own file too (DBVO 1 plays it, and
+                // DBReV looks for it before name(1)…).
+                if (g.Added) mine.Add(new BsaWriter.Entry(@"sound\dbvo\" + voice.PackId.ToLowerInvariant() + @"\" + g.Stem + ".fuz", files[0]));
+                var clash = mine.FirstOrDefault(e => used.Contains(e.ArchivePath) || IsPatchFile(e.ArchivePath));
+                if (clash != null)
+                {
+                    rep.Skipped.Add($"{g.Text}: {clash.ArchivePath} is already another line's file.");
+                    done++;
+                    continue;
+                }
+                foreach (var e in mine) used.Add(e.ArchivePath);
+                entries.AddRange(mine);
+                rep.Bytes += files.Sum(f => new FileInfo(f).Length);
                 rep.Lines++;
                 rep.Takes += kept.Count;
                 list.AppendLine($"{g.Text}\t{kept.Count} variant(s)\t{g.Stem}");
@@ -330,6 +405,7 @@ public sealed class VariantsPackBuilder
             try { Directory.Delete(stage, true); } catch { }
         }
         cfg.LastExportUtc = DateTime.UtcNow;
+        cfg.LastPackBsa = rep.Bsa;
         return rep;
     }
 }

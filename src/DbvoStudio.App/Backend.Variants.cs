@@ -47,18 +47,20 @@ public sealed partial class Backend
     }
 
     /// <summary>One line of a patch, as much as the Variants list needs (patch files run to tens of MB each).</summary>
-    private sealed record VEntry(string PatchId, string PatchName, string LineId, string Key, string Text, string Stem, string Words, string[] ModIds, int Takes, int Kept, int Pending, bool Exported);
+    private sealed record VEntry(string PatchId, string PatchName, string LineId, string Key, string Text, string Stem, string Words, string Lead, string[] ModIds, int Takes, int Kept, int Pending, bool Exported);
     /// <summary>Per patch file (date + size + naming): its voice pack and lines, so the list never reloads an unchanged patch.</summary>
     private readonly Dictionary<string, (DateTime Write, long Len, string Naming, string VoiceId, List<VEntry> Entries)> _vIndex = new();
 
-    private static List<VEntry> EntriesOf(string patchId, string patchName, IEnumerable<Phase2Line> lines, VoicePack v) =>
+    private static List<VEntry> EntriesOf(DbvoPatch? patch, string patchName, IEnumerable<Phase2Line> lines, VoicePack v) =>
         lines.Where(l => !string.IsNullOrWhiteSpace(l.FinalLine)).Select(l =>
         {
             var stem = l.FileStem ?? LineNaming.Stem(l.FinalLine, v.Naming);
-            // Omitted (a reference covers it) or excluded: the line is never exported, so its takes don't count (VariantGroup.Exported).
-            bool ex = !l.IsOmitted && !l.Excluded;
-            return new VEntry(patchId, patchName, l.LineId, v.Naming == NamingMode.Legacy ? stem.ToUpperInvariant() : stem, l.FinalLine, stem,
-                SpokenText.StripTags(l.Spoken), l.Sources.Select(s => s.ModId).ToArray(),
+            // Not written by an export (a reference covers it, excluded, or not approved while the patch exports approved
+            // lines only): its takes don't count (VariantGroup.Exported).
+            bool ex = VariantGroup.Ships(patch, l);
+            var (lead, words) = VariantsService.SplitLeading(l.Spoken);
+            return new VEntry(patch?.Id ?? "", patchName, l.LineId, v.Naming == NamingMode.Legacy ? stem.ToUpperInvariant() : stem, l.FinalLine, stem,
+                words, lead, l.Sources.Select(s => s.ModId).ToArray(),
                 ex ? l.Takes.Count : 0, ex ? l.Takes.Count(t => t.Kept) : 0, ex ? l.Takes.Count(t => t.VariantPending && !t.Kept) : 0, ex);
         }).ToList();
 
@@ -66,7 +68,7 @@ public sealed partial class Backend
     /// Every line of the voice pack's patches. Patches open in the app are read as they are; the rest from an index kept
     /// per file, refreshed only when a file changed. Nothing here adds patches to the app's cache.
     /// </summary>
-    private List<VEntry> VariantEntries(VoicePack v)
+    private List<VEntry> VariantEntries(VoicePack v, List<string>? unreadable = null)
     {
         var all = new List<VEntry>();
         // Which patches are this voice pack's: from the list rows the app keeps anyway, so other voice packs' files are never read.
@@ -81,7 +83,7 @@ public sealed partial class Backend
             lock (_patches) _patches.TryGetValue(id, out cached);
             if (cached != null)
             {
-                if (cached.VoicePackId == v.Id) all.AddRange(EntriesOf(cached.Id, cached.Name, cached.Lines, v));
+                if (cached.VoicePackId == v.Id) all.AddRange(EntriesOf(cached, cached.Name, cached.Lines, v));
                 continue;
             }
             var file = Path.Combine(dir, "patch.json");
@@ -97,9 +99,16 @@ public sealed partial class Backend
                 }
             }
             DbvoPatch? p;
-            try { p = _lib.LoadPatch(id); } catch { continue; }
+            try { p = _lib.LoadPatch(id); }
+            catch (Exception ex)
+            {
+                // Said on the page (its lines are missing from the list), not skipped in silence.
+                App.Log($"Variants: patch {id} couldn't be read: {ex.Message}");
+                unreadable?.Add(id);
+                continue;
+            }
             if (p == null) continue;
-            var entries = p.VoicePackId == v.Id ? EntriesOf(p.Id, p.Name, p.Lines, v) : new List<VEntry>();
+            var entries = p.VoicePackId == v.Id ? EntriesOf(p, p.Name, p.Lines, v) : new List<VEntry>();
             lock (_vIndex) _vIndex[id] = (fi.LastWriteTimeUtc, fi.Length, naming, p.VoicePackId, entries);
             all.AddRange(entries);
         }
@@ -113,8 +122,26 @@ public sealed partial class Backend
         return VariantEntries(v).Where(e => set.Contains(e.Key)).Select(e => e.PatchId).Distinct().Select(LoadPatch).ToList();
     }
 
-    /// <summary>Whether the prefix goes as context when the settings don't say: the app's default for ElevenLabs.</summary>
-    private bool DefaultContext(VoicePack v) => _settings.LeadingTagsAsContext && v.Engine == "elevenlabs";
+    /// <summary>ElevenLabs takes leading tags as context, except eleven_v3 (as in Phase 2).</summary>
+    private static bool ContextAvailable(VoicePack v) => v.Engine == "elevenlabs" && !v.Eleven.ModelId.Contains("v3", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Whether the prefix goes as context when the settings don't say: the app's default, where context exists.</summary>
+    private bool DefaultContext(VoicePack v) => _settings.LeadingTagsAsContext && ContextAvailable(v);
+    /// <summary>The setting in effect: never on where the model can't take context.</summary>
+    private bool ContextFor(VoicePack v, VariantsConfig cfg) => ContextAvailable(v) && (cfg.TagsAsContext ?? DefaultContext(v));
+    /// <summary>Hand-added lines need a file name made from the line's text: DBVO 1 (Legacy) names only.</summary>
+    private static void AddedLinesAllowed(VoicePack v)
+    {
+        if (v.Naming != NamingMode.Legacy)
+            throw new InvalidOperationException("Only voice packs with DBVO 1 (Legacy) file names can have lines added by hand. With DBVO 2.0 or DBReV names a line's file comes from its ID in a plugin, and a typed line has none.");
+    }
+    /// <summary>The voice pack whose Variants Pack is being built right now (its stars can't change meanwhile).</summary>
+    private volatile string? _variantsExporting;
+    private void NotWhileExporting(string voiceId)
+    {
+        if (_variantsExporting == voiceId) throw new InvalidOperationException("The Variants Pack is being built right now. Wait for that to finish first.");
+    }
+    /// <summary>Phase 2: stars and takes of a patch can't change while its voice pack's Variants Pack reads them.</summary>
+    private void NotWhilePackBuilds(DbvoPatch patch) => NotWhileExporting(patch.VoicePackId);
 
     private async Task<object?> DispatchVariants(string m, JsonElement p)
     {
@@ -128,17 +155,19 @@ public sealed partial class Backend
                     return new { data = dto, creditRate = rate };
                 }
             case "variants.line": return await Locked(() => VariantLineDto(S(p, "voiceId"), S(p, "key")));
-            case "variants.saveSettings": return await Locked(() => SaveVariantSettings(p));
-            case "variants.keep": return await Locked(() => KeepVariant(p));
+            case "variants.saveSettings": return await Locked(() => { NoUndoHere(); return SaveVariantSettings(p); });
+            case "variants.keep": return await Locked(() => { NoUndoHere(); return KeepVariant(p); });
             case "variants.deleteTake": return await Locked(() => DeleteVariantTake(p));
+            case "variants.listened": return await Locked(() => { NoUndoHere(); return ListenedVariant(p); });
             case "variants.checkLine": return await Locked(() => CheckTypedLine(S(p, "voiceId"), S(p, "text")));
             case "variants.search": return await Locked(() => SearchLines(S(p, "voiceId"), S(p, "q")));
-            case "variants.addLine": return await Locked(() => AddVariantLine(p));
-            case "variants.removeLine": return await Locked(() => RemoveVariantLine(S(p, "voiceId"), S(p, "key")));
+            case "variants.addLine": return await Locked(() => { NoUndoHere(); return AddVariantLine(p); });
+            case "variants.removeLine": return await Locked(() => { NoUndoHere(); return RemoveVariantLine(S(p, "voiceId"), S(p, "key")); });
+            case "variants.removePack": return await Locked(() => { NoUndoHere(); return RemoveVariantsPack(S(p, "voiceId")); });
             case "variants.generate": return StartVariants(p);
             case "variants.export": return StartVariantsExport(p);
             case "variants.fomods": return await Locked(() => _lib.LoadFomods().Where(f => f.VoicePackId == S(p, "voiceId")).Select(f => new { f.Id, f.Name }).ToList());
-            case "variants.addToFomod": return await Locked(() => AddVariantsToFomod(S(p, "voiceId"), S(p, "fomodId")));
+            case "variants.addToFomod": return await Locked(() => { NoUndoHere(); return AddVariantsToFomod(S(p, "voiceId"), S(p, "fomodId")); });
             default: return NotHandled;
         }
     }
@@ -147,37 +176,55 @@ public sealed partial class Backend
     {
         var voice = LoadVoice(voiceId);
         var cfg = LoadVariantsCfg(voiceId);
-        var entries = VariantEntries(voice).Concat(EntriesOf("", "Added here", cfg.AddedLines, voice)).ToList();
+        var unreadable = new List<string>();
+        var entries = VariantEntries(voice, unreadable).Concat(EntriesOf(null, "Added here", cfg.AddedLines, voice)).ToList();
+        bool perPatch = voice.Naming != NamingMode.Legacy;
         var lines = entries.GroupBy(e => e.Key).Where(g => g.Any(e => e.Exported)).Select(g =>
         {
             // the line new variants go to: the exported one with the most ★ already, else the first patch by name (as VariantGroup.Home)
-            var home = g.Where(e => e.Exported).OrderByDescending(e => e.Kept).ThenBy(e => e.PatchId.Length == 0 ? 1 : 0).ThenBy(e => e.PatchName, StringComparer.OrdinalIgnoreCase).First();
+            var home = g.Where(e => e.Exported).OrderBy(e => perPatch && e.PatchId.Length == 0 ? 1 : 0).ThenByDescending(e => e.Kept).ThenBy(e => e.PatchId.Length == 0 ? 1 : 0).ThenBy(e => e.PatchName, StringComparer.OrdinalIgnoreCase).First();
             return new
             {
                 key = g.Key,
                 text = home.Text,
                 stem = home.Stem,
-                // the words as you voiced them (no tags): what a variant says after its prefix
+                // the words as you voiced them, without the leading tags: what a variant says after its prefix
                 words = home.Words,
+                // the line's own leading tags: sent when the prefix is empty
+                lead = home.Lead,
                 mods = g.SelectMany(e => e.ModIds).Distinct().Count(),
                 patches = g.Where(e => e.PatchId.Length > 0 && e.Exported).Select(e => e.PatchId).Distinct().Count(),
                 takes = g.Sum(e => e.Takes),
-                kept = g.Sum(e => e.Kept),
+                // DBVO 2.0 names: each patch exports its own stars, so only the home patch's count (Legacy: the pack gathers them all)
+                kept = perPatch ? home.Kept : g.Sum(e => e.Kept),
                 pending = g.Sum(e => e.Pending),
-                added = g.All(e => e.PatchId.Length == 0),
+                // no patch exports the line's own file (the Variants Pack writes it)
+                added = !g.Any(e => e.Exported && e.PatchId.Length > 0),
             };
         }).ToList();
-        bool ctx = cfg.TagsAsContext ?? DefaultContext(voice);
+        bool ctx = ContextFor(voice, cfg);
+        var packFolder = cfg.OutputFolderFor(voice);
+        var packName = cfg.PackNameFor(voice);
+        var names = unreadable.Count == 0 ? new Dictionary<string, string>() : ListRowsFor(_lib.LoadVoicePacks()).Item2
+            .Where(r => r.TryGetProperty("id", out _) && r.TryGetProperty("name", out _))
+            .GroupBy(r => r.GetProperty("id").GetString() ?? "").ToDictionary(g => g.Key, g => g.First().GetProperty("name").GetString() ?? g.Key);
+        var unreadableNames = unreadable.Select(id => names.TryGetValue(id, out var n) && n.Length > 0 ? n : id).ToList();
         return new
         {
+            unreadable = unreadableNames,
             voice = new { voice.Id, voice.Name, voice.Color, naming = voice.Naming.ToString(), voice.PackId, voice.Engine, modelId = voice.Eleven.ModelId,
                 discrete = ModelCapabilities.HasDiscreteStability(voice.Eleven.ModelId), releaseFolder = voice.Destinations.ReleaseFolder },
             settings = new
             {
                 prefix = cfg.Prefix,
                 tagsAsContext = ctx,
+                contextAvailable = ContextAvailable(voice),
                 contextIsDefault = cfg.TagsAsContext == null,
                 appContextDefault = DefaultContext(voice),
+                // what the Variants Pack name and folder are set to ("" = follow the voice pack)
+                packNameSet = cfg.PackName,
+                outputFolderSet = cfg.OutputFolder,
+                packBuilt = !string.IsNullOrWhiteSpace(packFolder) && File.Exists(Path.Combine(packFolder, packName + ".bsa")),
                 preset = cfg.Preset,
                 rows = cfg.Rows,
                 presets = VariantsConfig.BuiltInPresets().Select(x => new { x.Name, x.Rows, builtIn = true })
@@ -206,6 +253,13 @@ public sealed partial class Backend
             stem = g.Stem,
             spoken = home.Line.Spoken,
             added = g.Added,
+            // a copy typed in on this page: "Remove this line" takes it (and its takes) away
+            canRemove = g.HasAddedCopy,
+            // the stars that ship: every exported copy's (Legacy, gathered by the Variants Pack), else the home patch's
+            keptCount = g.KeptCount,
+            homePatch = g.Home.Patch?.Name ?? "",
+            lead = VariantsService.SplitLeading(home.Line.Spoken).Lead,
+            words = VariantsService.SplitLeading(home.Line.Spoken).Words,
             modNames = g.Members.SelectMany(x => x.Line.Sources.Select(s => mods.TryGetValue(s.ModId, out var n) ? n : "")).Where(n => n.Length > 0).Distinct().OrderBy(n => n).ToList(),
             patchNames = g.Exported.Where(x => x.Patch != null).Select(x => x.Patch!.Name).Distinct().ToList(),
             takes = g.Exported.SelectMany(x => x.Line.Takes.Select(t => new
@@ -223,6 +277,8 @@ public sealed partial class Backend
                 seed = t.Settings.Seed,
                 spoken = t.SpokenText,
                 kept = t.Kept,
+                // counted in what ships (DBVO 2.0 names: only the home patch's stars)
+                counts = !g.PerPatch || x.Line == g.Home.Line,
                 pending = t.VariantPending && !t.Kept,
                 inUse = x.Line.SelectedTakeId == t.Id,
                 qaFlags = t.Qa?.Flags,
@@ -241,19 +297,27 @@ public sealed partial class Backend
         if (p.TryGetProperty("preset", out var ps) && ps.ValueKind == JsonValueKind.String) cfg.Preset = ps.GetString()!;
         if (p.TryGetProperty("rows", out var rows) && rows.ValueKind == JsonValueKind.Array)
             cfg.Rows = ReadRows(rows);
+        // Empty: follow the voice pack (its name, its release folder).
         if (p.TryGetProperty("packName", out var pn) && pn.ValueKind == JsonValueKind.String) cfg.PackName = pn.GetString()!.Trim();
         if (p.TryGetProperty("outputFolder", out var of) && of.ValueKind == JsonValueKind.String) cfg.OutputFolder = of.GetString()!.Trim();
         if (p.TryGetProperty("savePreset", out var sp) && sp.ValueKind == JsonValueKind.String && sp.GetString()!.Trim().Length > 0)
         {
             var name = sp.GetString()!.Trim();
+            if (name.Equals("Custom", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("\"Custom\" is what the page shows for changed rows. Pick another name.");
             if (VariantsConfig.BuiltInPresets().Any(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidOperationException($"\"{name}\" is a built-in preset. Pick another name.");
+            if (cfg.Presets.Any(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) && !B(p, "replace"))
+                throw new InvalidOperationException($"You already have a preset called \"{name}\".");
             cfg.Presets.RemoveAll(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
             cfg.Presets.Add(new VariantPreset { Name = name, Rows = cfg.Rows.Select(r => r.Clone()).ToList() });
             cfg.Preset = name;
         }
         if (p.TryGetProperty("deletePreset", out var dp) && dp.ValueKind == JsonValueKind.String)
+        {
             cfg.Presets.RemoveAll(x => x.Name.Equals(dp.GetString(), StringComparison.OrdinalIgnoreCase));
+            if (cfg.Preset.Equals(dp.GetString(), StringComparison.OrdinalIgnoreCase)) cfg.Preset = "";
+        }
         SaveVariantsCfg(cfg);
         return true;
     }
@@ -280,8 +344,24 @@ public sealed partial class Backend
         return list;
     }
 
-    /// <summary>Star or un-star a take as a variant. Listening to a pending (Creative) take and starring it clears its wait.</summary>
+    /// <summary>Star or un-star a take as a variant. It also clears a Creative take's listen mark.</summary>
     private object KeepVariant(JsonElement p)
+    {
+        var voiceId = S(p, "voiceId");
+        NotWhileExporting(voiceId);
+        var patchId = S(p, "patchId");
+        var cfg = LoadVariantsCfg(voiceId);
+        var lines = patchId.Length > 0 ? LoadPatch(patchId).Lines : cfg.AddedLines;
+        var line = lines.FirstOrDefault(l => l.LineId == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
+        var take = line.Takes.FirstOrDefault(t => t.Id == S(p, "takeId")) ?? throw new InvalidOperationException("Take not found.");
+        take.Kept = B(p, "kept");
+        take.VariantPending = false;
+        if (patchId.Length > 0) _lib.Save(LoadPatch(patchId)); else SaveVariantsCfg(cfg);
+        return true;
+    }
+
+    /// <summary>A Creative take was played: it is no longer marked listen. Its star stays as it was.</summary>
+    private object ListenedVariant(JsonElement p)
     {
         var voiceId = S(p, "voiceId");
         var patchId = S(p, "patchId");
@@ -289,7 +369,7 @@ public sealed partial class Backend
         var lines = patchId.Length > 0 ? LoadPatch(patchId).Lines : cfg.AddedLines;
         var line = lines.FirstOrDefault(l => l.LineId == S(p, "lineId")) ?? throw new InvalidOperationException("Line not found.");
         var take = line.Takes.FirstOrDefault(t => t.Id == S(p, "takeId")) ?? throw new InvalidOperationException("Take not found.");
-        take.Kept = B(p, "kept");
+        if (!take.VariantPending) return true;
         take.VariantPending = false;
         if (patchId.Length > 0) _lib.Save(LoadPatch(patchId)); else SaveVariantsCfg(cfg);
         return true;
@@ -302,7 +382,7 @@ public sealed partial class Backend
     private object DeleteVariantTake(JsonElement p)
     {
         var voiceId = S(p, "voiceId");
-        if (_jobCts != null && _generating == "variants:" + voiceId) throw new InvalidOperationException("Variants are being made right now. Wait for that to finish first.");
+        if (_jobCts != null && _generating == "variants:" + voiceId) throw new InvalidOperationException("Variants are being made, or the Variants Pack built, right now. Wait for that to finish first.");
         var patchId = S(p, "patchId");
         var voice = LoadVoice(voiceId);
         var cfg = LoadVariantsCfg(voiceId);
@@ -318,7 +398,10 @@ public sealed partial class Backend
         var root = Path.GetFullPath(new VariantsPackBuilder(_lib).RootOf(voice, patch)).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var dir = Path.GetDirectoryName(Path.GetFullPath(Path.Combine(root, take.WavPath)));
         // only the take's own folder, never the patch or Variants folder itself
-        try { if (dir != null && (dir + Path.DirectorySeparatorChar).StartsWith(root, StringComparison.OrdinalIgnoreCase) && dir.Length + 1 > root.Length && Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
+        string? left = null;
+        try { if (dir != null && (dir + Path.DirectorySeparatorChar).StartsWith(root, StringComparison.OrdinalIgnoreCase) && dir.Length + 1 > root.Length && Directory.Exists(dir)) Directory.Delete(dir, true); }
+        catch (Exception ex) { left = dir; App.Log($"Variants: take folder {dir} couldn't be deleted: {ex.Message}"); }
+        try { var dry = TakeEffects.DryPath(root, take); if (File.Exists(dry)) File.Delete(dry); } catch { }
         if (patch != null)
         {
             if (line.Takes.Count == 0) { line.Status = line.IsOmitted ? Phase2Status.Omitted : Phase2Status.Pending; line.NoAdopt = true; }
@@ -326,7 +409,8 @@ public sealed partial class Backend
             _lib.Save(patch);
         }
         else SaveVariantsCfg(cfg);
-        return true;
+        // The take is gone from the list either way; a folder Windows kept (a file still open) is named so it can go by hand.
+        return new { left };
     }
 
     private object CheckTypedLine(string voiceId, string text)
@@ -335,7 +419,7 @@ public sealed partial class Backend
         var t = text.Trim();
         if (t.Length == 0) return new { ok = false, problems = new List<string>(), stem = "", files = Array.Empty<string>(), existing = new List<string>() };
         var problems = VariantsService.CheckTypedLine(text);
-        if (voice.Naming == NamingMode.Dbrev) problems.Insert(0, "DBReV packs find lines by their ID, not their text, so a typed line can't be added to them.");
+        if (voice.Naming != NamingMode.Legacy) problems.Insert(0, "Only voice packs with DBVO 1 (Legacy) file names can have lines added by hand: with DBVO 2.0 or DBReV names a line's file comes from its ID in a plugin.");
         var stem = LineNaming.Stem(t, voice.Naming);
         var key = voice.Naming == NamingMode.Legacy ? stem.ToUpperInvariant() : stem;
         var g = VariantsService.Groups(voice, PatchesWith(voice, new[] { key }), LoadVariantsCfg(voiceId)).FirstOrDefault(x => x.Key == key);
@@ -344,7 +428,7 @@ public sealed partial class Backend
             ok = problems.Count == 0,
             problems,
             stem,
-            files = new[] { stem + ".fuz", stem + @"\1.fuz …", voice.Naming == NamingMode.Legacy ? stem + "(1).fuz …" : "" }.Where(x => x.Length > 0).ToArray(),
+            files = new[] { stem + ".fuz", stem + @"\1.fuz …", stem + "(1).fuz …" },
             existing = g == null ? new List<string>() : g.Exported.Select(x => x.Patch?.Name ?? "Added here").Distinct().ToList(),
             key = g?.Key,
         };
@@ -382,7 +466,7 @@ public sealed partial class Backend
     private object AddVariantLine(JsonElement p)
     {
         var voice = LoadVoice(S(p, "voiceId"));
-        if (voice.Naming == NamingMode.Dbrev) throw new InvalidOperationException("DBReV packs find lines by their ID, not their text, so a typed line can't be added to them.");
+        AddedLinesAllowed(voice);
         var text = S(p, "text").Trim();
         var problems = VariantsService.CheckTypedLine(text);
         if (problems.Count > 0) throw new InvalidOperationException(string.Join(" ", problems));
@@ -399,12 +483,14 @@ public sealed partial class Backend
 
     private object RemoveVariantLine(string voiceId, string key)
     {
-        if (_jobCts != null && _generating == "variants:" + voiceId) throw new InvalidOperationException("Variants are being made right now. Wait for that to finish first.");
+        if (_jobCts != null && _generating == "variants:" + voiceId) throw new InvalidOperationException("Variants are being made, or the Variants Pack built, right now. Wait for that to finish first.");
         var cfg = LoadVariantsCfg(voiceId);
         var line = cfg.AddedLines.FirstOrDefault(l => l.Key == key) ?? throw new InvalidOperationException("Only lines you added here can be removed here.");
         cfg.AddedLines.Remove(line);
         SaveVariantsCfg(cfg);
-        try { Directory.Delete(Path.Combine(_lib.VariantsFolder(voiceId), "takes", line.LineId), true); } catch (DirectoryNotFoundException) { }
+        var vroot = _lib.VariantsFolder(voiceId);
+        foreach (var t in line.Takes) try { var dry = TakeEffects.DryPath(vroot, t); if (File.Exists(dry)) File.Delete(dry); } catch { }
+        try { Directory.Delete(Path.Combine(vroot, "takes", line.LineId), true); } catch (DirectoryNotFoundException) { }
         return true;
     }
 
@@ -419,6 +505,9 @@ public sealed partial class Backend
         var keys = Strings(p, "keys").ToHashSet(StringComparer.Ordinal);
         if (keys.Count == 0) throw new InvalidOperationException("Tick one or more lines first.");
         int? oneRow = p.TryGetProperty("row", out var ri) && ri.ValueKind == JsonValueKind.Number ? ri.GetInt32() : null;
+        // A row that isn't there is refused: falling back to every row would pay for several takes instead of one.
+        if (oneRow is int want && (want < 0 || want >= LoadVariantsCfg(voiceId).Rows.Count))
+            throw new InvalidOperationException("That variant row isn't there any more. Pick one again.");
         _jobCts = NewJob("variants:" + voiceId);
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
@@ -431,15 +520,30 @@ public sealed partial class Backend
                 List<VariantGroup> groups;
                 List<VariantRow> rows;
                 bool ctx;
+                string prefix;
+                var skipped = new List<string>();
                 await _gate.WaitAsync();
                 try
                 {
                     cfg = LoadVariantsCfg(voiceId);
                     rows = cfg.Rows.Select(r => r.Clone()).ToList();
                     // "+ One more take": one row only.
-                    if (oneRow is int i && i >= 0 && i < rows.Count) rows = new() { rows[i] };
-                    ctx = cfg.TagsAsContext ?? DefaultContext(voice);
+                    if (oneRow is int i) rows = i < rows.Count ? new() { rows[i] } : throw new InvalidOperationException("That variant row isn't there any more. Pick one again.");
+                    ctx = ContextFor(voice, cfg);
+                    // The settings as they are now: typing in the prefix box while the job runs doesn't change takes half way.
+                    prefix = cfg.Prefix;
                     groups = VariantsService.Groups(voice, PatchesWith(voice, keys), cfg).Where(g => keys.Contains(g.Key)).ToList();
+                    // A patch line needs its own take first: variants go next to the take in use, and a line without one (or
+                    // whose take in use says older words) would get a variant as its take in use, or an outdated take starred.
+                    groups = groups.Where(g =>
+                    {
+                        var (hp, hl) = g.Home;
+                        if (hp == null && voice.Naming != NamingMode.Legacy) { skipped.Add($"\"{g.Text}\" was added by hand: with DBVO 2.0 names it can't ship, so remove it."); return false; }
+                        if (hp == null) return true;
+                        if (hl.SelectedTake == null) { skipped.Add($"\"{g.Text}\" has no take in {hp.Name} yet: generate it in Phase 2 first."); return false; }
+                        if (hl.Status == Phase2Status.Stale || hl.SelectedTake.SpokenText != hl.Spoken) { skipped.Add($"\"{g.Text}\": its take in use in {hp.Name} says older words: generate it again in Phase 2 first."); return false; }
+                        return true;
+                    }).ToList();
                     // The take in use gets a ★ first (when the line has none), so it stays in the rotation. With DBVO 2.0 names
                     // this matters for the patch's own export too: one ★ take would otherwise replace the take in use.
                     {
@@ -455,7 +559,10 @@ public sealed partial class Backend
                 }
                 finally { _gate.Release(); }
                 int total = groups.Count * rows.Count, before = 0, failed = 0;
-                if (total == 0) { Emit("jobDone", new { kind, voiceId, ok = true, made = 0 }); return; }
+                string? firstError = null;
+                string Note() => (skipped.Count > 0 ? $"{skipped.Count} line(s) skipped: " + string.Join(" ", skipped.Take(3)) + (skipped.Count > 3 ? " …" : "") : "")
+                    + (firstError != null ? (skipped.Count > 0 ? " " : "") + "First error: " + firstError : "");
+                if (total == 0) { Emit("jobDone", new { kind, voiceId, ok = skipped.Count == 0, made = 0, message = Note() }); return; }
                 if (total > 5) _lib.Backup("before-variants-" + voice.Name, _settings.BackupsToKeep, routine: true);
                 var svc = new Phase2Service(_lib, Runtime());
                 Emit("progress", new { kind, done = 0, total, failed = 0, current = (string?)null, message = (string?)null });
@@ -464,8 +571,9 @@ public sealed partial class Backend
                 {
                     var row = rows[r];
                     double stab = discrete ? ModelCapabilities.SnapStability(row.Stability) : row.Stability;
-                    bool creative = stab < 0.25;
-                    VariantSpec Spec(Phase2Line l) => new(VariantsService.VariantText(l.Spoken, cfg.Prefix, row.Word), stab, row.Speed,
+                    // Stability exists on ElevenLabs only: other engines' takes are never marked listen for it.
+                    bool creative = voice.Engine == "elevenlabs" && stab < 0.25;
+                    VariantSpec Spec(Phase2Line l) => new(VariantsService.VariantText(l.Spoken, prefix, row.Word), stab, row.Speed,
                         row.FixedSeed ? row.Seed : VariantsService.NewSeed(), ctx, Keep: !creative);
                     int offset = before;
                     foreach (var byHome in groups.GroupBy(g => g.Home.Patch))
@@ -475,6 +583,7 @@ public sealed partial class Backend
                         int callFailed = 0, callOffset = offset, rowNo = r + 1;
                         var progress = new DirectProgress<GenerationProgress>(g =>
                         {
+                            if (g.Failed > callFailed && g.Message != null && !g.Message.StartsWith("The take was made", StringComparison.Ordinal)) firstError ??= g.Message;
                             callFailed = g.Failed;
                             Emit("progress", new { kind, done = callOffset + g.Done, total, failed = failed + g.Failed, current = g.Current, message = $"Variant {rowNo} of {rows.Count}" + (g.Message != null ? ": " + g.Message : "") });
                         });
@@ -491,7 +600,7 @@ public sealed partial class Backend
                     }
                     before += groups.Count;
                 }
-                Emit("jobDone", new { kind, voiceId, ok = true, made = total - failed, failed });
+                Emit("jobDone", new { kind, voiceId, ok = true, made = total - failed, failed, message = Note() });
             }
             catch (OperationCanceledException) { Emit("jobDone", new { kind, voiceId, ok = false, message = "Cancelled. Variants made so far are kept." }); }
             catch (Exception ex)
@@ -499,7 +608,7 @@ public sealed partial class Backend
                 App.Log("Variants failed: " + ex);
                 Emit("jobDone", new { kind, voiceId, ok = false, message = FriendlyError.From(ex) });
             }
-            finally { _jobCts = null; _generating = null; }
+            finally { _generating = null; _jobCts = null; }
         });
         return true;
     }
@@ -507,7 +616,9 @@ public sealed partial class Backend
     private object StartVariantsExport(JsonElement p)
     {
         var voiceId = S(p, "voiceId");
-        _jobCts = NewJob();
+        // Like a generation for this voice pack: takes can't be deleted, nor its patches' lines rebuilt, while the pack reads them.
+        _jobCts = NewJob("variants:" + voiceId);
+        _variantsExporting = voiceId;
         var ct = _jobCts.Token;
         _ = Task.Run(async () =>
         {
@@ -517,19 +628,21 @@ public sealed partial class Backend
                 var voice = LoadVoice(voiceId);
                 VariantsConfig cfg;
                 List<VariantGroup> groups;
+                HashSet<string> patchFiles;
                 await _gate.WaitAsync();
                 try
                 {
                     cfg = LoadVariantsCfg(voiceId);
                     // A snapshot of the kept takes: generation can't run meanwhile (one job at a time), edits wait for the gate.
                     // Only lines with two or more ★ go in: load just the patches that have them.
-                    var withVariants = VariantEntries(voice).Concat(EntriesOf("", "", cfg.AddedLines, voice))
+                    var withVariants = VariantEntries(voice).Concat(EntriesOf(null, "", cfg.AddedLines, voice))
                         .GroupBy(e => e.Key).Where(g => g.Sum(e => e.Kept) >= 2).Select(g => g.Key).ToList(); // Kept counts exported lines only
                     groups = VariantsService.Groups(voice, PatchesWith(voice, withVariants), cfg);
+                    patchFiles = VariantEntries(voice).Where(e => e.Exported).Select(e => e.Key).ToHashSet(StringComparer.Ordinal);
                 }
                 finally { _gate.Release(); }
                 var progress = new DirectProgress<GenerationProgress>(g => Emit("progress", new { kind, g.Done, g.Total, g.Failed, g.Current, g.Message }));
-                var rep = await new VariantsPackBuilder(_lib).BuildAsync(voice, groups, cfg, Tools(), progress, ct);
+                var rep = await new VariantsPackBuilder(_lib).BuildAsync(voice, groups, cfg, Tools(), progress, ct, patchFiles);
                 await Locked(() => { SaveVariantsCfg(cfg); return null; });
                 Emit("jobDone", new { kind, voiceId, ok = true, report = rep });
             }
@@ -539,9 +652,53 @@ public sealed partial class Backend
                 App.Log("Variants Pack failed: " + ex);
                 Emit("jobDone", new { kind, voiceId, ok = false, message = FriendlyError.From(ex) });
             }
-            finally { _jobCts = null; }
+            finally { _variantsExporting = null; _generating = null; _jobCts = null; }
         });
         return true;
+    }
+
+    /// <summary>
+    /// Take the Variants Pack away: its BSA, plugin and lines list in its folder, and its option in this voice pack's FOMOD
+    /// projects. The ★ takes stay; Build makes it again.
+    /// </summary>
+    private object RemoveVariantsPack(string voiceId)
+    {
+        if (_jobCts != null && _generating == "variants:" + voiceId) throw new InvalidOperationException("Variants are being made, or the Variants Pack built, right now. Wait for that to finish first.");
+        var voice = LoadVoice(voiceId);
+        var cfg = LoadVariantsCfg(voiceId);
+        var name = cfg.PackNameFor(voice);
+        var folder = cfg.OutputFolderFor(voice);
+        var gone = new List<string>();
+        // the pack as it is named now, and the last one built (it may have had another name or folder)
+        var bases = new List<string>();
+        if (!string.IsNullOrWhiteSpace(folder)) bases.Add(Path.Combine(folder, name));
+        if (!string.IsNullOrWhiteSpace(cfg.LastPackBsa)) bases.Add(Path.Combine(Path.GetDirectoryName(cfg.LastPackBsa)!, Path.GetFileNameWithoutExtension(cfg.LastPackBsa)));
+        var locked = new List<string>();
+        foreach (var b in bases.Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (var file in new[] { b + ".bsa", b + ".esp", b + " - lines.txt" })
+            {
+                if (!File.Exists(file)) continue;
+                // a file the game or MO2 has open stays; the rest goes, and the reply says which stayed
+                try { File.Delete(file); gone.Add(Path.GetFileName(file)); } catch (Exception ex) { locked.Add(file); App.Log($"Variants Pack: {file} couldn't be deleted: {ex.Message}"); }
+            }
+        if (locked.Count == 0) { cfg.LastExportUtc = null; cfg.LastPackBsa = null; SaveVariantsCfg(cfg); }
+        var options = new List<string>();
+        foreach (var fid in _lib.LoadFomods().Where(x => x.VoicePackId == voiceId).Select(x => x.Id).ToList())
+        {
+            var f = LoadFomod(fid);
+            bool changed = false;
+            foreach (var st in f.Steps)
+            {
+                foreach (var g in st.Groups.Where(g => g.Name.Equals("Variants Pack", StringComparison.OrdinalIgnoreCase)).ToList())
+                {
+                    int n = g.Options.RemoveAll(o => o.Files.Any(x => x.Destination.EndsWith(".bsa", StringComparison.OrdinalIgnoreCase)));
+                    if (n > 0) { changed = true; options.Add(f.Name); }
+                    if (g.Options.Count == 0) st.Groups.Remove(g);
+                }
+            }
+            if (changed) _lib.Save(f);
+        }
+        return new { files = gone, fomods = options, locked };
     }
 
     /// <summary>
@@ -558,7 +715,7 @@ public sealed partial class Backend
         var folder = cfg.OutputFolderFor(voice);
         var bsa = Path.Combine(folder, name + ".bsa");
         var esp = Path.Combine(folder, name + ".esp");
-        if (!File.Exists(bsa) || !File.Exists(esp)) throw new InvalidOperationException("Export the Variants Pack first: its BSA and plugin aren't in " + folder + ".");
+        if (!File.Exists(bsa) || !File.Exists(esp)) throw new InvalidOperationException("Build the Variants Pack first (Variants Pack ▾ → Build): its BSA and plugin aren't in " + folder + ".");
         string Src(string full)
         {
             if (string.IsNullOrWhiteSpace(f.RootFolder)) return full;
@@ -566,7 +723,17 @@ public sealed partial class Backend
             return rel.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(rel) ? full : rel;
         }
         if (f.Steps.Count == 0) f.Steps.Add(new FomodStep { Name = "Voice Pack" });
-        var opt = f.Steps.SelectMany(s => s.Groups).SelectMany(g => g.Options).FirstOrDefault(o => o.Files.Any(x => x.Destination.Equals(name + ".bsa", StringComparison.OrdinalIgnoreCase)));
+        // The option this app added before: the one with this BSA, else the one in a "Variants Pack" group (the pack was renamed).
+        var packGroups = f.Steps.SelectMany(s => s.Groups).Where(g => g.Name.Equals("Variants Pack", StringComparison.OrdinalIgnoreCase)).SelectMany(g => g.Options).ToList();
+        bool Holds(FomodOption o, string bsaName) => o.Files.Any(x => x.Destination.Equals(bsaName, StringComparison.OrdinalIgnoreCase));
+        var lastName = cfg.LastPackBsa != null ? Path.GetFileName(cfg.LastPackBsa) : null;
+        var opt = packGroups.FirstOrDefault(o => Holds(o, name + ".bsa"))
+            ?? f.Steps.SelectMany(s => s.Groups).SelectMany(g => g.Options).FirstOrDefault(o => Holds(o, name + ".bsa"))
+            ?? (lastName != null ? packGroups.FirstOrDefault(o => Holds(o, lastName)) : null)
+            ?? packGroups.FirstOrDefault(o => o.Files.Any(x => x.Destination.EndsWith(".bsa", StringComparison.OrdinalIgnoreCase)));
+        // the pack's earlier name in that option (after a rename), so only its own two files are replaced
+        var oldBase = opt?.Files.Select(x => x.Destination).FirstOrDefault(d => d.EndsWith(".bsa", StringComparison.OrdinalIgnoreCase)
+            && (d.Equals(name + ".bsa", StringComparison.OrdinalIgnoreCase) || d.Equals(lastName, StringComparison.OrdinalIgnoreCase) || packGroups.Contains(opt!))) is { } ob ? ob[..^4] : null;
         bool added = opt == null;
         if (opt == null)
         {
@@ -575,12 +742,16 @@ public sealed partial class Backend
             opt = new FomodOption { Name = name };
             group.Options.Add(opt);
         }
+        // an option this app named after the pack follows the new name; a name you gave it stays
+        if (added || (oldBase != null && opt.Name.Equals(oldBase, StringComparison.OrdinalIgnoreCase))) opt.Name = name;
         opt.Mode = DetectMode.Recommended;
         opt.Plugins.Clear();
         if (string.IsNullOrWhiteSpace(opt.Description))
             opt.Description = "Lines that play a different take each time you say them (Dragonborn Voice Over 2 and Dragonborn ReVoiced). "
                 + "Keep this BSA as it is: unpacking it, or repacking the mod with Cathedral Assets Optimizer, breaks the variants.";
-        opt.Files.RemoveAll(x => x.Destination.Equals(name + ".bsa", StringComparison.OrdinalIgnoreCase) || x.Destination.Equals(name + ".esp", StringComparison.OrdinalIgnoreCase));
+        // the pack's own two files only (under its current or earlier name); anything else in the option stays
+        var mineDest = new[] { name + ".bsa", name + ".esp" }.Concat(oldBase != null ? new[] { oldBase + ".bsa", oldBase + ".esp" } : Array.Empty<string>()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        opt.Files.RemoveAll(x => mineDest.Contains(x.Destination));
         opt.Files.Add(new FomodFile { Kind = "file", Source = Src(bsa), Destination = name + ".bsa" });
         opt.Files.Add(new FomodFile { Kind = "file", Source = Src(esp), Destination = name + ".esp" });
         _lib.Save(f);

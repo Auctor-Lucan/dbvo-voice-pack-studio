@@ -435,7 +435,7 @@ export async function patchView(id) {
     };
     render();
     await modal(`Takes · ${l.finalLine}`, [list,
-      h('div.row', h('button.btn.sm', { title: 'Delete every take of this line except the one in use and kept ones', onclick: async () => {
+      h('div.row', h('button.btn.sm', { title: 'Delete every take of this line except the one in use, kept ★ takes and Creative variants not played yet', onclick: async () => {
         try { const r = await rpc('patch.purgeTakes', { id, lineIds: [l.lineId] }); patch = r.patch; reindex(); grid.setRows(visible()); render(); toast(`${r.removed} take(s) deleted.`); } catch (e) { fail(e); }
       } }, 'Keep only the used take'),
       h('button.btn.sm', { title: 'Make another take of this line', onclick: () => { closeAllModals(); generate('selected', [l.lineId], { autoplay: true }); } }, vc ? 'Convert again' : 'New take'),
@@ -451,7 +451,7 @@ export async function patchView(id) {
 
   async function purge(ids) {
     const n = ids ? ids.length : patch.lines.length;
-    if (!(await confirmBox('Delete unused takes?', `For ${n} line(s), every take except the one in use is deleted with its files. This can't be undone.`, 'Delete', true))) return;
+    if (!(await confirmBox('Delete unused takes?', `For ${n} line(s), every take except the one in use, kept ★ takes and Creative variants you haven't played yet is deleted with its files. This can't be undone.`, 'Delete', true))) return;
     try {
       const r = await rpc('patch.purgeTakes', { id, lineIds: ids });
       patch = r.patch; reindex(); grid.setRows(visible()); renderInspector();
@@ -957,8 +957,8 @@ export async function patchView(id) {
     ].filter(Boolean)));
     const takesBtn = h('button.btn', { disabled: busy, title: 'Delete takes you no longer need' }, 'Takes ▾');
     takesBtn.addEventListener('click', () => popupMenu(takesBtn, [
-      { label: `Keep only the used take · ticked lines (${sel.length})`, sub: 'Deletes the other takes and their files (kept ★ takes stay)', onclick: () => sel.length ? purge(sel) : toast('Tick the box of one or more rows first.', true) },
-      { label: 'Keep only the used take · all lines', sub: 'Deletes every take that is not in use or kept ★', onclick: () => purge(null) },
+      { label: `Keep only the used take · ticked lines (${sel.length})`, sub: 'Deletes the other takes and their files (kept ★ takes and Creative variants not played yet stay)', onclick: () => sel.length ? purge(sel) : toast('Tick the box of one or more rows first.', true) },
+      { label: 'Keep only the used take · all lines', sub: 'Deletes every take that is not in use, kept ★, or a Creative variant not played yet', onclick: () => purge(null) },
       { label: `Delete all takes · omitted lines (${patch.lines.filter((l) => l.omitted && l.takes.some((t) => !t.kept)).length})`, sub: 'Omitted lines are never exported: their takes and files go, except kept ★ ones', onclick: purgeOmitted },
     ]));
     const imp = h('button.btn', { title: 'Bring in takes or text from elsewhere' }, 'Import ▾');

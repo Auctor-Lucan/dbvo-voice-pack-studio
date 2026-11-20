@@ -237,7 +237,7 @@ on('jobDone', async (d) => {
     ], [{ label: 'Open folder', value: 'open' }, { label: 'OK', primary: true, value: true }]);
     if (v === 'open') rpc('open.path', { path: r.bsa });
   } else if (d.kind === 'variants' && d.ok) {
-    toast(d.failed ? `Variants made: ${d.made}. ${d.failed} failed (see the lines).` : `Variants made: ${d.made}.`, d.failed > 0);
+    toast(`Variants made: ${d.made}.${d.failed ? ` ${d.failed} failed.` : ''}${d.message ? ' ' + d.message : ''}`, d.failed > 0 || !!d.message);
   } else if (!d.ok && d.message) {
     toast(d.message, true);
   } else if (d.kind === 'generate') {

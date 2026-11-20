@@ -232,6 +232,9 @@ public sealed partial class Backend
                         .Concat(_lib.LoadFomods().Where(f => f.VoicePackId == vid).Select(f => f.Name + " (FOMOD)"))
                         .Concat(_lib.LoadRevoiceProjects().Where(r => r.Speakers.Values.Any(a => a.VoiceId == null && a.VoicePackId == vid)).Select(r => r.Name + " (NPC Revoice)"))
                         .Concat(_lib.LoadGruntProjects().Where(g => g.VoicePackId == vid).Select(g => g.Name + " (Player Grunts)")).ToList();
+                    // Lines added by hand on its Variants page have paid takes no other page can reach.
+                    int added = LoadVariantsCfg(vid).AddedLines.Count;
+                    if (added > 0) users.Add($"{added} line(s) added on its Variants page (remove them there)");
                     if (users.Count > 0)
                         throw new InvalidOperationException($"This voice pack is used by {string.Join(", ", users.Take(6))}{(users.Count > 6 ? $" and {users.Count - 6} more" : "")}. Delete those first, or keep the voice pack.");
                     _lib.Backup("before-delete-voice-pack", _settings.BackupsToKeep);
@@ -1086,6 +1089,8 @@ public sealed partial class Backend
         var patch = LoadPatch(S(p, "id"));
         var voice = LoadVoice(patch.VoicePackId);
         var line = patch.Lines.First(l => l.LineId == S(p, "lineId"));
+        // what the Variants Pack reads: stars, takes, and which lines are exported
+        if (S(p, "action") is "keep" or "deleteTake" or "selectTake" or "exclude" or "include" or "overrideOmit" or "approve") NotWhilePackBuilds(patch);
         switch (S(p, "action"))
         {
             case "spoken":
@@ -1114,7 +1119,7 @@ public sealed partial class Backend
             case "keep":
                 {
                     var kt = line.Takes.FirstOrDefault(x => x.Id == (S(p, "value") is { Length: > 0 } v ? v : line.SelectedTakeId));
-                    if (kt != null) kt.Kept = p.TryGetProperty("kept", out var kv) ? kv.GetBoolean() : !kt.Kept;
+                    if (kt != null) { kt.Kept = p.TryGetProperty("kept", out var kv) ? kv.GetBoolean() : !kt.Kept; kt.VariantPending = false; } // a star decides a Creative variant here too
                 }
                 break;
             case "selectTake":
@@ -1133,6 +1138,7 @@ public sealed partial class Backend
                     line.Takes.Remove(t);
                     var dir = Path.GetDirectoryName(Path.Combine(_lib.PatchFolder(patch.Id), t.WavPath));
                     try { if (dir != null && Directory.Exists(dir)) Directory.Delete(dir, true); } catch { }
+                    try { var dry = TakeEffects.DryPath(_lib.PatchFolder(patch.Id), t); if (File.Exists(dry)) File.Delete(dry); } catch { }
                     if (line.SelectedTakeId == t.Id) line.SelectedTakeId = line.Takes.LastOrDefault()?.Id;
                     if (line.Takes.Count == 0) { line.Status = line.IsOmitted ? Phase2Status.Omitted : Phase2Status.Pending; line.NoAdopt = true; }
                     else line.RefreshStale();

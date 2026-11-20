@@ -191,4 +191,194 @@ public class VariantsPackTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() => new VariantsPackBuilder(lib).BuildAsync(new VoicePack { Naming = NamingMode.Dbvo2Hash }, new(), cfg, tools));
         await Assert.ThrowsAsync<InvalidOperationException>(() => new VariantsPackBuilder(lib).BuildAsync(new VoicePack { Naming = NamingMode.Legacy, PackId = "x", Name = "X" }, new(), cfg, tools));
     }
+
+    // ---- 12.0.4: what the words say
+
+    [Fact]
+    public void Lines_a_patch_doesnt_export_because_they_arent_approved_never_count()
+    {
+        var v = new VoicePack { Id = "v1", Name = "V", PackId = "V", Naming = NamingMode.Legacy };
+        var unapproved = Line("Hello.", true, true);
+        var approved = Line("Bye.", true, true);
+        approved.Approved = true;
+        var p = new DbvoPatch { Id = "p", Name = "P", VoicePackId = "v1", ExportApprovedOnly = true, Lines = { unapproved, approved } };
+        var g = VariantsService.Groups(v, new[] { p }, VariantsConfig.Default("v1"));
+        Assert.DoesNotContain(g, x => x.Text == "Hello.");
+        Assert.Equal(2, g.Single(x => x.Text == "Bye.").KeptCount);
+    }
+
+    [Fact]
+    public void Dbvo2_names_count_only_the_home_patch_stars()
+    {
+        // each DBVO 2.0 patch exports its own stars, so one star in each of two patches is not two variants
+        var v = new VoicePack { Id = "v1", Name = "V", PackId = "V", Naming = NamingMode.Dbvo2Hash };
+        Phase2Line L() { var l = Line("Hello.", true); l.FileStem = "ABC123"; return l; }
+        var a = new DbvoPatch { Id = "a", Name = "A", VoicePackId = "v1", Lines = { L() } };
+        var b = new DbvoPatch { Id = "b", Name = "B", VoicePackId = "v1", Lines = { L() } };
+        var g = VariantsService.Groups(v, new[] { a, b }, VariantsConfig.Default("v1")).Single();
+        Assert.Equal(1, g.KeptCount);
+        Assert.Single(g.Kept);
+    }
+
+    [Fact]
+    public void A_typed_line_next_to_an_excluded_patch_copy_is_still_added_and_removable()
+    {
+        var v = new VoicePack { Id = "v1", Name = "V", PackId = "V", Naming = NamingMode.Legacy };
+        var excluded = Line("Lead the way.", true);
+        excluded.Excluded = true;
+        var p = new DbvoPatch { Id = "p", Name = "P", VoicePackId = "v1", Lines = { excluded } };
+        var cfg = VariantsConfig.Default("v1");
+        cfg.AddedLines.Add(Line("Lead the way.", true, true));
+        var g = VariantsService.Groups(v, new[] { p }, cfg).Single();
+        Assert.True(g.Added);        // no patch exports its file, so the pack writes it
+        Assert.True(g.HasAddedCopy); // and "Remove this line" is offered
+        Assert.Equal(2, g.KeptCount);
+    }
+
+    [Theory]
+    [InlineData("British Extremely Baleful", "[British Extremely Baleful]")]
+    [InlineData("[British] [Baleful]", "[British] [Baleful]")]
+    [InlineData("[British] softly", "[British softly]")]   // a loose word would be spoken
+    [InlineData("[British", "[British]")]                  // an open bracket would be spoken
+    [InlineData("[]", "")]
+    [InlineData("[A] [] [B]", "[A] [B]")]
+    [InlineData("  ", "")]
+    public void The_prefix_is_only_ever_tags(string prefix, string expected)
+        => Assert.Equal(expected, VariantsService.NormalizePrefix(prefix));
+
+    [Fact]
+    public void Leading_tags_split_off_and_mid_line_tags_stay_in_the_words()
+    {
+        var (lead, words) = VariantsService.SplitLeading("[British]  [Calm] Hello [laughs] there.");
+        Assert.Equal("[British] [Calm]", lead);
+        Assert.Equal("Hello [laughs] there.", words);
+    }
+
+    private static Phase2Line Packed(Library lib, DbvoPatch? patch, string voiceId, string text, int kept, bool withFiles = true)
+    {
+        var l = new Phase2Line { LineId = NewId.Short(), FinalLine = text, Spoken = text, Key = LineNaming.Key(text, NamingMode.Legacy) };
+        var root = patch != null ? lib.PatchFolder(patch.Id) : lib.VariantsFolder(voiceId);
+        for (int i = 0; i < kept; i++)
+        {
+            var rel = Path.Combine("takes", l.LineId, (i + 1).ToString("00"), "x.fuz");
+            if (withFiles)
+            {
+                var full = Path.Combine(root, rel);
+                Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+                File.WriteAllBytes(full, Enumerable.Repeat((byte)(i + 1), 4000).ToArray());
+            }
+            l.Takes.Add(new Take { Slot = i + 1, OriginalFuz = rel, WavPath = Path.Combine("takes", l.LineId, (i + 1).ToString("00"), "x.wav"), LipPath = "", Kept = true, CreatedUtc = DateTime.UtcNow.AddMinutes(i) });
+        }
+        l.SelectedTakeId = l.Takes.FirstOrDefault()?.Id;
+        return l;
+    }
+
+    [Fact]
+    public async Task A_take_with_missing_files_leaves_out_its_line_not_the_whole_pack()
+    {
+        var lib = new Library(Path.Combine(_dir, "lib4"));
+        var v = new VoicePack { Id = "v1", Name = "V", PackId = "V", Naming = NamingMode.Legacy };
+        var p = new DbvoPatch { Id = "p4", Name = "P", VoicePackId = "v1" };
+        p.Lines.Add(Packed(lib, p, "v1", "Good line.", 2));
+        p.Lines.Add(Packed(lib, p, "v1", "Broken line.", 2, withFiles: false));
+        var cfg = VariantsConfig.Default("v1");
+        cfg.OutputFolder = Path.Combine(_dir, "out4");
+        var rep = await new VariantsPackBuilder(lib).BuildAsync(v, VariantsService.Groups(v, new[] { p }, cfg), cfg, new ExternalTools { FfmpegPath = "ffmpeg.exe", FaceFxWrapperPath = "FaceFXWrapper.exe" });
+        Assert.Equal(1, rep.Lines);
+        Assert.Contains(rep.Skipped, x => x.StartsWith("Broken line."));
+    }
+
+    [Fact]
+    public async Task Both_names_of_a_variant_share_one_copy_of_its_audio()
+    {
+        var lib = new Library(Path.Combine(_dir, "lib5"));
+        var v = new VoicePack { Id = "v1", Name = "V", PackId = "V", Naming = NamingMode.Legacy };
+        var p = new DbvoPatch { Id = "p5", Name = "P", VoicePackId = "v1" };
+        p.Lines.Add(Packed(lib, p, "v1", "Falkreath.", 3));
+        var cfg = VariantsConfig.Default("v1");
+        cfg.OutputFolder = Path.Combine(_dir, "out5");
+        var rep = await new VariantsPackBuilder(lib).BuildAsync(v, VariantsService.Groups(v, new[] { p }, cfg), cfg, new ExternalTools { FfmpegPath = "ffmpeg.exe", FaceFxWrapperPath = "FaceFXWrapper.exe" });
+        Assert.Equal(6, rep.Files);                         // 3 DBVO 2 names + 3 DBReV names
+        Assert.True(new FileInfo(rep.Bsa).Length < 3 * 4000 + 2000); // the audio of 3 takes once, not twice
+        using var bsa = BsaArchive.Open(rep.Bsa);
+        for (int i = 1; i <= 3; i++)
+        {
+            Assert.Equal(Enumerable.Repeat((byte)i, 4000).ToArray(), bsa.Read($@"sound\dbvo\v\falkreath.\{i}.fuz"));
+            Assert.Equal(bsa.Read($@"sound\dbvo\v\falkreath.\{i}.fuz"), bsa.Read($@"sound\dbvo\v\falkreath.({i}).fuz"));
+        }
+    }
+
+    [Fact]
+    public async Task A_line_named_like_another_lines_variant_is_left_out_not_mixed_in()
+    {
+        var lib = new Library(Path.Combine(_dir, "lib6"));
+        var v = new VoicePack { Id = "v1", Name = "V", PackId = "V", Naming = NamingMode.Legacy };
+        var p = new DbvoPatch { Id = "p6", Name = "P", VoicePackId = "v1" };
+        p.Lines.Add(Packed(lib, p, "v1", "Hello", 2));
+        var cfg = VariantsConfig.Default("v1");
+        cfg.OutputFolder = Path.Combine(_dir, "out6");
+        cfg.AddedLines.Add(Packed(lib, null, "v1", "Hello(1)", 2)); // its own file would be Hello's DBReV variant (1)
+        var rep = await new VariantsPackBuilder(lib).BuildAsync(v, VariantsService.Groups(v, new[] { p }, cfg), cfg, new ExternalTools { FfmpegPath = "ffmpeg.exe", FaceFxWrapperPath = "FaceFXWrapper.exe" });
+        Assert.Equal(1, rep.Lines);
+        Assert.Contains(rep.Skipped, x => x.StartsWith("Hello(1)"));
+        using var bsa = BsaArchive.Open(rep.Bsa);
+        Assert.Equal(Enumerable.Repeat((byte)1, 4000).ToArray(), bsa.Read(@"sound\dbvo\v\hello(1).fuz"));
+    }
+
+    [Fact]
+    public void A_cancelled_bsa_write_leaves_the_old_archive_and_no_part_file()
+    {
+        var src = Path.Combine(_dir, "a.fuz");
+        File.WriteAllBytes(src, new byte[100]);
+        var bsaPath = Path.Combine(_dir, "cancel", "x.bsa");
+        BsaWriter.Write(bsaPath, new[] { new BsaWriter.Entry(@"sound\a.fuz", src) });
+        var before = File.ReadAllBytes(bsaPath);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        Assert.ThrowsAny<OperationCanceledException>(() => BsaWriter.Write(bsaPath, new[] { new BsaWriter.Entry(@"sound\b.fuz", src) }, cts.Token));
+        Assert.Equal(before, File.ReadAllBytes(bsaPath));
+        Assert.False(File.Exists(bsaPath + ".part"));
+    }
+
+    [Fact]
+    public void A_folder_name_too_long_for_a_bsa_is_refused_with_a_reason()
+    {
+        var src = Path.Combine(_dir, "b.fuz");
+        File.WriteAllBytes(src, new byte[10]);
+        var longFolder = @"sound\dbvo\v\" + new string('a', 260);
+        Assert.False(BsaWriter.FolderFits(longFolder + @"\1.fuz"));
+        Assert.True(BsaWriter.FolderFits(@"sound\dbvo\v\falkreath.\1.fuz"));
+        Assert.Throws<InvalidOperationException>(() => BsaWriter.Write(Path.Combine(_dir, "long.bsa"), new[] { new BsaWriter.Entry(longFolder + @"\1.fuz", src) }));
+    }
+
+    [Fact]
+    public async Task A_variant_name_a_patch_exports_itself_leaves_that_line_out()
+    {
+        var lib = new Library(Path.Combine(_dir, "lib7"));
+        var v = new VoicePack { Id = "v1", Name = "V", PackId = "V", Naming = NamingMode.Legacy };
+        var p = new DbvoPatch { Id = "p7", Name = "P", VoicePackId = "v1" };
+        p.Lines.Add(Packed(lib, p, "v1", "Hello", 2));
+        p.Lines.Add(Packed(lib, p, "v1", "Bye", 2));
+        var cfg = VariantsConfig.Default("v1");
+        cfg.OutputFolder = Path.Combine(_dir, "out7");
+        // another patch exports a line named "Hello(1)" itself: Hello's DBReV variant (1) would be overruled by it in game
+        var files = new HashSet<string> { "HELLO", "BYE", "HELLO(1)" };
+        var rep = await new VariantsPackBuilder(lib).BuildAsync(v, VariantsService.Groups(v, new[] { p }, cfg), cfg, new ExternalTools { FfmpegPath = "ffmpeg.exe", FaceFxWrapperPath = "FaceFXWrapper.exe" }, null, default, files);
+        Assert.Equal(1, rep.Lines);
+        Assert.Contains(rep.Skipped, x => x.StartsWith("Hello:"));
+    }
+
+    [Fact]
+    public void With_dbvo2_names_new_variants_never_go_to_a_hand_added_copy()
+    {
+        var v = new VoicePack { Id = "v1", Name = "V", PackId = "V", Naming = NamingMode.Dbvo2Hash };
+        var patchLine = Line("Hello.", true); patchLine.FileStem = "ABC";
+        var p = new DbvoPatch { Id = "a", Name = "A", VoicePackId = "v1", Lines = { patchLine } };
+        var cfg = VariantsConfig.Default("v1");
+        var added = Line("Hello.", true, true, true); added.FileStem = "ABC";
+        cfg.AddedLines.Add(added);
+        var g = VariantsService.Groups(v, new[] { p }, cfg).Single();
+        Assert.Same(p, g.Home.Patch);
+        Assert.Equal(1, g.KeptCount);
+    }
 }
