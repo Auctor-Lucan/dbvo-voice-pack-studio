@@ -134,6 +134,13 @@ public sealed class Library
     public Grunts.GruntCustomEvents LoadGruntCustomEvents() => Load<Grunts.GruntCustomEvents>(GruntCustomEventsPath) ?? new Grunts.GruntCustomEvents();
     public void Save(Grunts.GruntCustomEvents c) => SaveJson(GruntCustomEventsPath, c);
 
+    // ---------- Variants (Phase 2, per voice pack) ----------
+    /// <summary>A voice pack's Variants setup and hand-added lines; their takes live in takes\ below it.</summary>
+    public string VariantsFolder(string voicePackId) => Path.Combine(Root, "variants", voicePackId);
+    public Variants.VariantsConfig LoadVariants(string voicePackId) =>
+        Load<Variants.VariantsConfig>(Path.Combine(VariantsFolder(voicePackId), "variants.json")) ?? Variants.VariantsConfig.Default(voicePackId);
+    public void Save(Variants.VariantsConfig c) => SaveJson(Path.Combine(VariantsFolder(c.VoicePackId), "variants.json"), c);
+
     // ---------- references ----------
     public ReferenceSet AddReference(AppSettings settings, string name, string topicFile)
     {

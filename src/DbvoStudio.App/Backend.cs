@@ -54,7 +54,13 @@ public sealed partial class Backend
     /// <summary>Changes that rebuild a project's lines wait while takes are being made for it: a line swapped for a new one mid-request loses its paid-for take.</summary>
     private void NotWhileGenerating(string id)
     {
-        if (_jobCts != null && _generating == id)
+        // Variants (Phase 2 → Variants) make takes in any patch of their voice pack.
+        bool variantsHere = false;
+        if (_jobCts != null && _generating is { } g && g.StartsWith("variants:", StringComparison.Ordinal))
+        {
+            lock (_patches) variantsHere = _patches.TryGetValue(id, out var vp) && "variants:" + vp.VoicePackId == g;
+        }
+        if (_jobCts != null && (_generating == id || variantsHere))
             throw new InvalidOperationException("Takes are being made for this project right now. Wait for that to finish (or press Cancel in the bar at the top), then make this change: it rebuilds the lines being generated.");
     }
     private List<ElevenVoice>? _voices;
@@ -535,6 +541,8 @@ public sealed partial class Backend
                 if (gr != NotHandled) return gr;
                 var te = await DispatchTakeEdit(m, p);
                 if (te != NotHandled) return te;
+                var va = await DispatchVariants(m, p);
+                if (va != NotHandled) return va;
                 throw new InvalidOperationException("Unknown action: " + m);
         }
     }

@@ -83,7 +83,9 @@ public sealed partial class Phase2Service
     public static string NormalizeFuzTemplate(string? template, params string?[] finalRoots)
     {
         var t = (template ?? "").Trim().Replace('/', '\\');
-        if (Path.IsPathRooted(t) || (t.Length > 1 && t[1] == ':'))
+        // Only a drive (C:\…) or network path (\\server\…) is a full path. On Windows Path.IsPathRooted is also true for
+        // "\Sound\DBVO\Vampira", which people type meaning "inside the final folder"; that one stays relative.
+        if ((t.Length > 1 && t[1] == ':') || t.StartsWith("\\\\", StringComparison.Ordinal))
         {
             string? root = finalRoots.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r!.Trim().Replace('/', '\\').TrimEnd('\\'))
                 .FirstOrDefault(r => t.StartsWith(r + "\\", StringComparison.OrdinalIgnoreCase) || t.Equals(r, StringComparison.OrdinalIgnoreCase));
@@ -575,8 +577,11 @@ public sealed partial class Phase2Service
     public async Task GenerateAsync(DbvoPatch patch, VoicePack voice, IReadOnlyList<Phase2Line> lines, ExternalTools tools,
         IProgress<GenerationProgress>? progress = null, Func<Phase2Line, Task>? onLineDone = null, CancellationToken ct = default,
         SemaphoreSlim? stateGate = null, string? engineOverride = null, string? folder = null, Action? save = null,
-        bool makeLip = true, Func<Phase2Line, string>? takeFolder = null, Func<Phase2Line, (string? Previous, string? Next)>? context = null)
+        bool makeLip = true, Func<Phase2Line, string>? takeFolder = null, Func<Phase2Line, (string? Previous, string? Next)>? context = null,
+        Func<Phase2Line, Variants.VariantSpec?>? variant = null)
     {
+        // variant (the Variants view only): the take's own text, stability, speed and seed; it is kept (★) or left to
+        // listen to, and the take in use stays as it was. Without it, generation is exactly as before.
         string root = folder ?? _lib.PatchFolder(patch.Id);
         bool vc = patch.Kind == "vc";
         string engine = engineOverride ?? (vc ? "sts" : voice.Engine);
@@ -633,7 +638,7 @@ public sealed partial class Phase2Service
         var saveLock = stateGate ?? new SemaphoreSlim(1, 1);
         var convertGate = new SemaphoreSlim(Math.Max(2, Environment.ProcessorCount / 2));
 
-        async Task<EngineAudio> Synthesize(Phase2Line line, string spoken, CancellationToken c)
+        async Task<EngineAudio> Synthesize(Phase2Line line, string spoken, Variants.VariantSpec? spec, CancellationToken c)
         {
             switch (engine)
             {
@@ -687,21 +692,23 @@ public sealed partial class Phase2Service
                     var text = ApplyPronunciations(spoken, pronunciations, es.ModelId);
                     // Experiment: the [tags] at the start go in previous_text (context, not billed) instead of the text.
                     string? tagContext = null;
-                    if (patch.TagsAsContext && !es.ModelId.Contains("v3", StringComparison.OrdinalIgnoreCase))
+                    if ((spec?.TagsAsContext ?? patch.TagsAsContext) && !es.ModelId.Contains("v3", StringComparison.OrdinalIgnoreCase))
                     {
                         var m = System.Text.RegularExpressions.Regex.Match(text, @"^\s*((?:\[[^\]]*\]\s*)+)");
                         if (m.Success && text.Length > m.Length) { tagContext = m.Groups[1].Value.Trim(); text = text[m.Length..]; }
                     }
+                    double stability = spec?.Stability ?? es.Stability, speed = spec?.Speed ?? es.Speed;
+                    long? seed = spec != null ? spec.Seed : es.Seed;
                     var req = new TtsRequest
                     {
                         VoiceId = es.VoiceId,
                         ModelId = es.ModelId,
                         Text = text,
                         OutputFormat = es.OutputFormat,
-                        Seed = es.Seed,
+                        Seed = seed,
                         LanguageCode = string.IsNullOrWhiteSpace(es.LanguageCode) ? null : es.LanguageCode,
                         ApplyTextNormalization = es.TextNormalization == "auto" ? null : es.TextNormalization,
-                        VoiceSettings = ModelCapabilities.Build(es.ModelId, es.Stability, es.Similarity, es.Style, es.SpeakerBoost, es.Speed),
+                        VoiceSettings = ModelCapabilities.Build(es.ModelId, stability, es.Similarity, es.Style, es.SpeakerBoost, speed),
                         PronunciationDictionaries = es.PronunciationDictionaryIds.Count == 0 ? null
                             : es.PronunciationDictionaryIds.Take(3).Select(id => new PronunciationLocator { DictionaryId = id }).ToList(),
                     };
@@ -717,7 +724,7 @@ public sealed partial class Phase2Service
                     return new EngineAudio(audio, es.OutputFormat, new TakeSettings
                     {
                         Engine = "elevenlabs", VoiceId = es.VoiceId, ModelId = es.ModelId, Stability = req.VoiceSettings?.Stability ?? 0,
-                        Similarity = es.Similarity, Style = es.Style, SpeakerBoost = es.SpeakerBoost, Speed = es.Speed, Seed = es.Seed, OutputFormat = es.OutputFormat,
+                        Similarity = es.Similarity, Style = es.Style, SpeakerBoost = es.SpeakerBoost, Speed = speed, Seed = seed, OutputFormat = es.OutputFormat,
                         BilledCharacters = req.BilledCharacters, SentCharacters = req.Text.Length, TagsAsContext = tagContext != null,
                     });
                 }
@@ -731,10 +738,11 @@ public sealed partial class Phase2Service
             line.LastError = null;
             Take? newTake = null;
             // The text as it is now: an edit made while this line generates must leave the new take marked as changed.
-            var spoken = line.Spoken;
+            var spec = variant?.Invoke(line);
+            var spoken = spec?.Spoken ?? line.Spoken;
             try
             {
-                var got = await Synthesize(line, spoken, ct);
+                var got = await Synthesize(line, spoken, spec, ct);
                 // The audio is paid for now: a Stop pressed from here on still lets it become a take (a few seconds).
                 var post = CancellationToken.None;
                 await convertGate.WaitAsync(post);
@@ -809,12 +817,29 @@ public sealed partial class Phase2Service
                 await saveLock.WaitAsync(CancellationToken.None);
                 try
                 {
-                    if (newTake != null)
+                    if (newTake != null && spec != null)
+                    {
+                        // A variant: starred (or left to listen to); the take in use stays, unless the line had none.
+                        newTake.Kept = spec.Keep;
+                        newTake.VariantPending = !spec.Keep;
+                        bool first = line.SelectedTake == null;
+                        line.Takes.Add(newTake);
+                        if (first) line.SelectedTakeId = newTake.Id;
+                        if (line.Status is Phase2Status.Generating or Phase2Status.Pending or Phase2Status.Failed)
+                            line.Status = line.SelectedTake != null ? Phase2Status.Generated : Phase2Status.Pending;
+                        line.RefreshStale();
+                    }
+                    else if (newTake != null)
                     {
                         line.Takes.Add(newTake);
                         line.SelectedTakeId = newTake.Id;
                         line.Status = Phase2Status.Generated;
                         line.RefreshStale();
+                    }
+                    else if (spec != null && line.Status == Phase2Status.Failed && line.SelectedTake != null)
+                    {
+                        // A failed variant leaves the line's own take as it was; the error is reported, not stuck on the line.
+                        line.Status = Phase2Status.Generated;
                     }
                     if (save != null) save(); else _lib.Save(patch);
                     if (onLineDone != null) await onLineDone(line);

@@ -2,6 +2,7 @@ import { applyTheme } from './themes.js';
 import { rpc, on, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce, popupMenu, pathText, pathRows, pathList, closeAllModals, modalsMayClose, hasGuardedModal } from './lib.js';
 import { modsView, modView } from './phase1.js';
 import { patchesView, patchView } from './phase2.js';
+import { variantsView } from './variants.js';
 import { fomodsView, fomodView } from './phase3.js';
 import { wavLipView } from './tools.js';
 import { revoiceListView, revoiceView } from './revoice.js';
@@ -76,7 +77,7 @@ export function noteNav(route) {
   store.set('route', route);
 }
 
-const SECTION = { home: 'home', help: 'help', mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches', fomods: 'fomods', fomod: 'fomods', settings: 'settings', voices: 'settings', wavlip: 'tools', vc: 'patches', revoices: 'tools', revoice: 'tools', books: 'tools', book: 'tools', grunts: 'tools', grunt: 'tools' };
+const SECTION = { home: 'home', help: 'help', mods: 'mods', mod: 'mods', patches: 'patches', patch: 'patches', variants: 'patches', fomods: 'fomods', fomod: 'fomods', settings: 'settings', voices: 'settings', wavlip: 'tools', vc: 'patches', revoices: 'tools', revoice: 'tools', books: 'tools', book: 'tools', grunts: 'tools', grunt: 'tools' };
 
 let renderTicket = 0;
 export async function render() {
@@ -103,6 +104,7 @@ export async function render() {
       case 'patches': view = await patchesView('tts'); break;
       case 'vc': view = await patchesView(); break; // the Voice Changer is now a toggle inside each patch
       case 'patch': view = await patchView(app.route.id); break;
+      case 'variants': view = await variantsView(app.route.id); break;
       case 'fomods': view = await fomodsView(); break;
       case 'fomod': view = await fomodView(app.route.id); break;
       case 'wavlip': view = await wavLipView(); break;
@@ -160,7 +162,7 @@ toolsBtn.addEventListener('click', () => popupMenu(toolsBtn, [
 
 // ---- background jobs (generation, .fuz, FOMOD, WAV to LIP)
 const jobEl = document.getElementById('job');
-const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to LIP', generate: 'Generating', import: 'Importing', qa: 'Checking takes', 'revoice-qa': 'Checking takes', 'grunts-export': 'Exporting voice pack', 'grunts-measure': 'Measuring loudness', 'grunts-whisper': 'Whisper subtitles' };
+const LABEL = { fuz: 'Building .fuz', fomod: 'Building FOMOD', wavlip: 'WAV to LIP', generate: 'Generating', import: 'Importing', qa: 'Checking takes', 'revoice-qa': 'Checking takes', 'grunts-export': 'Exporting voice pack', 'grunts-measure': 'Measuring loudness', 'grunts-whisper': 'Whisper subtitles', variants: 'Making variants', variantsPack: 'Building the Variants Pack' };
 // Progress reports can arrive a moment after the job has finished (they travel separately); one of those must not
 // bring back the job bar and keep buttons disabled.
 let lastDone = null;
@@ -224,6 +226,18 @@ on('jobDone', async (d) => {
     if (v === 'open') rpc('open.path', { path: r.archive || r.staging });
   } else if (d.kind === 'grunts-measure' || d.kind === 'grunts-whisper') {
     if (d.message) toast(d.message, !d.ok);
+  } else if (d.kind === 'variantsPack' && d.ok && d.report) {
+    const r = d.report;
+    const v = await modal('Variants Pack built', [
+      h('div.kv', h('div', 'Lines with variants'), h('div', r.lines.toLocaleString()), h('div', 'Variant takes'), h('div', r.takes.toLocaleString()),
+        h('div', 'Files in the BSA (DBVO 2 and DBReV names)'), h('div', r.files.toLocaleString()), h('div', 'Size'), h('div', (r.bytes / 1048576).toFixed(1) + ' MB'),
+        h('div', 'BSA'), h('div', pathText(r.bsa)), h('div', 'Plugin that loads it'), h('div', pathText(r.plugin)), h('div', 'List of the lines'), h('div', pathText(r.listFile))),
+      r.skipped && r.skipped.length ? h('div.banner.warn', { style: { margin: 0 } }, h('div', h('b', `${r.skipped.length} line(s) left out: `), h('ul', r.skipped.slice(0, 20).map((x) => h('li', x))))) : null,
+      h('div.faint', 'Keep the BSA as it is. Unpacking it, or repacking the mod with Cathedral Assets Optimizer, breaks the variants: Windows folder names can\'t end in a period, and BSA folder names can.'),
+    ], [{ label: 'Open folder', value: 'open' }, { label: 'OK', primary: true, value: true }]);
+    if (v === 'open') rpc('open.path', { path: r.bsa });
+  } else if (d.kind === 'variants' && d.ok) {
+    toast(d.failed ? `Variants made: ${d.made}. ${d.failed} failed (see the lines).` : `Variants made: ${d.made}.`, d.failed > 0);
   } else if (!d.ok && d.message) {
     toast(d.message, true);
   } else if (d.kind === 'generate') {

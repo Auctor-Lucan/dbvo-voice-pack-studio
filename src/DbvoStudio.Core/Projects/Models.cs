@@ -469,6 +469,8 @@ public sealed class Take
     public double DurationSeconds { get; set; }
     /// <summary>Kept as a variant (DBVO 2.0: every kept take is exported; two or more go to &lt;name&gt;\0, 1, …).</summary>
     public bool Kept { get; set; }
+    /// <summary>Made in the Variants view with Creative stability: waits for you to listen before it is starred.</summary>
+    public bool VariantPending { get; set; }
     /// <summary>
     /// Relative to the patch folder: the .fuz this take was imported from (a legacy pack or the final folder). Building
     /// .fuz files reuses it as it is, so imported audio is never encoded a second time.

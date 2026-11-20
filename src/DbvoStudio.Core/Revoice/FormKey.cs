@@ -8,11 +8,14 @@ namespace DbvoStudio.Core.Revoice;
 /// </summary>
 public readonly record struct FormKey(string Plugin, uint Id)
 {
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> Lower = new();
+
     public static FormKey Resolve(PluginFile file, uint raw)
     {
         int idx = (int)(raw >> 24);
         string owner = idx < file.Masters.Count ? file.Masters[idx] : file.FileName;
-        return new FormKey(owner.ToLowerInvariant(), raw & 0xFFFFFF);
+        // One shared lowercase string per plugin name: a whole load order has hundreds of thousands of keys.
+        return new FormKey(Lower.GetOrAdd(owner, o => string.Intern(o.ToLowerInvariant())), raw & 0xFFFFFF);
     }
 
     public bool IsNull => Id == 0 && Plugin.Length == 0;

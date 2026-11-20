@@ -1,0 +1,372 @@
+// Phase 2 → Variants: per voice pack, which lines play a random take in game, making more with the Variant settings,
+// lines added by hand, and the Variants Pack (one BSA + its plugin) with its pre-ticked FOMOD option.
+import { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, VGrid, debounce, switchEl, popupMenu, icon, helpButton, searchLamp } from './lib.js';
+import { app, go } from './app.js';
+import { voiceChip } from './phase2.js';
+
+const STAB = [[0, 'Creative'], [0.5, 'Natural'], [1, 'Robust']];
+const stabName = (v) => (v < 0.25 ? 'Creative' : v < 0.75 ? 'Natural' : 'Robust');
+const LEADING = /^\s*((?:\[[^\]]*\]\s*)*)/;
+
+/** The text a variant is sent as; mirrors VariantsService.VariantText (the backend makes the real one). */
+export function variantText(spoken, prefix, word) {
+  const m = LEADING.exec(spoken || '');
+  const words = (spoken || '').slice(m[0].length).trim();
+  let lead = (prefix || '').trim();
+  if (lead && !lead.includes('[')) lead = '[' + lead.replace(/^\[|\]$/g, '').trim() + ']';
+  lead = lead.replace(/\s+/g, ' ');
+  if (!lead) lead = m[1].trim().replace(/\s+/g, ' ');
+  const w = (word || '').trim().replace(/^\[|\]$/g, '').trim();
+  if (w) {
+    const tags = [...lead.matchAll(/\[[^\]]*\]/g)];
+    if (!tags.length) lead = (lead + ' [' + w + ']').trim();
+    else {
+      const last = tags[tags.length - 1];
+      const inner = last[0].slice(1, -1).trim();
+      const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (!new RegExp('(^|[\\s,])' + esc + '($|[\\s,])', 'i').test(inner))
+        lead = lead.slice(0, last.index) + '[' + (inner ? inner + ', ' + w : w) + ']' + lead.slice(last.index + last[0].length);
+    }
+  }
+  return lead ? lead + ' ' + words : words;
+}
+
+const billed = (text, ctx) => { if (!ctx) return text.length; const m = LEADING.exec(text); return m[0].length < text.length ? text.length - m[0].length : text.length; };
+
+export async function variantsView(voiceId) {
+  let res;
+  try { res = await rpc('variants.get', { voiceId }); } catch (e) { fail(e); return h('div.view', h('div.view-body', h('div.empty', h('h2', 'Variants'), h('div', String(e.message || e))))); }
+  let data = res.data;
+  const rate = res.creditRate;
+  const voice = data.voice;
+  const st = data.settings;
+  const legacy = voice.naming === 'Legacy';
+  const eleven = voice.engine === 'elevenlabs';
+  const view = h('div.view');
+
+  const packBtn = h('button.btn', { title: 'Build the Variants Pack (one BSA with every line\'s variants) and add it to your FOMOD' }, 'Variants Pack ▾');
+  view.append(h('div.view-head',
+    h('button.btn.sm.ghost', { title: 'Back to the patch list', onclick: () => go('patches') }, '‹ Patches'),
+    h('h1', 'Variants'), voiceChip(voice.name, voice.color), helpButton('variants'),
+    h('span.sub', 'Lines that play a random take each time. Shared by every patch of this voice pack.'),
+    h('div.spacer'), legacy ? packBtn : null));
+
+  if (voice.naming === 'Dbrev') {
+    view.append(h('div.view-body', h('div.empty', h('h2', 'DBReV packs make variants in each patch'),
+      h('div', 'DBReV finds lines by their ID. Star (★) extra takes of a line in its patch: each one is exported as a variation, (1), (2)…'))));
+    return view;
+  }
+
+  // ---- counts
+  const kpis = h('div.var-kpis');
+  // ---- filters
+  let filter = store.get('variants-filter:' + voiceId, 'suggested');
+  let sortBy = store.get('variants-sort:' + voiceId, 'used');
+  const chips = h('div.row', { style: { gap: '6px' } });
+  const q = h('input', { type: 'text', placeholder: 'Search spoken text', style: { width: '240px' } });
+  const sortSel = h('select', { title: 'Order of the list' }, h('option', { value: 'used' }, 'Most used first'), h('option', { value: 'short' }, 'Shortest first'), h('option', { value: 'az' }, 'A–Z'), h('option', { value: 'variants' }, 'Most variants first'));
+  sortSel.value = sortBy;
+  const addBtn = h('button.btn.sm', { title: 'Type a line from the game: it gets the voice pack\'s file name and can have variants' }, '+ Add a line…');
+  const toolbar = h('div.toolbar', { style: { alignItems: 'center' } }, chips, searchLamp(q), addBtn, h('div.spacer'), h('span.dim', 'Sort'), sortSel);
+  view.append(kpis, toolbar);
+
+  const split = h('div.split');
+  const left = h('div.left');
+  const insp = h('aside.inspector');
+  split.append(left, insp);
+  view.append(split);
+
+  const isSuggested = (l) => l.kept < 2 && !l.added && l.mods >= 2;
+  const hasVariants = (l) => l.kept >= 2;
+  const needsLook = (l) => l.pending > 0;
+  const shown = () => {
+    const f = q.value.trim().toLowerCase();
+    let rows = data.lines.filter((l) => (filter === 'all' || (filter === 'suggested' && isSuggested(l)) || (filter === 'has' && hasVariants(l)) || (filter === 'look' && needsLook(l)) || (filter === 'added' && l.added))
+      && (!f || l.text.toLowerCase().includes(f) || l.words.toLowerCase().includes(f)));
+    const cmp = { used: (a, b) => b.mods - a.mods || b.patches - a.patches || a.text.length - b.text.length,
+      short: (a, b) => a.text.length - b.text.length || a.text.localeCompare(b.text),
+      az: (a, b) => a.text.localeCompare(b.text), variants: (a, b) => b.kept - a.kept || b.mods - a.mods }[sortBy];
+    return rows.sort(cmp);
+  };
+
+  const reach = (l) => {
+    const out = [];
+    if (l.pending) out.push(h('span.badge.b-toolong', { title: `${l.pending} take(s) made with Creative stability wait for you to listen: star the good ones in the panel on the right` }, `${l.pending} to listen to`));
+    if (l.kept >= 2) out.push(...(legacy ? [h('span.badge.b-valid', { title: 'Dragonborn Voice Over 2 plays one of these at random (numbered files in the line\'s folder)' }, 'DBVO 2'), h('span.badge.b-valid', { title: 'Dragonborn ReVoiced plays one of these at random (name(1), name(2)… next to the line\'s file)' }, 'DBReV')]
+      : [h('span.badge.b-valid', { title: 'Exported with the patch as numbered files in the line\'s folder' }, 'DBVO 2')]));
+    if (l.added) out.push(h('span.badge.b-fixed', { title: 'A line you added here (no patch has it)' }, 'Added here'));
+    return out.length ? h('span.row', { style: { gap: '4px' } }, out) : h('span.faint', '–');
+  };
+
+  let focusKey = null;
+  const grid = new VGrid(left, {
+    storageKey: 'variants',
+    rowKey: (l) => l.key,
+    rowClass: () => '',
+    onRowClick: (l) => { focusKey = l.key; renderInspector(); renderPreview(); },
+    columns: [
+      { id: 'sel', title: '', width: 32, resizable: false, render: (l) => grid.checkbox(l) },
+      { id: 'text', title: 'Spoken text', flex: 1, width: 320, sort: (l) => l.text.toLowerCase(), render: (l) => h('span', { title: `In-game line: ${l.text}\nFile: ${l.stem}.fuz` }, l.words || l.text) },
+      { id: 'mods', title: 'Said in', width: 100, sort: (l) => -l.mods, render: (l) => h('span.dim', { title: `${l.mods} mod(s), ${l.patches} patch(es) of this voice pack. With the same file name they all play the same variants.` }, l.added ? '–' : `${l.mods} mod${l.mods === 1 ? '' : 's'}`) },
+      { id: 'kept', title: 'Variants', width: 110, sort: (l) => -l.kept, render: (l) => l.kept ? h('span.row', { style: { gap: '4px', color: 'var(--warn)' }, title: `${l.kept} take(s) starred (★) as variants · ${l.takes} take(s) in all` }, icon('star', { filled: true, size: 14 }), String(l.kept)) : h('span.dim', `${l.takes} take${l.takes === 1 ? '' : 's'}`) },
+      { id: 'reach', title: 'Reaches', width: 200, sortable: false, render: reach },
+    ],
+  });
+
+  const renderCounts = () => {
+    const withV = data.lines.filter(hasVariants);
+    const look = data.lines.filter(needsLook).length;
+    const sugg = data.lines.filter(isSuggested).length;
+    const added = data.lines.filter((l) => l.added).length;
+    clear(kpis).append(
+      h('div.kpi', h('b', withV.length.toLocaleString()), h('span', 'lines with variants')),
+      h('div.kpi', h('b', withV.reduce((a, l) => a + l.kept, 0).toLocaleString()), h('span', 'variant takes ★')),
+      h('div.kpi', h('b', sugg.toLocaleString()), h('span', 'suggested lines')),
+      h('div.kpi' + (look ? '.warn' : ''), h('b', look.toLocaleString()), h('span', 'need a look')));
+    const chip = (key, label, n, title) => h('span.chip' + (filter === key ? '.on' : ''), { title, onclick: () => { filter = key; store.set('variants-filter:' + voiceId, key); renderCounts(); grid.setRows(shown()); } }, label, h('span.n', n.toLocaleString()));
+    clear(chips).append(
+      chip('suggested', 'Suggested', sugg, 'Lines the same in two or more mods, without variants yet: one set of variants covers them all'),
+      chip('has', 'Has variants', withV.length, 'Lines with two or more ★ takes'),
+      chip('look', 'Needs a look', look, 'Creative takes waiting for you to listen'),
+      added ? chip('added', 'Added here', added, 'Lines you typed in') : null,
+      chip('all', 'All lines', data.lines.length, 'Every line of this voice pack'));
+  };
+
+  // ---- inspector (one line)
+  const audio = new Audio();
+  let lineData = null;
+  async function renderInspector() {
+    clear(insp);
+    if (!focusKey) { insp.append(h('div.help', h('p', h('b', 'Pick a line'), ' to hear its takes and star (★) the ones that should play in game.'), h('p', 'Tick lines and press Generate variants to make new takes with the Variant settings below.'))); return; }
+    const key = focusKey;
+    try { lineData = await rpc('variants.line', { voiceId, key }); } catch (e) { fail(e); return; }
+    if (key !== focusKey) return;
+    const d = lineData;
+    const kept = d.takes.filter((t) => t.kept);
+    insp.append(h('h3', d.text),
+      h('div.kv2',
+        h('div', 'Said in'), h('div.kv-v', { title: d.modNames.join('\n') }, d.added ? 'Added here' : d.modNames.join(', ') || '–'),
+        h('div', 'File name'), h('div.kv-v.mono', d.stem + '.fuz'),
+        legacy ? [h('div', 'DBVO 2'), h('div.kv-v.mono', `${d.stem}\\1.fuz … ${Math.max(kept.length, 1)}.fuz`)] : [h('div', 'DBVO 2'), h('div.kv-v.mono', `${d.stem}\\0.fuz …`)],
+        legacy ? [h('div', 'DBReV'), h('div.kv-v.mono', `${d.stem}(1).fuz … (${Math.min(Math.max(kept.length, 1), 19)})`)] : null),
+      h('h3', `Takes · ${kept.length} ★`));
+    for (const t of d.takes) {
+      const star = h('button.act-btn' + (t.kept ? '.on.warn' : ''), { title: t.kept ? 'A variant (★): click to take it out' : 'Star it: it becomes a variant', onclick: async () => {
+        try { await rpc('variants.keep', { voiceId, patchId: t.patchId || '', lineId: t.lineId, takeId: t.takeId, kept: !t.kept }); await reload(); } catch (e) { fail(e); }
+      } }, icon('star', { filled: t.kept }));
+      const meta = [`${t.duration.toFixed(1)} s`, t.model || t.engine, t.engine === 'elevenlabs' ? stabName(t.stability) : null, t.speed && t.speed !== 1 ? `×${t.speed}` : null, t.seed != null ? `seed ${t.seed}` : null, t.inUse ? 'in use' : null].filter(Boolean).join(' · ');
+      insp.append(h('div.take' + (t.inUse ? '.sel' : ''), { title: t.spoken },
+        h('button.act-btn', { title: 'Play', onclick: () => { audio.src = t.url + '?t=' + Date.now(); audio.play().catch(() => {}); } }, icon('play')),
+        h('span.take-lbl', '#' + t.slot),
+        h('span.meta', { style: { flex: 1 } }, meta, d.patchNames.length > 1 && t.patchId ? h('span.faint', ' · ' + t.patch) : null),
+        t.pending ? h('span.badge.b-toolong', { title: 'Made with Creative stability: listen, then star it if it keeps the voice' }, 'listen') : null,
+        t.qaFlags && t.qaFlags.length ? h('span.badge.b-broken', { title: 'Check takes flagged it: ' + t.qaFlags.join(', ') }, '⚠') : null,
+        star));
+    }
+    const playAll = h('button.btn.sm', { title: 'Play every ★ take, one after another', disabled: !kept.length, onclick: () => {
+      let i = 0; const next = () => { if (i >= kept.length) { audio.onended = null; return; } audio.src = kept[i++].url + '?t=' + Date.now(); audio.play().catch(() => {}); }; audio.onended = next; next();
+    } }, '▶ Play all ★');
+    const more = h('button.btn.sm', { title: 'One more take for this line, with one row of the Variant settings', onclick: () => popupMenu(more, rows.map((r, i) => ({ label: `Row ${i + 1}: ${stabName(r.stability)} · ×${Number(r.speed).toFixed(2)}${r.word ? ' · ' + r.word : ''}`, sub: variantText(d.spoken, prefix.value, r.word), onclick: () => generate([d.key], i) }))) }, '+ One more take');
+    insp.append(h('div.row', playAll, more),
+      d.added ? h('button.btn.sm.danger', { title: 'Remove this line and its takes from the Variants', onclick: async () => {
+        if (!(await confirmBox('Remove this line?', `"${d.text}" and its ${d.takes.length} take(s) are removed from the Variants. This can't be undone.`, 'Remove', true))) return;
+        try { await rpc('variants.removeLine', { voiceId, key: d.key }); focusKey = null; await reload(); } catch (e) { fail(e); }
+      } }, 'Remove this line') : null,
+      h('div.help', h('p', h('b', '★ = variant.'), legacy ? ' Every ★ take goes into the Variants Pack. In game, DBVO 2 and DBReV pick one at random each time you say the line.' : ' DBVO 2.0 patches export every ★ take as a variant with the patch.')));
+  }
+
+  // ---- Variant settings
+  let rows = st.rows.map((r) => ({ ...r }));
+  let ctx = st.tagsAsContext;
+  let ctxDefault = st.contextIsDefault;
+  const prefix = h('input', { type: 'text', value: st.prefix, placeholder: 'the line\'s own tags', style: { width: '330px' }, title: 'Sent in front of every variant made here, instead of the line\'s own leading tags. Saved for this voice pack\'s variants only.' });
+  const presetSel = h('select', { title: 'Variant rows to start from' });
+  const ctxBox = h('span.row', { style: { gap: '8px' } });
+  const rgrid = h('div.var-rows');
+  const save = debounce(async () => {
+    try { await rpc('variants.saveSettings', { voiceId, prefix: prefix.value, rows, tagsAsContext: ctxDefault ? null : ctx, preset: presetSel.value }); } catch (e) { fail(e); }
+  }, 500);
+  const saveNow = async () => { await rpc('variants.saveSettings', { voiceId, prefix: prefix.value, rows, tagsAsContext: ctxDefault ? null : ctx, preset: presetSel.value }); };
+
+  const renderPresets = () => {
+    clear(presetSel).append(st.presets.map((p) => h('option', { value: p.name }, p.name + (p.builtIn ? '' : ' (yours)'))));
+    if (!st.presets.some((p) => p.name === st.preset)) presetSel.append(h('option', { value: st.preset }, st.preset));
+    presetSel.value = st.preset;
+  };
+  presetSel.addEventListener('change', () => {
+    const p = st.presets.find((x) => x.name === presetSel.value);
+    if (p) { rows = p.rows.map((r) => ({ ...r })); st.preset = p.name; renderRows(); renderStatus(); renderPreview(); save(); }
+  });
+
+  const renderCtx = () => {
+    clear(ctxBox).append(
+      h('span.badge' + (ctx ? '.b-valid' : '.b-toolong'), { title: ctx
+        ? 'The prefix tags go to ElevenLabs as context (previous_text): not billed, and a little weaker than in the text. Your tests: strong words (Extremely) make up for it.'
+        : 'The prefix tags go in the text: billed as characters, at full strength.' }, ctx ? 'Context on' : 'Context off'),
+      switchEl(ctx, (v) => { ctx = v; ctxDefault = false; renderCtx(); renderStatus(); save(); }, 'Send the prefix as context', { disabled: !eleven, title: eleven ? 'On: tags as context (not billed, a little weaker). Off: tags in the text (billed, full strength).' : 'Only ElevenLabs takes context' }),
+      h('span.faint', { style: { fontSize: '12px' } }, ctxDefault ? `(your default from Global Settings: ${st.appContextDefault ? 'on' : 'off'})` : ''),
+      !ctxDefault ? h('button.btn.sm.ghost', { title: 'Follow the default in Global Settings again', onclick: () => { ctxDefault = true; ctx = st.appContextDefault; renderCtx(); renderStatus(); save(); } }, 'Use default') : null);
+  };
+
+  function renderRows() {
+    clear(rgrid).append(['#', 'Stability', 'Speed', 'Variation word (merged into the prefix)', 'Seed', 'Sent as', ''].map((t) => h('div.rh', t)));
+    rows.forEach((r, i) => {
+      const stab = voice.discrete || !eleven
+        ? h('select', { disabled: !eleven, title: 'Creative: livelier, may drift (its takes wait for you to listen). Natural: the usual. Robust: steady, flatter.' }, STAB.map(([v, n]) => h('option', { value: v }, n)))
+        : h('input', { type: 'number', min: 0, max: 1, step: 0.05, style: { width: '84px' } });
+      stab.value = voice.discrete || !eleven ? String(r.stability < 0.25 ? 0 : r.stability < 0.75 ? 0.5 : 1) : String(r.stability);
+      stab.addEventListener('change', () => { r.stability = Number(stab.value); markCustom(); renderPreview(); renderRows(); });
+      const speed = h('input', { type: 'number', min: 0.7, max: 1.2, step: 0.05, value: Number(r.speed).toFixed(2), style: { width: '76px' }, title: 'Pace: 0.70 to 1.20. Small steps (±0.05) sound natural.' });
+      speed.addEventListener('change', () => { r.speed = Math.min(1.2, Math.max(0.7, Number(speed.value) || 1)); speed.value = r.speed.toFixed(2); markCustom(); });
+      const word = h('input', { type: 'text', value: r.word || '', placeholder: 'none', style: { width: '100%' }, title: 'Merged into the prefix tag: [British Extremely Baleful, softly]. One tag, not two: two leading tags weaken each other.' });
+      word.addEventListener('input', () => { r.word = word.value; markCustom(); renderPreview(); });
+      const seedSel = h('select', { title: 'New: a different reading every time. Fixed: the same seed again, to repeat a reading you liked.' }, h('option', { value: 'new' }, 'New'), h('option', { value: 'fixed' }, r.fixedSeed && r.seed != null ? `Fixed: ${r.seed}` : 'Fixed…'));
+      seedSel.value = r.fixedSeed ? 'fixed' : 'new';
+      seedSel.addEventListener('change', async () => {
+        if (seedSel.value === 'fixed') {
+          const v = await modal('Fixed seed', [h('div', 'The same seed, text and settings give the same reading again (as far as ElevenLabs manages). Copy a seed from a take you liked, in the panel on the right.'), h('input#seedIn', { type: 'number', min: 0, max: 4294967295, value: r.seed ?? '' })], [{ label: 'Cancel', value: false }, { label: 'OK', primary: true, value: true }]);
+          const n = Number(document.getElementById('seedIn')?.value);
+          if (v && Number.isFinite(n) && n >= 0) { r.fixedSeed = true; r.seed = Math.floor(n); } else if (v) { r.fixedSeed = true; r.seed = null; }
+        } else { r.fixedSeed = false; }
+        markCustom(); renderRows();
+      });
+      const sent = h('div.mono.ellipsis.dim', { 'data-row': i });
+      const del = h('button.act-btn', { title: 'Remove this variant row', disabled: rows.length <= 1, onclick: () => { rows.splice(i, 1); markCustom(); renderRows(); renderStatus(); } }, '✕');
+      rgrid.append(h('div.dim', String(i + 1)), stab, speed, word, seedSel, sent, del);
+    });
+    renderPreview();
+  }
+  const markCustom = () => { st.preset = presetSel.value; save(); renderStatus(); };
+  function renderPreview() {
+    const l = (focusKey && data.lines.find((x) => x.key === focusKey)) || data.lines.find((x) => grid.selected.has(x.key)) || null;
+    const spoken = lineData && lineData.key === focusKey ? lineData.spoken : l ? l.words : 'Falkreath';
+    rgrid.querySelectorAll('[data-row]').forEach((el) => { const r = rows[Number(el.dataset.row)]; if (r) { el.textContent = variantText(spoken, prefix.value, r.word); el.title = el.textContent; } });
+  }
+  prefix.addEventListener('input', () => { renderPreview(); renderStatus(); save(); });
+
+  const addRow = h('button.btn.sm', { title: 'Another variant per line (ten at most)', onclick: () => { if (rows.length >= 10) return; rows.push({ ...rows[rows.length - 1], fixedSeed: false, seed: null }); markCustom(); renderRows(); renderStatus(); } }, '+ Variant');
+  const savePreset = h('button.btn.sm.ghost', { title: 'Keep these rows under a name of your own', onclick: async () => {
+    const got = await prompt('Save as preset', [{ name: 'name', label: 'Name for these variant rows', value: '' }]);
+    const name = ((got && got.name) || '').trim();
+    if (!name) return;
+    try { await rpc('variants.saveSettings', { voiceId, rows, savePreset: name }); const r = await rpc('variants.get', { voiceId }); data = r.data; Object.assign(st, data.settings); renderPresets(); toast(`Saved as "${name}".`); } catch (e) { fail(e); }
+  } }, 'Save as preset…');
+  const recipe = h('div.var-recipe',
+    h('div.row', { style: { gap: '12px', flexWrap: 'wrap' } }, h('b', 'Variant settings'),
+      h('span.faint', { style: { fontSize: '12px' } }, 'Only used for variants made here. Your lines and other takes stay as they are.'),
+      h('div.spacer'), h('span.dim', 'Preset'), presetSel, savePreset),
+    h('div.row', { style: { gap: '10px', marginTop: '8px', flexWrap: 'wrap' } }, h('span.field-label', { style: { margin: 0, width: '110px' } }, 'Prefix [tags]'), prefix, ctxBox),
+    eleven ? null : h('div.banner.warn', { style: { margin: '6px 0 0' } }, `This voice pack uses ${voice.engine}: Stability and Seed only apply to ElevenLabs. Speed and the text still differ per variant.`),
+    rgrid,
+    h('div.row', { style: { gap: '10px', marginTop: '6px' } }, addRow, h('span.badge.b-toolong', 'Creative'), h('span.faint', { style: { fontSize: '12px' } }, 'takes wait for you to listen before they get a ★ (they can drift out of the voice\'s accent)')));
+  view.append(recipe);
+
+  // ---- status bar
+  const status = h('div.statusbar');
+  view.append(status);
+  const genBtn = h('button.btn.primary', { onclick: () => generate([...grid.selected]) }, 'Generate variants');
+  function renderStatus() {
+    const ticked = data.lines.filter((l) => grid.selected.has(l.key));
+    let chars = 0;
+    for (const l of ticked) for (const r of rows) chars += billed(variantText(l.words, prefix.value, r.word), ctx && eleven);
+    const est = eleven ? (rate ? `≈ ${chars.toLocaleString()} characters · ≈ ${Math.ceil(chars * rate).toLocaleString()} credits` : `≈ ${chars.toLocaleString()} characters`) : `${(ticked.length * rows.length).toLocaleString()} takes`;
+    genBtn.disabled = !ticked.length || !!app.job;
+    genBtn.title = !ticked.length ? 'Tick one or more lines first' : app.job ? 'Another task is running' : `Make ${rows.length} variant take(s) for each ticked line`;
+    clear(status).append(h('span.stat', h('b', ticked.length.toLocaleString()), ` line${ticked.length === 1 ? '' : 's'} ticked`),
+      h('span.dim', `· ${rows.length} variant${rows.length === 1 ? '' : 's'} per line`),
+      ticked.length ? h('button.btn.sm.ghost', { onclick: () => grid.selectAll(false) }, 'Clear ticks') : null,
+      h('div.spacer'), h('span.dim', est), genBtn);
+  }
+  grid.el.addEventListener('selection', () => { renderStatus(); renderPreview(); });
+
+  async function generate(keys, row = null) {
+    if (!keys.length) { toast('Tick one or more lines first.', true); return; }
+    const n = keys.length * (row == null ? rows.length : 1);
+    const use = row == null ? rows : [rows[row]];
+    let chars = 0;
+    for (const k of keys) { const l = data.lines.find((x) => x.key === k); if (l) for (const r of use) chars += billed(variantText(l.words, prefix.value, r.word), ctx && eleven); }
+    const cost = eleven ? ` About ${chars.toLocaleString()} characters${rate ? ` (≈ ${Math.ceil(chars * rate).toLocaleString()} credits)` : ''}.` : '';
+    if (n > 3 && !(await confirmBox('Generate variants?', `${n.toLocaleString()} new take(s) for ${keys.length.toLocaleString()} line(s).${cost} Context is ${ctx && eleven ? 'on' : 'off'}.`, 'Generate'))) return;
+    try { await saveNow(); await rpc('variants.generate', { voiceId, keys, row }); } catch (e) { fail(e); }
+  }
+
+  // ---- Add a line
+  addBtn.addEventListener('click', async () => {
+    const input = h('input', { type: 'text', placeholder: 'The line as it appears in game', style: { width: '100%' } });
+    const spoken = h('input', { type: 'text', placeholder: 'Spoken text (tags allowed): empty = the line itself', style: { width: '100%' } });
+    const sugg = h('div.var-sugg');
+    const info = h('div');
+    let check = null;
+    const runCheck = debounce(async () => {
+      const text = input.value;
+      try {
+        const [c, found] = await Promise.all([rpc('variants.checkLine', { voiceId, text }), rpc('variants.search', { voiceId, q: text })]);
+        if (text !== input.value) return;
+        check = c;
+        clear(sugg).append(found.length ? [h('span.faint', 'Matches as you type: '), ...found.map((f) => h('a', { title: f.where, onclick: () => { input.value = f.text; runCheck(); } }, f.text))] : null);
+        clear(info);
+        if (!text.trim()) return;
+        info.append(h('div.var-kv', h('div', 'File name'), h('div.mono', c.stem + '.fuz'),
+          ...c.files.slice(1).map((f, i) => [h('div', i === 0 ? 'DBVO 2 variants' : 'DBReV variants'), h('div.mono', f)]),
+          h('div', 'Line check'), h('div', c.ok ? h('span.badge.b-valid', 'Valid') : h('span.badge.b-broken', 'Not voiceable'), h('span.faint', ' same rules as Phase 1'))));
+        if (c.problems.length) info.append(h('div.help.bad', h('ul', c.problems.map((p) => h('li', p)))));
+        if (c.existing.length) info.append(h('div.help.warn', h('p', h('b', 'Already voiced: '), `this line is in ${c.existing.join(', ')}. Its variants go there, so every patch with it shares them.`)));
+      } catch (e) { fail(e); }
+    }, 300);
+    input.addEventListener('input', runCheck);
+    const v = await modal('Add a line', [h('div.field-label', 'Line as it appears in game'), input, sugg, info, h('div.field-label', 'Spoken text'), spoken,
+      h('div.faint', 'A line you add here only plays if its wording matches the game exactly. Pick it from the matches when you can.')],
+      [{ label: 'Cancel', value: false }, { label: 'Add', value: 'add' }, { label: 'Add and generate', primary: true, value: 'gen' }], { onOpen: () => input.focus() });
+    if (!v) return;
+    try {
+      const r = await rpc('variants.addLine', { voiceId, text: input.value, spoken: spoken.value });
+      await reload();
+      focusKey = r.key; grid.focus(r.key, true); renderInspector();
+      if (r.existed) toast('This voice pack already has that line: it is selected.');
+      if (v === 'gen') await generate([r.key]);
+    } catch (e) { fail(e); }
+  });
+
+  // ---- Variants Pack
+  packBtn.addEventListener('click', () => popupMenu(packBtn, [
+    { label: 'Build the Variants Pack', sub: `${data.lines.filter(hasVariants).length} line(s) → ${st.packName}.bsa + .esp in ${st.outputFolder || '(no folder set)'}`, disabled: !!app.job, onclick: async () => {
+      if (!st.outputFolder) { toast('Set the folder first: Variants Pack ▾ → Name and folder.', true); return; }
+      if (!(await confirmBox('Build the Variants Pack?', `Every line with two or more ★ takes goes into ${st.packName}.bsa in ${st.outputFolder}, as DBVO 2 numbered files and DBReV name(1) files. An earlier Variants Pack with that name is replaced.`, 'Build'))) return;
+      try { await saveNow(); await rpc('variants.export', { voiceId }); } catch (e) { fail(e); }
+    } },
+    { label: 'Add to a FOMOD project…', sub: 'A pre-ticked option with the BSA and its plugin, which users can untick', onclick: addToFomod },
+    { label: 'Name and folder…', sub: `${st.packName} · ${st.outputFolder || 'not set'}`, onclick: async () => {
+      const name = h('input', { type: 'text', value: st.packName, style: { width: '100%' } });
+      const folder = h('input', { type: 'text', value: st.outputFolder, style: { width: '100%' } });
+      const pick = h('button.btn.sm', { onclick: async () => { try { const f = await rpc('pick.folder', { title: 'Folder for the Variants Pack' }); if (f) folder.value = f; } catch (e) { fail(e); } } }, 'Browse…');
+      const ok = await modal('Variants Pack name and folder', [h('div.field-label', 'Name (the .bsa and .esp)'), name, h('div.field-label', 'Folder'), h('div.row', folder, pick),
+        h('div.faint', 'Empty folder: "Variants Pack" in the voice pack\'s release folder.')], [{ label: 'Cancel', value: false }, { label: 'Save', primary: true, value: true }]);
+      if (!ok) return;
+      try { await rpc('variants.saveSettings', { voiceId, packName: name.value, outputFolder: folder.value }); await reload(); } catch (e) { fail(e); }
+    } },
+  ]));
+  async function addToFomod() {
+    try {
+      const list = await rpc('variants.fomods', { voiceId });
+      if (!list.length) { toast('This voice pack has no FOMOD project yet (Phase 3).', true); return; }
+      const pickOne = list.length === 1 ? list[0] : await new Promise((resolve) => popupMenu(packBtn, list.map((f) => ({ label: f.name, onclick: () => resolve(f) }))));
+      if (!pickOne) return;
+      const r = await rpc('variants.addToFomod', { voiceId, fomodId: pickOne.id });
+      toast(r.added ? `"${r.option}" is now a pre-ticked option in ${r.fomod} (group Variants Pack on the first page).` : `"${r.option}" in ${r.fomod} now points at the current Variants Pack.`);
+    } catch (e) { fail(e); }
+  }
+
+  // ---- data
+  async function reload() {
+    try { const r = await rpc('variants.get', { voiceId }); data = r.data; Object.assign(st, data.settings); } catch (e) { fail(e); return; }
+    renderCounts(); grid.setRows(shown()); renderStatus(); renderInspector();
+  }
+  q.addEventListener('input', debounce(() => grid.setRows(shown()), 200));
+  sortSel.addEventListener('change', () => { sortBy = sortSel.value; store.set('variants-sort:' + voiceId, sortBy); grid.setRows(shown()); });
+  const onDone = (e) => { if (!view.isConnected) { document.removeEventListener('job-done', onDone); return; } if (e.detail && (e.detail.kind === 'variants' || e.detail.kind === 'variantsPack') && e.detail.voiceId === voiceId) reload(); else renderStatus(); };
+  document.addEventListener('job-done', onDone);
+  document.addEventListener('job-progress', () => { if (view.isConnected) genBtn.disabled = true; });
+
+  renderPresets(); renderCtx(); renderRows(); renderCounts(); grid.setRows(shown()); renderStatus(); renderInspector();
+  return view;
+}

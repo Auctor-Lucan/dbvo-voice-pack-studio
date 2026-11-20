@@ -273,9 +273,12 @@ second line</description>
         var res = await svc.BuildAsync(p, NamingMode.Legacy, true);
         Assert.True(File.Exists(res.Archive));
         Assert.True(File.Exists(Path.Combine(res.Staging, "Vamp - Inigo", "Sound", "DBVO", "vampira", "Hello.fuz")));
-        using var zip = System.IO.Compression.ZipFile.OpenRead(res.Archive!);
-        Assert.Contains(zip.Entries, e => e.FullName == "fomod/ModuleConfig.xml");
-        Assert.DoesNotContain(zip.Entries, e => e.FullName.StartsWith(Path.GetFileName(res.Staging) + "/"));
+        // Closed before building again: Windows can't replace an archive that is still open.
+        using (var zip = System.IO.Compression.ZipFile.OpenRead(res.Archive!))
+        {
+            Assert.Contains(zip.Entries, e => e.FullName == "fomod/ModuleConfig.xml");
+            Assert.DoesNotContain(zip.Entries, e => e.FullName.StartsWith(Path.GetFileName(res.Staging) + "/"));
+        }
         // building again over an existing archive and staging works
         var again = await svc.BuildAsync(p, NamingMode.Legacy, true);
         Assert.True(File.Exists(again.Archive));

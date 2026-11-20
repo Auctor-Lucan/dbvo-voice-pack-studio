@@ -99,6 +99,12 @@ export async function patchesView(kind = 'tts') {
       ? 'Other Tools · revoice WAV or .fuz files another voice pack already has (ElevenLabs speech-to-speech). Works like Phase 2, without DBVO Fix plugins or topic files.'
       : 'One voice pack × one or more mods. Drag a patch onto another header to change its category. Two lists side by side, so you can compare voice packs.'),
     h('div.spacer'),
+    vcPage || !s.voicePacks.length ? null : (() => {
+      const b = h('button.btn', { title: 'Lines that play a random take each time, per voice pack: see them, make more, and build the Variants Pack' }, '★ Variants');
+      b.addEventListener('click', () => (s.voicePacks.length === 1 ? go('variants', { id: s.voicePacks[0].id })
+        : popupMenu(b, s.voicePacks.map((v) => ({ label: v.name, sub: namingLabel(v.naming), onclick: () => go('variants', { id: v.id }) })))));
+      return b;
+    })(),
     vcPage ? null : h('button.btn', { onclick: addCategory, title: 'Add a category header (also used for mods and FOMOD pages)' }, '+ Category'),
     h('button.btn.primary', { onclick: () => newPatch(kind), title: vcPage ? 'Revoice another voice pack\'s files with speech-to-speech' : 'A voice pack × one or more Phase 1 mods' }, vcPage ? '+ New Voice Changer patch' : '+ New DBVO Patch')));
   const body = h('div.view-body');
@@ -361,7 +367,7 @@ export async function patchView(id) {
     const kept = l.takes.filter((t) => t.kept).length;
     const regenTitle = l.excluded ? 'Excluded: clear the 🚫 to generate it' : l.omitted ? 'Omitted: a reference topic file already has this line' : !canGen(l) ? 'No source WAV or .fuz with this line\'s name. Turn on "Generate lines without a source with text-to-speech" in the Voice Changer banner to voice it.' : vc && !l.hasSource ? 'Generate with text-to-speech (no source file)' : 'Regenerate the draft variant (a new take; kept takes stay)';
     const keepTitle = !sel ? 'No take yet' : voice && voice.naming === 'Legacy'
-      ? (sel.kept ? 'Kept - click to un-keep. Legacy naming exports one take per line (the one in use).' : 'Keep this take. Legacy naming exports one take per line, so variants need DBVO 2.0 naming.')
+      ? (sel.kept ? 'Kept - click to un-keep. Legacy naming exports the take in use with the patch; ★ takes go into the Variants Pack (★ Variants on the patch list).' : 'Keep this take as a variant. Legacy naming exports the take in use with the patch; ★ takes go into the Variants Pack (★ Variants on the patch list).')
       : (sel.kept ? `Kept (${kept} kept) - click to un-keep. Kept takes are exported as DBVO 2.0 variants (2+ → name\\0, 1, …).` : `Keep this take as a variant (${kept} kept). DBVO 2.0 exports every kept take; with none kept, the take in use.`);
     return h('span.row.icon-bar', { style: { gap: '2px' } },
       h('button.act-btn' + (inFlight.has(l.lineId) ? '.spinning' : ''), { title: inFlight.has(l.lineId) ? 'Making a new take…' : regenTitle, disabled: l.excluded || l.omitted || !canGen(l), onmousedown: keepEditing, onclick: (e) => { e.stopPropagation(); regen(l); } }, icon('regen')),

@@ -1131,3 +1131,18 @@ table.pr-sum td:last-child { text-align: right; font-weight: 600; }
 html.app-busy, html.app-busy * { cursor: progress !important; }
 /* A task's bar before it can count anything: a moving stripe instead of 0 % */
 .job .bar-fill.indet { width: 100% !important; animation: busy-march .6s linear infinite; background-size: 18px 100%, 100% 100%; opacity: .8; }
+
+/* ---- 12.0.0: Phase 2 → Variants */
+.var-kpis { display: flex; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; flex-shrink: 0; }
+.var-kpis .kpi { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 14px; min-width: 130px; }
+.var-kpis .kpi b { display: block; font-size: 18px; font-weight: 650; }
+.var-kpis .kpi span { color: var(--dim); font-size: 12px; }
+.var-kpis .kpi.warn b { color: var(--warn); }
+.var-recipe { border-top: 1px solid var(--line); background: var(--panel); padding: 10px 18px; flex-shrink: 0; max-height: 40vh; overflow: auto; }
+.var-rows { display: grid; grid-template-columns: 24px 120px 84px minmax(160px, 1fr) 130px minmax(200px, 1.3fr) 28px; gap: 6px 10px; align-items: center; margin-top: 8px; }
+.var-rows .rh { font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .7px; font-weight: 600; }
+.var-sugg { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; margin-top: 4px; }
+.var-sugg a { cursor: pointer; }
+.var-kv { display: grid; grid-template-columns: 130px 1fr; gap: 4px 12px; font-size: 12.5px; margin: 8px 0; }
+.var-kv > div:nth-child(odd) { color: var(--faint); }
+.var-kv .mono { word-break: break-all; }

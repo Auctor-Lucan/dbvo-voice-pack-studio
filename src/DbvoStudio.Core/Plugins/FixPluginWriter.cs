@@ -86,7 +86,26 @@ public static class FixPluginWriter
     {
         var bytes = Build(source, edits);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        File.WriteAllBytes(path, bytes);
+        WriteSafely(path, bytes);
+    }
+
+    /// <summary>
+    /// Write a plugin beside its target, then swap it in: a crash or a full disk never leaves a cut-off plugin the game
+    /// won't load. A hardlinked copy elsewhere (an unpacked installer) keeps the version it had.
+    /// </summary>
+    public static void WriteSafely(string path, byte[] bytes)
+    {
+        var part = path + "." + Guid.NewGuid().ToString("N")[..8] + ".part";
+        try
+        {
+            File.WriteAllBytes(part, bytes);
+            File.Move(part, path, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(part); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
     private static List<Subrecord> CopySubs(PluginFile source, PluginRecord rec)
@@ -154,6 +173,14 @@ public static class FixPluginWriter
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!);
         using var fs = File.Create(path);
         WriteHeader(fs, new List<string>(), 0);
+    }
+
+    /// <summary>The bytes of the empty light plugin <see cref="WriteLoader"/> writes.</summary>
+    public static byte[] LoaderBytes()
+    {
+        using var ms = new MemoryStream();
+        WriteHeader(ms, new List<string>(), 0);
+        return ms.ToArray();
     }
 
     private static void WriteHeader(Stream s, List<string> masters, int recordCount)

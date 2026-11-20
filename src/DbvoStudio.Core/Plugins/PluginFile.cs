@@ -73,23 +73,99 @@ public sealed class PluginFile
     public bool IsLight => (HeaderFlags & HeaderFlagLight) != 0;
     public string BaseName => System.IO.Path.GetFileNameWithoutExtension(FileName);
 
-    /// <summary>Read a plugin. Only DIAL and INFO records are materialized; other records are skipped.</summary>
+    /// <summary>Record types that only live inside another type's top-level group (INFO in DIAL, references in CELL/WRLD).</summary>
+    private static readonly Dictionary<string, string[]> NestedIn = new()
+    {
+        ["INFO"] = new[] { "DIAL" },
+        ["CELL"] = new[] { "WRLD" },
+        ["REFR"] = new[] { "CELL", "WRLD" }, ["ACHR"] = new[] { "CELL", "WRLD" }, ["PGRE"] = new[] { "CELL", "WRLD" },
+        ["PMIS"] = new[] { "CELL", "WRLD" }, ["PARW"] = new[] { "CELL", "WRLD" }, ["PBAR"] = new[] { "CELL", "WRLD" },
+        ["PBEA"] = new[] { "CELL", "WRLD" }, ["PCON"] = new[] { "CELL", "WRLD" }, ["PFLA"] = new[] { "CELL", "WRLD" },
+        ["PHZD"] = new[] { "CELL", "WRLD" }, ["NAVM"] = new[] { "CELL", "WRLD" }, ["LAND"] = new[] { "CELL", "WRLD" },
+    };
+
+    /// <summary>
+    /// Read a plugin. Only records with the given signatures (default DIAL and INFO) are materialized. Top-level groups
+    /// that can't hold any of them (most of a master's size) are skipped on disk without being read, so a 250 MB master
+    /// costs a fraction of the time and memory. Groups that hold wanted nested records (INFO in DIAL, ACHR in CELL/WRLD)
+    /// are read; the result is the same as reading the whole file.
+    /// </summary>
     public static PluginFile Read(string path, ISet<string>? signatures = null)
     {
         signatures ??= new HashSet<string> { "DIAL", "INFO" };
-        var b = File.ReadAllBytes(path);
-        if (b.Length < 24 || Subrecord.Ascii(b.AsSpan(0, 4)) != "TES4")
-            throw new InvalidDataException($"{System.IO.Path.GetFileName(path)} is not a Skyrim plugin (missing TES4 header).");
+        var groups = new HashSet<string>(signatures);
+        foreach (var s in signatures)
+            if (NestedIn.TryGetValue(s, out var holders)) groups.UnionWith(holders);
 
-        uint hdrSize = BitConverter.ToUInt32(b, 4);
-        uint hdrFlags = BitConverter.ToUInt32(b, 8);
-        var header = Subrecord.Parse(b.AsSpan(24, (int)hdrSize));
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, FileOptions.RandomAccess);
+        var head = new byte[24];
+        if (fs.Length < 24 || ReadSome(fs, head) < 24 || Subrecord.Ascii(head.AsSpan(0, 4)) != "TES4")
+            throw new InvalidDataException($"{System.IO.Path.GetFileName(path)} is not a Skyrim plugin (missing TES4 header).");
+        uint hdrSize = BitConverter.ToUInt32(head, 4);
+        uint hdrFlags = BitConverter.ToUInt32(head, 8);
+        if (hdrSize > fs.Length - 24) throw new InvalidDataException($"{System.IO.Path.GetFileName(path)} has a damaged header.");
+        var hdrBytes = new byte[hdrSize];
+        ReadExactly(fs, hdrBytes);
+        var header = Subrecord.Parse(hdrBytes);
         var masters = header.Where(s => s.Type == "MAST").Select(s => PluginRecord.ZString(s.Data)).ToList();
 
         var records = new List<PluginRecord>();
-        var groupStack = new Stack<(long End, uint Label, uint Type)>();
-        long o = 24 + hdrSize;
         int index = 0;
+        var gh = new byte[24];
+        while (fs.Position + 24 <= fs.Length)
+        {
+            long start = fs.Position;
+            ReadExactly(fs, gh);
+            string sig = Subrecord.Ascii(gh.AsSpan(0, 4));
+            uint size = BitConverter.ToUInt32(gh, 4);
+            long total = sig == "GRUP" ? size : 24L + size;
+            if (sig == "GRUP" && size < 24) throw new InvalidDataException($"Corrupt group at offset {start}.");
+            if (start + total > fs.Length) throw new InvalidDataException($"Corrupt {(sig == "GRUP" ? "group" : "record")} at offset {start}.");
+            bool wanted = sig == "GRUP"
+                ? BitConverter.ToUInt32(gh, 12) != 0 || groups.Contains(Subrecord.Ascii(gh.AsSpan(8, 4)))
+                : signatures.Contains(sig);
+            if (!wanted)
+            {
+                fs.Seek(start + total, SeekOrigin.Begin);
+                continue;
+            }
+            var block = new byte[total];
+            Array.Copy(gh, block, 24);
+            ReadExactly(fs, block.AsSpan(24));
+            ParseBlock(block, signatures, records, ref index);
+        }
+
+        return new PluginFile(path, System.IO.Path.GetFileName(path), hdrFlags, header, masters, records);
+    }
+
+    private static int ReadSome(Stream s, byte[] buf)
+    {
+        int got = 0;
+        while (got < buf.Length)
+        {
+            int n = s.Read(buf, got, buf.Length - got);
+            if (n == 0) break;
+            got += n;
+        }
+        return got;
+    }
+
+    private static void ReadExactly(Stream s, Span<byte> buf)
+    {
+        int got = 0;
+        while (got < buf.Length)
+        {
+            int n = s.Read(buf[got..]);
+            if (n == 0) throw new EndOfStreamException("The plugin file ends early.");
+            got += n;
+        }
+    }
+
+    /// <summary>The records in one top-level group (or one loose record), parsed exactly as the whole-file pass did.</summary>
+    private static void ParseBlock(byte[] b, ISet<string> signatures, List<PluginRecord> records, ref int index)
+    {
+        var groupStack = new Stack<(long End, uint Label, uint Type)>();
+        long o = 0;
         while (o + 24 <= b.Length)
         {
             while (groupStack.Count > 0 && o >= groupStack.Peek().End) groupStack.Pop();
@@ -129,8 +205,6 @@ public sealed class PluginFile
             }
             o += 24 + dataSize;
         }
-
-        return new PluginFile(path, System.IO.Path.GetFileName(path), hdrFlags, header, masters, records);
     }
 
     private static byte[] Decompress(ReadOnlySpan<byte> raw)

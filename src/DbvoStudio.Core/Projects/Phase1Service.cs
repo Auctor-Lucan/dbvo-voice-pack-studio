@@ -639,7 +639,7 @@ public sealed class Phase1Service
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, p.FixFileName);
             if (keepExistingFix && File.Exists(path)) continue;
-            File.WriteAllBytes(path, bytes);
+            FixPluginWriter.WriteSafely(path, bytes);
             written.Add(path);
         }
         return written;
