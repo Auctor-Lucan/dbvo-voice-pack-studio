@@ -122,6 +122,52 @@ public sealed partial class Backend
         return VariantEntries(v).Where(e => set.Contains(e.Key)).Select(e => e.PatchId).Distinct().Select(LoadPatch).ToList();
     }
 
+    /// <summary>
+    /// Phase 2 patches that send leading [tags] in the text (billed) although they could send them as context: ElevenLabs
+    /// patches made before 9.0.0, when new patches started with context on. Patches you chose to keep are left out, and
+    /// nothing is listed when you switched the default off in Global Settings.
+    /// </summary>
+    private object ContextOffPatches()
+    {
+        if (!_settings.LeadingTagsAsContext) return new List<object>();
+        var voices = _lib.LoadVoicePacks().ToDictionary(v => v.Id);
+        var kept = _settings.ContextKeptOff.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var list = new List<(string Id, string Name, string Voice)>();
+        foreach (var h in _lib.LoadPatchHeads())
+        {
+            DbvoPatch? open;
+            lock (_patches) _patches.TryGetValue(h.Id, out open);
+            bool ctx = open?.TagsAsContext ?? h.TagsAsContext;
+            if (ctx || h.Kind == "vc" || kept.Contains(h.Id)) continue;
+            if (!voices.TryGetValue(h.VoicePackId, out var v) || !ContextAvailable(v)) continue;
+            list.Add((h.Id, open?.Name ?? h.Name, v.Name));
+        }
+        return list.OrderBy(x => x.Voice, StringComparer.OrdinalIgnoreCase).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(x => new { id = x.Id, name = x.Name, voice = x.Voice }).ToList();
+    }
+
+    private object ContextOn(List<string> ids)
+    {
+        int n = 0;
+        foreach (var id in ids)
+        {
+            NotWhileGenerating(id);
+            var p = LoadPatch(id);
+            if (p.TagsAsContext) continue;
+            p.TagsAsContext = true;
+            _lib.Save(p);
+            n++;
+        }
+        return new { changed = n };
+    }
+
+    private object ContextKeep(List<string> ids)
+    {
+        foreach (var id in ids) if (!_settings.ContextKeptOff.Contains(id, StringComparer.OrdinalIgnoreCase)) _settings.ContextKeptOff.Add(id);
+        _lib.Save(_settings);
+        return true;
+    }
+
     /// <summary>ElevenLabs takes leading tags as context, except eleven_v3 (as in Phase 2).</summary>
     private static bool ContextAvailable(VoicePack v) => v.Engine == "elevenlabs" && !v.Eleven.ModelId.Contains("v3", StringComparison.OrdinalIgnoreCase);
     /// <summary>Whether the prefix goes as context when the settings don't say: the app's default, where context exists.</summary>

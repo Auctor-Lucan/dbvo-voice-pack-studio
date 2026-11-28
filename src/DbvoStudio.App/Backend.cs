@@ -121,6 +121,9 @@ public sealed partial class Backend
         {
             // ---- app / settings
             case "state": return State();
+            case "patches.contextOff": return await Locked(ContextOffPatches);
+            case "patches.contextOn": return await Locked(() => { NoUndoHere(); return ContextOn(Strings(p, "ids")); });
+            case "patches.contextKeep": return await Locked(() => { NoUndoHere(); return ContextKeep(Strings(p, "ids")); });
             case "settings.save": return await Locked(() => SaveSettings(p));
             case "settings.setApiKey":
                 return await Locked(() =>
@@ -458,7 +461,12 @@ public sealed partial class Backend
                     if (p.TryGetProperty("ttsForMissing", out var tm) && tm.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.TtsForMissing = tm.GetBoolean();
                     bool owChanged = false;
                     if (p.TryGetProperty("overwriteWavLip", out var ow) && ow.ValueKind is JsonValueKind.True or JsonValueKind.False) { if (patch.OverwriteWavLip != ow.GetBoolean()) { _settings.NewPatchOverwriteWavLip = ow.GetBoolean(); owChanged = true; } patch.OverwriteWavLip = ow.GetBoolean(); }
-                    if (p.TryGetProperty("tagsAsContext", out var tc) && tc.ValueKind is JsonValueKind.True or JsonValueKind.False) patch.TagsAsContext = tc.GetBoolean();
+                    if (p.TryGetProperty("tagsAsContext", out var tc) && tc.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    {
+                        patch.TagsAsContext = tc.GetBoolean();
+                        // switched off by hand: your choice, so the start-up message doesn't ask about this patch
+                        if (!patch.TagsAsContext && !_settings.ContextKeptOff.Contains(patch.Id, StringComparer.OrdinalIgnoreCase)) { _settings.ContextKeptOff.Add(patch.Id); _lib.Save(_settings); }
+                    }
                     if (p.TryGetProperty("overwriteFuz", out var of) && of.ValueKind is JsonValueKind.True or JsonValueKind.False) { if (patch.OverwriteFuz != of.GetBoolean()) { _settings.NewPatchOverwriteFuz = of.GetBoolean(); owChanged = true; } patch.OverwriteFuz = of.GetBoolean(); }
                     if (p.TryGetProperty("overwriteFix", out var ox) && ox.ValueKind is JsonValueKind.True or JsonValueKind.False) { if (patch.OverwriteFix != ox.GetBoolean()) { _settings.NewPatchOverwriteFix = ox.GetBoolean(); owChanged = true; } patch.OverwriteFix = ox.GetBoolean(); }
                     // An Overwrite switch you change here is what the next new patch starts with (saving a patch's

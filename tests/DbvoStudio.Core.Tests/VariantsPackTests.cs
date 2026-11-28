@@ -381,4 +381,22 @@ public class VariantsPackTests : IDisposable
         Assert.Same(p, g.Home.Patch);
         Assert.Equal(1, g.KeptCount);
     }
+
+    [Fact]
+    public void Patch_settings_are_read_without_the_lines_and_not_from_a_take()
+    {
+        var lib = new Library(Path.Combine(_dir, "lib8"));
+        var line = Line("Hello.", true);
+        line.Takes[0].Settings.TagsAsContext = true; // a take made with context on: not the patch's own setting
+        var p = new DbvoPatch { Id = "p8", Name = "Old patch", VoicePackId = "v1", Kind = "tts", TagsAsContext = false, Lines = { line } };
+        lib.Save(p);
+        var q = new DbvoPatch { Id = "p9", Name = "New patch", VoicePackId = "v1", Kind = "vc", TagsAsContext = true };
+        lib.Save(q);
+        var heads = lib.LoadPatchHeads().ToDictionary(x => x.Id);
+        Assert.False(heads["p8"].TagsAsContext);
+        Assert.Equal("Old patch", heads["p8"].Name);
+        Assert.Equal("tts", heads["p8"].Kind);
+        Assert.True(heads["p9"].TagsAsContext);
+        Assert.Equal("vc", heads["p9"].Kind);
+    }
 }

@@ -1,4 +1,4 @@
-Version 12.0.6 (changes since 11.0.10)
+Version 12.0.7 (changes since 11.0.10)
 - New: Variants. ★ Variants on the Phase 2 patch list opens a page per voice pack with every line of all its patches. A line with variants plays a different take each time you say it in game (Dragonborn Voice Over 2 and Dragonborn ReVoiced pick one at random). A line with the same file name in several patches is one line on the page.
 - Only lines your patches export count on the Variants page. Lines a reference covers (such as Skyrim Base Game), excluded lines and, when a patch exports approved lines only, lines not approved are left out, along with their takes.
 - Suggested lists lines that are the same in two or more mods and have no variants yet, most used first. Click a line to hear its takes, star the ones that should play, and delete the ones you don't want with the bin. The take in use can only be changed in Phase 2.
@@ -21,4 +21,6 @@ Version 12.0.6 (changes since 11.0.10)
 - NPC Revoice and the Voiced Books tool use less memory on large load orders.
 - Deleting a take in Phase 2 also deletes its kept dry original.
 - A voice pack with lines added on its Variants page can't be deleted until those lines are removed.
+- Patches made before 9.0.0 still send leading [tags] in the text, where ElevenLabs bills them as characters. When the Studio starts it lists any such ElevenLabs patches and offers Turn on for all or Keep as they are. It asks once per patch, and never about a patch you switched off yourself.
+- Phase 2: the Take column is now Takes, and the title over the line buttons, Take creation, sorts the lines by when the take in use was made (oldest or newest first).
 - Fixed: a .fuz sub-folder typed as \Sound\DBVO\Vampira\ was treated as a folder elsewhere and replaced with Sound\DBVO\{packId}. It now counts as a folder inside the final folder.

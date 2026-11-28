@@ -347,13 +347,15 @@ export async function patchView(id) {
         render: (l) => h('span.row.pp-cell', { style: { gap: '3px' } }, effectIcon(l.effect, () => applyFx([l.lineId], '')), softenIcon(l.soften, () => applySoften([l.lineId], '')), noiseIcon(l.noise, () => applyNoise([l.lineId], false))) },
       { id: 'qa', title: 'QA', tip: 'Check takes: ⚠ flagged, ✓ passed, empty = not checked. Click to sort the flagged ones to the top.', width: 44, min: 32, align: 'center',
         sort: (l) => { const t = flaggedTake(l) || selTake(l); return !t || !t.qa ? 2 : t.qa.flags.length ? 0 : 1; }, render: (l) => qaBadge(l) },
-      { id: 'take', title: 'Take', width: 68, min: 56, render: (l) => h('span.row', { style: { gap: '5px' } }, statusDot(l),
+      { id: 'take', title: 'Takes', width: 68, min: 56, render: (l) => h('span.row', { style: { gap: '5px' } }, statusDot(l),
         h('span.take-lbl' + (l.takes.length ? '.click' : ''), { title: l.takes.length ? `${l.takes.length} take(s); #${(l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot} is used. Click to play, switch, keep or delete takes.` : 'No take yet', onclick: (e) => { if (l.takes.length) { e.stopPropagation(); takesModal(l); } } },
           l.takes.length ? '#' + ((l.takes.find((t) => t.id === l.selectedTakeId) || l.takes[0]).slot) + (l.takes.length > 1 ? '/' + l.takes.length : '') : '—'),
         (selTake(l) || {}).original ? h('span.imp-mark', { title: 'The take in use is an imported .fuz, kept as it is' }, 'fuz') : null) },
       { id: 'edit', title: '', menuTitle: 'Edit take', tip: 'Edit take: trim and cut the take in use', width: 36, min: 32, align: 'center',
         render: (l) => h('button.act-btn', { title: selTake(l) ? 'Edit take: trim, cut out doubled words, fade (a new .lip is made)' : 'No take yet', disabled: !selTake(l), onclick: (e) => { e.stopPropagation(); editLineTake(l); } }, icon('wrench')) },
-      { id: 'act', title: '', menuTitle: 'Line actions', tip: 'Regenerate, keep, takes folder, flag, play', width: 156, min: 32, render: (l) => rowIcons(l) },
+      // The title over the buttons sorts by when the take in use was made (imported takes: when they were imported).
+      { id: 'act', title: 'Take creation', menuTitle: 'Line actions', tip: 'Sorts by when the take in use was made (imported takes: when they were imported). Lines without a take stay at the bottom.', width: 156, min: 32,
+        blankLast: true, sort: (l) => { const t = selTake(l); return t && t.createdUtc ? Date.parse(t.createdUtc) : null; }, render: (l) => rowIcons(l) },
     ].filter(Boolean),
   });
   grid.el.addEventListener('selection', () => renderActions());

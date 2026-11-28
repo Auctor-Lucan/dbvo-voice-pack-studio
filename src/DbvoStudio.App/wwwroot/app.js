@@ -260,7 +260,28 @@ window.addEventListener('drop', (e) => e.preventDefault());
   await render();
   // The first screen is drawn: the splash can go.
   rpc('window.ready').catch(() => { /* not in the app */ });
+  checkContextOff();
 })();
+
+// Patches made before 10.0.0 still send leading [tags] in the text, where ElevenLabs bills them: offer to switch them over.
+async function checkContextOff() {
+  let list;
+  try { list = await rpc('patches.contextOff'); } catch { return; }
+  if (!list || !list.length) return;
+  const ul = h('ul', { style: { maxHeight: '220px', overflow: 'auto', margin: '6px 0' } }, list.map((p) => h('li', `${p.name} (${p.voice})`)));
+  const v = await modal('Leading tags are billed in these patches', [
+    h('div', `${list.length} of your Phase 2 patches send leading [tags] as part of the text, so ElevenLabs bills them as characters: a tag like [British Baleful] adds about 18 billed characters to every line. They were made before patches started with "Leading tags as context" on.`),
+    ul,
+    h('div', 'Turn on for all: their new takes send leading tags as context, which isn\'t billed, but tags come through a little weaker (strong words such as Extremely make up for it). Takes you already made stay as they are.'),
+    h('div.faint', 'Keep as they are: nothing changes and you won\'t be asked about these patches again. Each patch can still be changed in Phase 2 → Output ▾ → Leading tags as context.'),
+  ], [{ label: 'Keep as they are', value: 'keep' }, { label: 'Turn on for all', primary: true, value: 'on' }]);
+  const ids = list.map((p) => p.id);
+  try {
+    if (v === 'on') { const r = await rpc('patches.contextOn', { ids }); toast(`Leading tags as context is now on in ${r.changed} patch(es).`); }
+    else if (v === 'keep') await rpc('patches.contextKeep', { ids });
+    // closed without a choice: asked again next time
+  } catch (e) { fail(e); }
+}
 
 export { rpc, h, clear, toast, fail, modal, confirmBox, prompt, store, debounce };
 

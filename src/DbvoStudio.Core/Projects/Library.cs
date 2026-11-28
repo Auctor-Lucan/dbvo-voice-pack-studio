@@ -190,6 +190,64 @@ public sealed class Library
     }
 
     // ---------- json ----------
+    /// <summary>A patch's own settings, read from the start of its file without its lines (patch files run to tens of MB).</summary>
+    public sealed record PatchHead(string Id, string Name, string VoicePackId, string Kind, bool TagsAsContext);
+
+    public List<PatchHead> LoadPatchHeads()
+    {
+        var list = new List<PatchHead>();
+        var dir = Path.Combine(Root, "patches");
+        if (!Directory.Exists(dir)) return list;
+        foreach (var d in Directory.EnumerateDirectories(dir))
+        {
+            var file = Path.Combine(d, "patch.json");
+            if (!File.Exists(file)) continue;
+            try
+            {
+                // the quick read, else the whole file (settings written in another order)
+                var h = ReadHead(file);
+                if (h == null && Load<DbvoPatch>(file) is { } p) h = new PatchHead(p.Id, p.Name, p.VoicePackId, p.Kind, p.TagsAsContext);
+                if (h != null) list.Add(h);
+            }
+            catch { /* a file that can't be read is left out here; Phase 2 says why */ }
+        }
+        return list;
+    }
+
+    private static PatchHead? ReadHead(string file)
+    {
+        using var s = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        var buf = new byte[Math.Min(s.Length, 1 << 20)];
+        int got = 0, n;
+        while (got < buf.Length && (n = s.Read(buf, got, buf.Length - got)) > 0) got += n;
+        var span = buf.AsSpan(0, got);
+        if (span.StartsWith(new byte[] { 0xEF, 0xBB, 0xBF })) span = span[3..];
+        var r = new System.Text.Json.Utf8JsonReader(span, isFinalBlock: got == s.Length, state: default);
+        string id = "", name = "", voice = "", kind = "tts";
+        bool ctx = false, sawLines = false, sawCtx = false, sawKind = false;
+        if (!r.Read() || r.TokenType != System.Text.Json.JsonTokenType.StartObject) return null;
+        // top-level properties only, until the lines start (the takes inside have their own TagsAsContext)
+        while (r.Read() && r.TokenType == System.Text.Json.JsonTokenType.PropertyName)
+        {
+            var prop = r.GetString();
+            if (prop == "Lines") { sawLines = true; break; }
+            if (!r.Read()) return null;
+            switch (prop)
+            {
+                case "Id": id = r.GetString() ?? ""; break;
+                case "Name": name = r.GetString() ?? ""; break;
+                case "VoicePackId": voice = r.GetString() ?? ""; break;
+                case "Kind": kind = r.GetString() ?? "tts"; sawKind = true; break;
+                case "TagsAsContext": ctx = r.TokenType == System.Text.Json.JsonTokenType.True; sawCtx = true; break;
+                default: if (r.TokenType is System.Text.Json.JsonTokenType.StartObject or System.Text.Json.JsonTokenType.StartArray && !r.TrySkip()) return null; break;
+            }
+            // everything needed is near the top: stop before the big parts (the export map, the lines)
+            if (sawCtx && sawKind && id.Length > 0 && voice.Length > 0) return new PatchHead(id, name, voice, kind, ctx);
+        }
+        if (!sawLines && got < s.Length) return null; // settings after the lines: not read here
+        return id.Length == 0 ? null : new PatchHead(id, name, voice, kind, ctx);
+    }
+
     public static T? Load<T>(string path) where T : class
     {
         if (!File.Exists(path)) return null;

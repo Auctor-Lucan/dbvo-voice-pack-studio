@@ -37,6 +37,8 @@ public sealed class AppSettings
     public bool PlayerNameLinesVoiced { get; set; }
     /// <summary>New ElevenLabs patches send leading [tags] as context (each patch can change it in Output ▾).</summary>
     public bool LeadingTagsAsContext { get; set; } = true;
+    /// <summary>Patches you chose to keep sending leading tags in the text when the app asked: it doesn't ask about them again.</summary>
+    public List<string> ContextKeptOff { get; set; } = new();
     /// <summary>The Overwrite switches a new DBVO Patch starts with: the ones you last set on a patch (Folders &amp; options).</summary>
     public bool NewPatchOverwriteWavLip { get; set; }
     public bool NewPatchOverwriteFuz { get; set; }

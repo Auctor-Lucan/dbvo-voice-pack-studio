@@ -696,7 +696,7 @@ export class VGrid {
   /** The value a column sorts by: its sort(row) when given, else the text it shows (text boxes count by their value). */
   sortKey(c, r) {
     let v;
-    if (c.sort) v = c.sort(r);
+    if (c.sort) { v = c.sort(r); if (v == null && c.blankLast) return null; } // blankLast: no value sorts to the bottom both ways
     else {
       const n = c.render(r, 0);
       if (n instanceof Node) {
@@ -716,6 +716,8 @@ export class VGrid {
       const coll = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
       keyed.sort((a, b) => {
         const x = a.k, y = b.k;
+        // nothing to sort by (null, e.g. no take yet): at the bottom in both directions
+        if (x == null || y == null) return x == null && y == null ? a.i - b.i : x == null ? 1 : -1;
         const d = typeof x === 'number' && typeof y === 'number' ? x - y : coll.compare(String(x), String(y));
         return d ? d * this.sortDir : a.i - b.i;
       });
